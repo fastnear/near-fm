@@ -39,6 +39,11 @@ services:
       - "3847:3000"
     depends_on:
       - server
+    args:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8477}
+      NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
+      NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
+      NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8477}
       NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
