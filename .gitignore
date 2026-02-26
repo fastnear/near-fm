@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+target/
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# Environment files (secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Claude
+.claude/
+
+# Rust
+Cargo.lock
+
+# Debug / Logs
+*.log
+npm-debug.log*
+
+# Next.js
+next-env.d.ts

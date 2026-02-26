@@ -1,0 +1,340 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import type { Language } from "@/types";
+import { useNearWallet } from "@/contexts/NearWalletContext";
+import { createSong, getSongs, getLanguages } from "@/lib/api";
+import {
+  prepareFastFSUpload,
+  uploadToFastFS,
+  computeFileHash,
+  getFastFSUrl,
+  getRelativePath,
+} from "@/lib/near/fastfs";
+
+export default function UploadPage() {
+  const { accountId, signIn, callFunction } = useNearWallet();
+  const router = useRouter();
+
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [lyrics, setLyrics] = useState("");
+  const [aiModel, setAiModel] = useState("");
+  const [languageId, setLanguageId] = useState<number | undefined>();
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const [error, setError] = useState("");
+
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getLanguages().then(setLanguages).catch(console.error);
+  }, []);
+
+  if (!accountId) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-20 text-center">
+        <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center">
+            <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
+          <p className="text-slate-400 mb-8">
+            Connect your NEAR wallet to upload AI-generated music
+          </p>
+          <button
+            onClick={signIn}
+            className="btn-primary px-8 py-3 rounded-xl text-sm"
+          >
+            Connect Wallet
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleCoverSelect = (file: File) => {
+    setCoverFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setCoverPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpload = async () => {
+    if (!audioFile || !title.trim()) {
+      setError("Title and audio file are required");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+
+    try {
+      setUploadProgress("Reading audio file...");
+      const audioBuffer = await audioFile.arrayBuffer();
+      const audioBytes = new Uint8Array(audioBuffer);
+
+      setUploadProgress("Checking for duplicates...");
+      const audioHash = await computeFileHash(audioBytes);
+      try {
+        await getSongs({ audio_hash: audioHash });
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message.includes("already uploaded")) {
+          setError("This audio file has already been uploaded");
+          setUploading(false);
+          return;
+        }
+      }
+
+      const audioRelPath = getRelativePath(audioHash, audioFile.type || "audio/mpeg");
+      const audioParts = prepareFastFSUpload(
+        audioRelPath,
+        audioFile.type || "audio/mpeg",
+        audioBytes
+      );
+
+      setUploadProgress(
+        `Uploading audio (0/${audioParts.length} chunks)...`
+      );
+
+      await uploadToFastFS(
+        (params) =>
+          callFunction({
+            contractId: params.contractId,
+            method: params.method,
+            args: params.args,
+            gas: params.gas,
+          }),
+        audioParts,
+        (done, total) =>
+          setUploadProgress(`Uploading audio (${done}/${total} chunks)...`)
+      );
+
+      const audioUrl = getFastFSUrl(accountId, audioRelPath);
+
+      let coverUrl: string | undefined;
+      if (coverFile) {
+        setUploadProgress("Uploading cover image...");
+        const coverBuffer = await coverFile.arrayBuffer();
+        const coverBytes = new Uint8Array(coverBuffer);
+        const coverHash = await computeFileHash(coverBytes);
+        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
+        const coverParts = prepareFastFSUpload(
+          coverRelPath,
+          coverFile.type || "image/jpeg",
+          coverBytes
+        );
+
+        await uploadToFastFS(
+          (params) =>
+            callFunction({
+              contractId: params.contractId,
+              method: params.method,
+              args: params.args,
+              gas: params.gas,
+            }),
+          coverParts
+        );
+
+        coverUrl = getFastFSUrl(accountId, coverRelPath);
+      }
+
+      setUploadProgress("Saving song...");
+      const song = await createSong({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        lyrics: lyrics.trim() || undefined,
+        ai_model: aiModel.trim() || undefined,
+        audio_url: audioUrl,
+        audio_hash: audioHash,
+        audio_mime_type: audioFile.type || "audio/mpeg",
+        cover_image_url: coverUrl,
+        language_id: languageId,
+      });
+
+      router.push(`/song/${song.uuid}`);
+    } catch (e) {
+      console.error("Upload failed:", e);
+      setError(e instanceof Error ? e.message : "Upload failed");
+    }
+    setUploading(false);
+  };
+
+  const inputClass =
+    "w-full rounded-xl px-4 py-3 border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500/20 focus:outline-none transition-all";
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-10">
+      <h1 className="text-2xl font-bold text-white mb-2">Upload a Song</h1>
+      <p className="text-slate-500 text-sm mb-8">Share your AI-generated music with the world</p>
+
+      <div className="space-y-6">
+        {/* Audio file */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">
+            Audio file (MP3, WAV, OGG) *
+          </label>
+          <input
+            ref={audioInputRef}
+            type="file"
+            accept="audio/*"
+            onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+            className="hidden"
+          />
+          <button
+            onClick={() => audioInputRef.current?.click()}
+            className="w-full border-2 border-dashed border-white/[0.1] rounded-2xl p-8 text-center hover:border-purple-500/50 hover:bg-purple-500/[0.03] transition-all group"
+          >
+            {audioFile ? (
+              <div className="flex items-center justify-center gap-3">
+                <svg className="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+                <span className="text-purple-400 font-medium">{audioFile.name}</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <svg className="w-10 h-10 mx-auto text-slate-600 group-hover:text-purple-500/50 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                <p className="text-slate-500 text-sm">Click to select audio file (max 32MB)</p>
+              </div>
+            )}
+          </button>
+        </div>
+
+        {/* Cover image */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">
+            Cover image (optional)
+          </label>
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleCoverSelect(f);
+            }}
+            className="hidden"
+          />
+          <button
+            onClick={() => coverInputRef.current?.click()}
+            className="w-24 h-24 border-2 border-dashed border-white/[0.1] rounded-2xl flex items-center justify-center hover:border-purple-500/50 transition-all overflow-hidden group"
+          >
+            {coverPreview ? (
+              <img src={coverPreview} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <svg className="w-6 h-6 text-slate-600 group-hover:text-purple-500/50 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 003.75 21z" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Title */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Title *</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Song title"
+            maxLength={200}
+            className={inputClass}
+          />
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What is this song about?"
+            rows={3}
+            className={`${inputClass} resize-none`}
+          />
+        </div>
+
+        {/* Lyrics */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Lyrics</label>
+          <textarea
+            value={lyrics}
+            onChange={(e) => setLyrics(e.target.value)}
+            placeholder="Paste lyrics here"
+            rows={6}
+            className={`${inputClass} resize-none font-mono text-sm`}
+          />
+        </div>
+
+        {/* AI Model */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">AI Model</label>
+          <input
+            type="text"
+            value={aiModel}
+            onChange={(e) => setAiModel(e.target.value)}
+            placeholder="e.g., Suno v4, Udio"
+            className={inputClass}
+          />
+        </div>
+
+        {/* Language */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Language</label>
+          <select
+            value={languageId ?? ""}
+            onChange={(e) =>
+              setLanguageId(e.target.value ? Number(e.target.value) : undefined)
+            }
+            className={inputClass}
+          >
+            <option value="">Select language</option>
+            {languages.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-center gap-2 text-rose-400 text-sm bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            {error}
+          </div>
+        )}
+
+        {/* Upload progress */}
+        {uploading && (
+          <div className="flex items-center gap-3 text-purple-400 text-sm bg-purple-500/10 border border-purple-500/20 rounded-xl px-4 py-3">
+            <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            {uploadProgress}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button
+          onClick={handleUpload}
+          disabled={uploading || !audioFile || !title.trim()}
+          className="w-full py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+        >
+          {uploading ? "Uploading..." : "Upload Song"}
+        </button>
+      </div>
+    </div>
+  );
+}
