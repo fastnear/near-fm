@@ -75,8 +75,7 @@ pub fn verify_nep413_signature(
     borsh_data.extend_from_slice(&(msg_bytes.len() as u32).to_le_bytes());
     borsh_data.extend_from_slice(msg_bytes);
 
-    // nonce: fixed 32 bytes (as byte array, Borsh u32 len + bytes)
-    borsh_data.extend_from_slice(&(nonce.len() as u32).to_le_bytes());
+    // nonce: [u8; 32] fixed-size array — no length prefix in Borsh
     borsh_data.extend_from_slice(nonce);
 
     // recipient: string

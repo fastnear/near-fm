@@ -34,7 +34,15 @@ export default function UploadPage() {
   const coverInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getLanguages().then(setLanguages).catch(console.error);
+    getLanguages()
+      .then((langs) => {
+        setLanguages(langs);
+        if (!languageId) {
+          const english = langs.find((l) => l.code === "en");
+          if (english) setLanguageId(english.id);
+        }
+      })
+      .catch(console.error);
   }, []);
 
   if (!accountId) {

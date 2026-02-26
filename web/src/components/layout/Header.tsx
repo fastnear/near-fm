@@ -17,17 +17,17 @@ function NavLink({ href, children, className = "" }: { href: string; children: R
 }
 
 export function Header() {
-  const { accountId, signIn, signOut, loading } = useNearWallet();
+  const { accountId, signIn, signOut, isAuthenticated, loading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId || !isAuthenticated) return;
     getNotifications()
       .then((notifs) => {
         setUnreadCount(notifs.filter((n) => !n.is_read).length);
       })
       .catch(() => {});
-  }, [accountId]);
+  }, [accountId, isAuthenticated]);
 
   return (
     <header className="sticky top-0 z-50 glass-strong">
@@ -48,7 +48,7 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-8">
           <NavLink href="/">Feed</NavLink>
           <NavLink href="/requests">Requests</NavLink>
-          {accountId && (
+          {accountId && isAuthenticated && (
             <>
               <NavLink href="/upload">Upload</NavLink>
               <Link
@@ -70,7 +70,7 @@ export function Header() {
         <div className="flex items-center gap-3">
           {loading ? (
             <div className="w-28 h-9 rounded-xl skeleton" />
-          ) : accountId ? (
+          ) : accountId && isAuthenticated ? (
             <div className="flex items-center gap-3">
               <Link
                 href={`/profile/${accountId}`}
@@ -90,7 +90,7 @@ export function Header() {
               onClick={signIn}
               className="btn-primary px-5 py-2 text-sm rounded-xl"
             >
-              Connect Wallet
+              Sign in
             </button>
           )}
         </div>
@@ -110,7 +110,7 @@ export function Header() {
           </svg>
           Requests
         </Link>
-        {accountId && (
+        {accountId && isAuthenticated && (
           <>
             <Link href="/upload" className="flex flex-col items-center gap-1 text-slate-400 hover:text-white transition-colors">
               <div className="w-8 h-8 -mt-4 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-purple-500/30">

@@ -6,12 +6,12 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import { setupWalletSelector } from "@near-wallet-selector/core";
 import type {
   WalletSelector,
-  AccountState,
   Wallet,
 } from "@near-wallet-selector/core";
 import { setupModal } from "@near-wallet-selector/modal-ui";
@@ -22,6 +22,7 @@ import { setupHereWallet } from "@near-wallet-selector/here-wallet";
 import { setupIntearWallet } from "@near-wallet-selector/intear-wallet";
 
 import { actionCreators } from "@near-js/transactions";
+import { verifyAuth } from "@/lib/api";
 
 import "@near-wallet-selector/modal-ui/styles.css";
 
@@ -38,8 +39,10 @@ interface NearWalletContextType {
   accountId: string | null;
   wallet: Wallet | null;
   loading: boolean;
+  isAuthenticated: boolean;
   signIn: () => void;
   signOut: () => Promise<void>;
+  ensureWalletConnected: () => void;
   callFunction: (params: {
     contractId: string;
     method: string;
@@ -60,8 +63,10 @@ const NearWalletContext = createContext<NearWalletContextType>({
   accountId: null,
   wallet: null,
   loading: true,
+  isAuthenticated: false,
   signIn: () => {},
   signOut: async () => {},
+  ensureWalletConnected: () => {},
   callFunction: async () => "",
   viewMethod: async () => null,
 });
@@ -72,6 +77,49 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Track whether we need to auto-authenticate after wallet connects
+  const pendingAuthRef = useRef(false);
+
+  useEffect(() => {
+    setIsAuthenticated(!!localStorage.getItem("nearfm_token"));
+  }, []);
+
+  const doApiAuth = useCallback(async (w: Wallet, accId: string) => {
+    if (localStorage.getItem("nearfm_token")) {
+      setIsAuthenticated(true);
+      return;
+    }
+
+    if (!w.signMessage) {
+      console.warn("Wallet does not support signMessage (NEP-413)");
+      return;
+    }
+
+    const nonce = new Uint8Array(32);
+    crypto.getRandomValues(nonce);
+
+    const signed = await w.signMessage({
+      message: "Sign in to near.fm",
+      nonce: Buffer.from(nonce),
+      recipient: CONTRACT_ID,
+    });
+
+    if (!signed) return;
+
+    const result = await verifyAuth({
+      account_id: signed.accountId || accId,
+      public_key: signed.publicKey,
+      signature: signed.signature,
+      message: "Sign in to near.fm",
+      nonce: Array.from(nonce),
+      recipient: CONTRACT_ID,
+    });
+
+    localStorage.setItem("nearfm_token", result.token);
+    setIsAuthenticated(true);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -85,10 +133,8 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         ],
       });
 
-      // Use FASTFS_RECEIVER as the contractId so that during sign-in,
-      // the wallet creates a function call access key for the FastFS contract.
-      // This enables local signing for large FastFS upload transactions
-      // (redirect-based wallets like MyNearWallet can't handle 1MB+ payloads in URLs).
+      // No contractId — light connection for signing only.
+      // Function call access keys are added later when needed for transactions.
       const mod = setupModal(sel, {
         contractId: FASTFS_RECEIVER,
       });
@@ -103,37 +149,71 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         setAccountId(acc.accountId);
         const w = await sel.wallet();
         setWallet(w);
+        // If wallet connected but no token (e.g. after redirect), auto-authenticate
+        if (!localStorage.getItem("nearfm_token")) {
+          try {
+            await doApiAuth(w, acc.accountId);
+          } catch (e) {
+            console.error("Auto-auth failed:", e);
+          }
+        } else {
+          setIsAuthenticated(true);
+        }
       }
 
       setLoading(false);
 
-      // Listen for account changes
-      sel.store.observable.subscribe((state) => {
-        const accounts = state.accounts;
+      sel.store.observable.subscribe(async (newState) => {
+        const accounts = newState.accounts;
         if (accounts.length > 0) {
-          setAccountId(accounts[0].accountId);
+          const accId = accounts[0].accountId;
+          setAccountId(accId);
+          try {
+            const w = await sel.wallet();
+            setWallet(w);
+            // Auto-authenticate after fresh wallet connection
+            if (pendingAuthRef.current && !localStorage.getItem("nearfm_token")) {
+              pendingAuthRef.current = false;
+              await doApiAuth(w, accId);
+            }
+          } catch (e) {
+            console.error("Wallet auth error:", e);
+          }
         } else {
           setAccountId(null);
           setWallet(null);
+          localStorage.removeItem("nearfm_token");
+          setIsAuthenticated(false);
         }
       });
     };
 
     init().catch(console.error);
-  }, []);
+  }, [doApiAuth]);
 
+  // "Sign in" — opens wallet modal, then auto-authenticates with API
   const signIn = useCallback(() => {
+    pendingAuthRef.current = true;
     modal?.show();
   }, [modal]);
 
+  // "Sign out" — disconnects wallet and removes token
   const signOut = useCallback(async () => {
     if (wallet) {
       await wallet.signOut();
       setAccountId(null);
       setWallet(null);
       localStorage.removeItem("nearfm_token");
+      setIsAuthenticated(false);
     }
   }, [wallet]);
+
+  // For tips/transactions — ensure wallet has function call access key
+  const ensureWalletConnected = useCallback(() => {
+    if (!wallet) {
+      modal?.show();
+    }
+  }, [wallet, modal]);
 
   const callFunction = useCallback(
     async (params: {
@@ -159,7 +239,6 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         ],
       });
 
-      // Extract tx hash from result
       const txHash =
         (result as { transaction?: { hash?: string } })?.transaction?.hash || "";
       return txHash;
@@ -215,8 +294,10 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         accountId,
         wallet,
         loading,
+        isAuthenticated,
         signIn,
         signOut,
+        ensureWalletConnected,
         callFunction,
         viewMethod,
       }}
