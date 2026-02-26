@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: nearfm
+      POSTGRES_USER: nearfm
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nearfm_dev}
+    ports:
+      - "5499:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nearfm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: ./server
+    ports:
+      - "8477:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://nearfm:${DB_PASSWORD:-nearfm_dev}@postgres:5432/nearfm
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
+      CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
+      FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
+      NEAR_RPC_URL: ${NEAR_RPC_URL:-https://rpc.testnet.near.org}
+      ADMIN_ACCOUNTS: ${ADMIN_ACCOUNTS:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3847}
+      RUST_LOG: ${RUST_LOG:-nearfm_server=info,tower_http=info}
+
+  web:
+    build: ./web
+    ports:
+      - "3847:3000"
+    depends_on:
+      - server
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8477}
+      NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
+      NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
+      NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
+
+volumes:
+  pgdata:
