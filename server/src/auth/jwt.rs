@@ -24,7 +24,7 @@ pub fn create_token(
     is_admin: bool,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::hours(24))
+        .checked_add_signed(chrono::Duration::days(7))
         .expect("valid timestamp")
         .timestamp() as usize;
 

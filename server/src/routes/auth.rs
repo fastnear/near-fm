@@ -36,6 +36,33 @@ pub async fn verify(
     State(state): State<AppState>,
     Json(req): Json<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
+    // 0. Parse and validate JSON message
+    let msg: serde_json::Value = serde_json::from_str(&req.message).map_err(|_| {
+        (StatusCode::BAD_REQUEST, "Message must be JSON".to_string())
+    })?;
+
+    if msg.get("action").and_then(|v| v.as_str()) != Some("sign_in")
+        || msg.get("domain").and_then(|v| v.as_str()) != Some("near.fm")
+    {
+        return Err((StatusCode::BAD_REQUEST, "Invalid message format".to_string()));
+    }
+
+    // Version check — only accept v1+
+    let version = msg.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
+    if version < 1 {
+        return Err((StatusCode::BAD_REQUEST, "Unsupported message version".to_string()));
+    }
+
+    // Validate timestamp
+    let ts = msg.get("timestamp").and_then(|v| v.as_i64()).ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, "Missing timestamp".to_string())
+    })?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let age_ms = now - ts;
+    if age_ms > 5 * 60 * 1000 || age_ms < -30_000 {
+        return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
+    }
+
     // 1. Verify NEP-413 signature
     let valid = nep413::verify_nep413_signature(
         &req.public_key,

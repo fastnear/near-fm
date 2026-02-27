@@ -24,7 +24,7 @@ function yoctoToNear(yocto: string): string {
 }
 
 export function TipButton({ song }: { song: Song }) {
-  const { accountId, signIn, callFunction, viewMethod } = useNearWallet();
+  const { accountId, isAuthenticated, signIn, connectForTransactions, callFunction, viewMethod } = useNearWallet();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -42,7 +42,7 @@ export function TipButton({ song }: { song: Song }) {
   }, [accountId, showModal, viewMethod]);
 
   const handleTip = async (amountNear: string, fromBalance: boolean) => {
-    if (!accountId) {
+    if (!accountId || !isAuthenticated) {
       signIn();
       return;
     }
@@ -105,7 +105,7 @@ export function TipButton({ song }: { song: Song }) {
     <div className="relative">
       <button
         onClick={() => {
-          if (!accountId) {
+          if (!accountId || !isAuthenticated) {
             signIn();
             return;
           }

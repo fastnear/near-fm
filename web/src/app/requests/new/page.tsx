@@ -8,7 +8,7 @@ import { createRequest, getLanguages } from "@/lib/api";
 import { createBountyAction } from "@/lib/near/contract";
 
 export default function NewRequestPage() {
-  const { accountId, signIn, callFunction } = useNearWallet();
+  const { accountId, isAuthenticated, signIn, callFunction } = useNearWallet();
   const router = useRouter();
 
   const [title, setTitle] = useState("");
@@ -23,19 +23,19 @@ export default function NewRequestPage() {
     getLanguages().then(setLanguages).catch(console.error);
   }, []);
 
-  if (!accountId) {
+  if (!accountId || !isAuthenticated) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12">
           <h1 className="text-2xl font-bold mb-4">Create a Song Request</h1>
           <p className="text-slate-400 mb-6">
-            Connect your NEAR wallet to create a song request with a bounty
+            Sign in to create a song request with a bounty
           </p>
           <button
             onClick={signIn}
             className="px-6 py-3 btn-primary rounded-xl font-medium transition"
           >
-            Connect Wallet
+            Sign in
           </button>
         </div>
       </div>

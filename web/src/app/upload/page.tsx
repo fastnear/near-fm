@@ -14,7 +14,7 @@ import {
 } from "@/lib/near/fastfs";
 
 export default function UploadPage() {
-  const { accountId, signIn, callFunction } = useNearWallet();
+  const { accountId, isAuthenticated, signIn, connectForTransactions, callFunction } = useNearWallet();
   const router = useRouter();
 
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -45,7 +45,7 @@ export default function UploadPage() {
       .catch(console.error);
   }, []);
 
-  if (!accountId) {
+  if (!accountId || !isAuthenticated) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -56,13 +56,13 @@ export default function UploadPage() {
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
           <p className="text-slate-400 mb-8">
-            Connect your NEAR wallet to upload AI-generated music
+            Sign in to upload AI-generated music
           </p>
           <button
             onClick={signIn}
             className="btn-primary px-8 py-3 rounded-xl text-sm"
           >
-            Connect Wallet
+            Sign in
           </button>
         </div>
       </div>

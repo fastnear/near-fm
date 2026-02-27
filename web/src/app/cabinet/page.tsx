@@ -54,7 +54,7 @@ const TABS: { key: TabKey; label: string }[] = [
 // ── Main component ──
 
 export default function CabinetPage() {
-  const { accountId, signIn, callFunction, viewMethod, loading: walletLoading } = useNearWallet();
+  const { accountId, isAuthenticated, signIn, callFunction, viewMethod, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
 
   if (walletLoading) {
@@ -66,20 +66,20 @@ export default function CabinetPage() {
     );
   }
 
-  if (!accountId) {
+  if (!accountId || !isAuthenticated) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
           <div className="text-5xl mb-4 text-slate-700">&#128274;</div>
-          <h1 className="text-xl font-bold text-white mb-2">Connect Your Wallet</h1>
+          <h1 className="text-xl font-bold text-white mb-2">Sign in</h1>
           <p className="text-slate-400 text-sm mb-6">
-            Sign in with your NEAR wallet to access your dashboard, manage your balance, and view your songs.
+            Sign in to access your dashboard, manage your balance, and view your songs.
           </p>
           <button
             onClick={signIn}
             className="btn-primary px-6 py-3 rounded-xl"
           >
-            Connect Wallet
+            Sign in
           </button>
         </div>
       </div>

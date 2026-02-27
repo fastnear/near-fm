@@ -86,12 +86,17 @@ export function Header() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={signIn}
-              className="btn-primary px-5 py-2 text-sm rounded-xl"
-            >
-              Sign in
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={signIn}
+                className="btn-primary px-5 py-2 text-sm rounded-xl"
+              >
+                Sign in
+              </button>
+              <span className="hidden sm:block text-[11px] text-slate-500 max-w-[140px] leading-tight">
+                Free signature, no gas needed
+              </span>
+            </div>
           )}
         </div>
       </div>

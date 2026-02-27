@@ -24,6 +24,11 @@ async function fetchApi<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401 && token) {
+      // Token expired — clear it so UI prompts re-sign-in
+      localStorage.removeItem("nearfm_token");
+      window.dispatchEvent(new Event("nearfm_token_expired"));
+    }
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
