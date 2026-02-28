@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getBookmarks, getNotifications, markAllNotificationsRead } from "@/lib/api";
+import { getUserProfile, getBookmarks, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import type { Song, Notification } from "@/types";
@@ -40,15 +40,21 @@ function timeAgo(iso: string): string {
   return `${months}mo ago`;
 }
 
+const ADMIN_ACCOUNTS = (process.env.NEXT_PUBLIC_ADMIN_ACCOUNTS || "").split(",").map(s => s.trim()).filter(Boolean);
+
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "bookmarks" | "notifications";
+type TabKey = "balance" | "songs" | "bookmarks" | "notifications" | "reports";
 
-const TABS: { key: TabKey; label: string }[] = [
+const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
   { key: "bookmarks", label: "Bookmarks" },
   { key: "notifications", label: "Notifications" },
+];
+
+const ADMIN_TABS: { key: TabKey; label: string }[] = [
+  { key: "reports", label: "Reports" },
 ];
 
 // ── Main component ──
@@ -56,6 +62,8 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function CabinetPage() {
   const { accountId, signIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
+  const isAdmin = accountId && ADMIN_ACCOUNTS.includes(accountId);
+  const TABS = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
 
   if (walletLoading) {
     return (
@@ -113,6 +121,7 @@ export default function CabinetPage() {
       {activeTab === "songs" && <MySongsTab />}
       {activeTab === "bookmarks" && <BookmarksTab />}
       {activeTab === "notifications" && <NotificationsTab />}
+      {activeTab === "reports" && isAdmin && <ReportsTab />}
     </div>
   );
 }
@@ -254,16 +263,27 @@ function BalanceTab() {
         <div className="glass-card rounded-2xl p-6">
           <h3 className="text-white font-semibold mb-4">Withdraw NEAR</h3>
           <div className="flex gap-3">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={withdrawAmount}
-              onChange={(e) => setWithdrawAmount(e.target.value)}
-              disabled={actionLoading}
-              className="flex-1 border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
-            />
+            <div className="flex-1 relative">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={withdrawAmount}
+                onChange={(e) => setWithdrawAmount(e.target.value)}
+                disabled={actionLoading}
+                className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 pr-14 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
+              />
+              {balance && BigInt(balance) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWithdrawAmount(yoctoToNear(balance))}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 rounded-lg transition"
+                >
+                  Max
+                </button>
+              )}
+            </div>
             <button
               onClick={handleWithdraw}
               disabled={actionLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
@@ -585,6 +605,126 @@ function NotificationsTab() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Reports Tab (Admin) ──
+
+function ReportsTab() {
+  const [reports, setReports] = useState<{
+    id: number; song_id: number; reason: string; status: string;
+    created_at: string; song_uuid: string; song_title: string;
+    reporter_account_id: string;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
+
+  const fetchReportsList = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getReports();
+      setReports(data);
+    } catch (e) {
+      console.error("Failed to load reports:", e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchReportsList();
+  }, [fetchReportsList]);
+
+  const handleAction = async (reportId: number, action: "dismiss" | "hide" | "delete") => {
+    setActionLoading(reportId);
+    try {
+      if (action === "dismiss") {
+        await reviewReport(reportId, { status: "dismissed" });
+      } else {
+        await reviewReport(reportId, { status: "reviewed", action });
+      }
+      setReports((prev) => prev.filter((r) => r.id !== reportId));
+    } catch (e) {
+      console.error("Review failed:", e);
+    }
+    setActionLoading(null);
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 space-y-2">
+                <div className="h-4 skeleton rounded w-3/4" />
+                <div className="h-3 skeleton rounded w-1/2" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (reports.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <div className="text-5xl mb-4 text-slate-700">&#9989;</div>
+        <p className="text-slate-400 text-lg">No pending reports</p>
+        <p className="text-slate-500 text-sm mt-2">All reports have been reviewed.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-slate-400 mb-4">{reports.length} pending report{reports.length !== 1 ? "s" : ""}</p>
+      {reports.map((report) => (
+        <div key={report.id} className="glass-card rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-rose-500/10 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white font-medium">
+                <a href={`/song/${report.song_uuid}`} className="hover:text-purple-400 transition-colors">
+                  {report.song_title}
+                </a>
+              </p>
+              <p className="text-sm text-slate-300 mt-1">&ldquo;{report.reason}&rdquo;</p>
+              <p className="text-xs text-slate-500 mt-1">
+                by {report.reporter_account_id} &middot; {timeAgo(report.created_at)}
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => handleAction(report.id, "dismiss")}
+                disabled={actionLoading === report.id}
+                className="px-3 py-1.5 text-xs rounded-lg border border-white/[0.08] text-slate-400 hover:text-white hover:bg-white/[0.06] transition disabled:opacity-50"
+              >
+                Dismiss
+              </button>
+              <button
+                onClick={() => handleAction(report.id, "hide")}
+                disabled={actionLoading === report.id}
+                className="px-3 py-1.5 text-xs rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition disabled:opacity-50"
+              >
+                Hide
+              </button>
+              <button
+                onClick={() => handleAction(report.id, "delete")}
+                disabled={actionLoading === report.id}
+                className="px-3 py-1.5 text-xs rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -237,7 +237,7 @@ export async function getLanguages(): Promise<Language[]> {
 
 // ── Admin ──
 
-export async function getReports(status?: string): Promise<{ id: number; song_id: number; reporter_id: number; reason: string; status: string; created_at: string }[]> {
+export async function getReports(status?: string): Promise<{ id: number; song_id: number; reporter_id: number; reason: string; status: string; created_at: string; song_uuid: string; song_title: string; reporter_account_id: string }[]> {
   const params = status ? `?status=${status}` : "";
   return fetchApi(`/api/admin/reports${params}`);
 }

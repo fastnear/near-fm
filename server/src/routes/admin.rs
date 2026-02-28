@@ -73,15 +73,36 @@ pub async fn delete_category(
 
 // ── Reports ──
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ReportWithContext {
+    pub id: i32,
+    pub song_id: i32,
+    pub reporter_id: i32,
+    pub reason: String,
+    pub status: String,
+    pub reviewed_by: Option<i32>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub song_uuid: String,
+    pub song_title: String,
+    pub reporter_account_id: String,
+}
+
 pub async fn list_reports(
     State(state): State<AppState>,
     extensions: Extensions,
-) -> Result<Json<Vec<Report>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ReportWithContext>>, (StatusCode, String)> {
     require_admin(&extensions)
         .map_err(|s| (s, "Admin required".to_string()))?;
 
-    let reports = sqlx::query_as::<_, Report>(
-        "SELECT * FROM reports WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100",
+    let reports = sqlx::query_as::<_, ReportWithContext>(
+        r#"SELECT r.id, r.song_id, r.reporter_id, r.reason, r.status, r.reviewed_by, r.created_at,
+                  s.uuid AS song_uuid, s.title AS song_title,
+                  u.account_id AS reporter_account_id
+           FROM reports r
+           JOIN songs s ON s.id = r.song_id
+           JOIN users u ON u.id = r.reporter_id
+           WHERE r.status = 'pending'
+           ORDER BY r.created_at DESC LIMIT 100"#,
     )
     .fetch_all(&state.db)
     .await

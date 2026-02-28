@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Song } from "@/types";
-import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong } from "@/lib/api";
+import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { VoteButtons } from "@/components/song/VoteButtons";
@@ -68,7 +68,8 @@ export function SongDetail({ uuid }: { uuid: string }) {
   }
 
   const isActive = currentSong?.uuid === song.uuid;
-  const canEdit = accountId && (accountId === song.uploader_account_id || ADMIN_ACCOUNTS.includes(accountId));
+  const isAdmin = accountId && ADMIN_ACCOUNTS.includes(accountId);
+  const canEdit = accountId && (accountId === song.uploader_account_id || isAdmin);
 
   const startEditing = () => {
     setEditForm({
@@ -335,6 +336,30 @@ export function SongDetail({ uuid }: { uuid: string }) {
                   </svg>
                   Report
                 </button>
+
+                {/* Admin: Hide */}
+                {isAdmin && (
+                  <button
+                    onClick={async () => {
+                      const newHidden = !song.is_hidden;
+                      if (newHidden && !window.confirm("Hide this song from public view?")) return;
+                      try {
+                        await moderateSong(song.uuid, { is_hidden: newHidden });
+                        setSong({ ...song, is_hidden: newHidden });
+                      } catch (e) { console.error("Moderate failed:", e); }
+                    }}
+                    className={`btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5 ${
+                      song.is_hidden
+                        ? "!text-rose-400 !border-rose-500/20 !bg-rose-500/10"
+                        : "hover:!text-rose-400 hover:!border-rose-500/20 hover:!bg-rose-500/10"
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>
+                    {song.is_hidden ? "Hidden" : "Hide"}
+                  </button>
+                )}
               </div>
 
               {/* Report form */}
@@ -398,7 +423,7 @@ export function SongDetail({ uuid }: { uuid: string }) {
               {/* Dates */}
               <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-slate-600">
                 <span>Added {new Date(song.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
-                {song.updated_at && song.updated_at !== song.created_at && (
+                {song.updated_at && new Date(song.updated_at).toDateString() !== new Date(song.created_at).toDateString() && (
                   <span>Updated {new Date(song.updated_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
                 )}
               </div>
