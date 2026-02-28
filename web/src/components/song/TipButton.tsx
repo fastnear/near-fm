@@ -6,7 +6,7 @@ import { useNearWallet } from "@/contexts/NearWalletContext";
 import { recordTip } from "@/lib/api";
 import { tipSongAction, tipFromBalanceArgs, getBalance } from "@/lib/near/contract";
 
-const TIP_AMOUNTS = ["0.1", "0.5", "1", "5"];
+const TIP_AMOUNTS = ["0.01", "0.1", "0.5", "1", "5"];
 
 function nearToYocto(near: string): string {
   const parts = near.split(".");
@@ -29,6 +29,7 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
+  const [customAmount, setCustomAmount] = useState("");
 
   useEffect(() => {
     if (accountId && showModal) {
@@ -159,16 +160,37 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
                       key={amount}
                       onClick={() => handleTip(amount)}
                       disabled={loading}
-                      className={`flex-1 min-w-[48px] px-2 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 ${
+                      className={`flex-1 min-w-[36px] px-1.5 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 ${
                         canUseBalance
                           ? "bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20"
                           : "bg-white/[0.04] text-slate-300 border-white/[0.08] hover:bg-white/[0.08] hover:border-white/[0.15]"
                       }`}
                     >
-                      {amount} N
+                      {amount}
                     </button>
                   );
                 })}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={customAmount}
+                  onChange={(e) => setCustomAmount(e.target.value)}
+                  placeholder="Custom"
+                  className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-purple-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    const val = parseFloat(customAmount);
+                    if (val >= 0.01) handleTip(customAmount);
+                  }}
+                  disabled={loading || !customAmount || parseFloat(customAmount) < 0.01}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Tip
+                </button>
               </div>
               {hasBalance && (
                 <p className="text-[10px] text-slate-500 text-center">
