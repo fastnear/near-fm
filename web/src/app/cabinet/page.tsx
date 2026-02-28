@@ -174,6 +174,8 @@ function BalanceTab() {
       });
       setDepositAmount("");
       setActionSuccess(`Deposited ${depositAmount} NEAR successfully.`);
+      // Wait for NEAR finality before refreshing balance
+      await new Promise((r) => setTimeout(r, 2000));
       await fetchBalance();
     } catch (e: any) {
       console.error("Deposit failed:", e);
@@ -198,6 +200,8 @@ function BalanceTab() {
       });
       setWithdrawAmount("");
       setActionSuccess(`Withdrew ${withdrawAmount} NEAR successfully.`);
+      // Wait for NEAR finality before refreshing balance
+      await new Promise((r) => setTimeout(r, 2000));
       await fetchBalance();
     } catch (e: any) {
       console.error("Withdraw failed:", e);
@@ -228,7 +232,7 @@ function BalanceTab() {
         </div>
       )}
       {actionSuccess && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-xl px-4 py-3 text-sm">
+        <div className="bg-[#00ec97]/10 border border-[#00ec97]/20 text-[#00ec97] rounded-xl px-4 py-3 text-sm">
           {actionSuccess}
         </div>
       )}
@@ -422,7 +426,7 @@ function NotificationIcon({ type }: { type: string }) {
   switch (type) {
     case "tip_received":
       return (
-        <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-5 h-5 text-[#00ec97]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       );

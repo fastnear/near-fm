@@ -138,7 +138,7 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
       {showModal && (
         <div className="absolute bottom-full mb-2 left-0 rounded-2xl p-4 shadow-2xl z-50 min-w-[240px] bg-slate-900 border border-white/[0.1]">
           {success ? (
-            <div className="flex items-center gap-2 text-emerald-400 text-sm">
+            <div className="flex items-center gap-2 text-[#00ec97] text-sm">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>

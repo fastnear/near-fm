@@ -28,7 +28,7 @@ function StatusBadge({ status }: { status: string }) {
     <span
       className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
         isOpen
-          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+          ? "bg-[#00ec97]/10 text-[#00ec97] border border-[#00ec97]/20"
           : "bg-purple-500/10 text-purple-400 border border-purple-500/20"
       }`}
     >

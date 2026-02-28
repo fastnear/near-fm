@@ -9,11 +9,12 @@ pub async fn get_or_create_user(
     account_id: &str,
     is_admin: bool,
 ) -> Result<User, sqlx::Error> {
-    // Try to find existing user
+    // Try to find existing user, update is_admin from config
     if let Some(user) = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE account_id = $1",
+        "UPDATE users SET is_admin = $2 WHERE account_id = $1 RETURNING *",
     )
     .bind(account_id)
+    .bind(is_admin)
     .fetch_optional(pool)
     .await?
     {

@@ -51,7 +51,7 @@ function formatDate(iso: string): string {
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    reviewed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    reviewed: "bg-[#00ec97]/10 text-[#00ec97] border-[#00ec97]/20",
     dismissed: "bg-white/[0.04] text-slate-400 border-white/[0.08]",
   };
   const cls = colors[status] || "bg-white/[0.04] text-slate-400 border-white/[0.08]";

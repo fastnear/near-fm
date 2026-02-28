@@ -84,8 +84,8 @@ export function VoteButtons({ song, compact }: Props) {
           onClick={() => handleVote(1)}
           className={`p-1.5 rounded-lg transition-all duration-200 ${
             userVote === 1
-              ? "text-emerald-400 bg-emerald-400/15"
-              : "text-slate-500 hover:text-emerald-400 hover:bg-emerald-400/10"
+              ? "text-[#00ec97] bg-[#00ec97]/15"
+              : "text-slate-500 hover:text-[#00ec97] hover:bg-[#00ec97]/10"
           }`}
           disabled={loading}
         >
@@ -93,7 +93,7 @@ export function VoteButtons({ song, compact }: Props) {
         </button>
         <span
           className={`text-sm font-semibold min-w-[24px] text-center tabular-nums ${
-            net > 0 ? "text-emerald-400" : net < 0 ? "text-rose-400" : "text-slate-500"
+            net > 0 ? "text-[#00ec97]" : net < 0 ? "text-rose-400" : "text-slate-500"
           }`}
         >
           {net}
@@ -119,8 +119,8 @@ export function VoteButtons({ song, compact }: Props) {
         onClick={() => handleVote(1)}
         className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
           userVote === 1
-            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
-            : "bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:text-emerald-400 hover:border-emerald-500/20 hover:bg-emerald-500/10"
+            ? "bg-[#00ec97]/15 text-[#00ec97] border border-[#00ec97]/20"
+            : "bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:text-[#00ec97] hover:border-[#00ec97]/20 hover:bg-[#00ec97]/10"
         }`}
         disabled={loading}
       >

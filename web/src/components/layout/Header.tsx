@@ -46,7 +46,9 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Logo */}
         <a href={`${base}/`} className="flex items-center gap-2.5 group">
-          <img src="/favicon-32x32.png" alt="near.fm" className="w-8 h-8" />
+          <div className="w-8 h-8 rounded-lg bg-white/90 flex items-center justify-center">
+            <img src="/favicon-32x32.png" alt="near.fm" className="w-7 h-7" />
+          </div>
           <span className="text-xl font-bold text-gradient">
             near.fm
           </span>
