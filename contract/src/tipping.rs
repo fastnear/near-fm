@@ -5,21 +5,23 @@ use crate::{NearFmContract, NearFmContractExt};
 
 #[near_bindgen]
 impl NearFmContract {
-    /// Send a direct tip (attached NEAR goes to recipient minus commission).
+    /// Send a tip with attached NEAR — credited to recipient's virtual balance.
     #[payable]
-    pub fn tip(&mut self, recipient: AccountId, song_uuid: String) -> Promise {
+    pub fn tip(&mut self, recipient: AccountId, song_uuid: String) {
         let sender = env::predecessor_account_id();
         let deposit = env::attached_deposit().as_yoctonear();
         assert!(deposit > 0, "Must attach NEAR to tip");
 
         let (tip_amount, commission) = self.apply_commission(deposit);
 
+        // Credit to recipient's virtual balance
+        let recipient_balance = self.balances.get(&recipient).unwrap_or(0);
+        self.balances.insert(&recipient, &(recipient_balance + tip_amount));
+
         log!(
             "EVENT_JSON:{{\"standard\":\"nearfm\",\"version\":\"1.0.0\",\"event\":\"tip\",\"data\":[{{\"sender\":\"{}\",\"recipient\":\"{}\",\"amount\":\"{}\",\"commission\":\"{}\",\"song_uuid\":\"{}\",\"from_balance\":false}}]}}",
             sender, recipient, tip_amount, commission, song_uuid
         );
-
-        Promise::new(recipient).transfer(NearToken::from_yoctonear(tip_amount))
     }
 
     /// Tip from virtual balance (callable via function call access key, no wallet popup).

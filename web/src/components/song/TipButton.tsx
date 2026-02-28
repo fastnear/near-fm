@@ -41,7 +41,7 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
     }
   }, [accountId, showModal, viewMethod]);
 
-  const handleTip = async (amountNear: string, fromBalance: boolean) => {
+  const handleTip = async (amountNear: string) => {
     if (!isAuthenticated) {
       if (accountId) { completeSignIn(); } else { signIn(); }
       return;
@@ -51,8 +51,11 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
     try {
       const amountYocto = nearToYocto(amountNear);
       let txHash: string;
+      let fromBalance = false;
 
-      if (fromBalance) {
+      // If user has enough virtual balance, tip from balance (no wallet popup)
+      if (balance && BigInt(balance) >= BigInt(amountYocto)) {
+        fromBalance = true;
         const action = tipFromBalanceArgs(
           song.uploader_account_id,
           amountYocto,
@@ -65,6 +68,7 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
           gas: action.gas,
         });
       } else {
+        // Not enough balance — send full amount as deposit (goes to virtual balance)
         const action = tipSongAction(
           song.uploader_account_id,
           song.uuid,
@@ -82,9 +86,17 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
       await recordTip({
         song_uuid: song.uuid,
         tx_hash: txHash,
-        amount_yocto: nearToYocto(amountNear),
+        amount_yocto: amountYocto,
         from_balance: fromBalance,
       });
+
+      // Refresh balance
+      if (accountId) {
+        getBalance(
+          (params) => viewMethod(params).then((r) => String(r ?? "0")),
+          accountId
+        ).then((b) => setBalance(b)).catch(() => {});
+      }
 
       setSuccess(true);
       setTimeout(() => {
@@ -134,40 +146,35 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
           ) : (
             <div className="space-y-3">
               {hasBalance && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">Balance</span>
-                    <span className="text-xs font-medium text-purple-400">{balanceNear} NEAR</span>
-                  </div>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {TIP_AMOUNTS.map((amount) => (
-                      <button
-                        key={`bal-${amount}`}
-                        onClick={() => handleTip(amount, true)}
-                        disabled={loading || BigInt(balance!) < BigInt(nearToYocto(amount))}
-                        className="flex-1 min-w-[48px] px-2 py-1.5 bg-purple-500/10 text-purple-300 text-xs font-medium rounded-lg border border-purple-500/20 hover:bg-purple-500/20 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                      >
-                        {amount} N
-                      </button>
-                    ))}
-                  </div>
-                  <div className="border-t border-white/[0.06] pt-2">
-                    <p className="text-[11px] text-slate-500 mb-1.5">Or tip via wallet:</p>
-                  </div>
-                </>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Balance</span>
+                  <span className="text-xs font-medium text-purple-400">{balanceNear} NEAR</span>
+                </div>
               )}
               <div className="flex gap-1.5 flex-wrap">
-                {TIP_AMOUNTS.map((amount) => (
-                  <button
-                    key={amount}
-                    onClick={() => handleTip(amount, false)}
-                    disabled={loading}
-                    className="flex-1 min-w-[48px] px-2 py-1.5 bg-white/[0.04] text-slate-300 text-xs font-medium rounded-lg border border-white/[0.08] hover:bg-white/[0.08] hover:border-white/[0.15] transition-all disabled:opacity-50"
-                  >
-                    {amount} N
-                  </button>
-                ))}
+                {TIP_AMOUNTS.map((amount) => {
+                  const canUseBalance = balance && BigInt(balance) >= BigInt(nearToYocto(amount));
+                  return (
+                    <button
+                      key={amount}
+                      onClick={() => handleTip(amount)}
+                      disabled={loading}
+                      className={`flex-1 min-w-[48px] px-2 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 ${
+                        canUseBalance
+                          ? "bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20"
+                          : "bg-white/[0.04] text-slate-300 border-white/[0.08] hover:bg-white/[0.08] hover:border-white/[0.15]"
+                      }`}
+                    >
+                      {amount} N
+                    </button>
+                  );
+                })}
               </div>
+              {hasBalance && (
+                <p className="text-[10px] text-slate-500 text-center">
+                  Purple = from balance, gray = wallet deposit
+                </p>
+              )}
             </div>
           )}
         </div>

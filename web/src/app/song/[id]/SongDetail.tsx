@@ -372,7 +372,7 @@ export function SongDetail({ uuid }: { uuid: string }) {
               )}
 
               {/* Stats */}
-              <div className="flex gap-4 mt-5 text-sm">
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-5 text-sm">
                 <span className="flex items-center gap-1.5 text-slate-500">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -392,6 +392,14 @@ export function SongDetail({ uuid }: { uuid: string }) {
                     </svg>
                     {(Number(song.total_tips_yocto) / 1e24).toFixed(2)} NEAR
                   </span>
+                )}
+              </div>
+
+              {/* Dates */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-slate-600">
+                <span>Added {new Date(song.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
+                {song.updated_at && song.updated_at !== song.created_at && (
+                  <span>Updated {new Date(song.updated_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
                 )}
               </div>
 

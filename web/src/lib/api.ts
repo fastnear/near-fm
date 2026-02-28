@@ -26,12 +26,9 @@ async function fetchApi<T>(
     throw new Error(text || res.statusText);
   }
 
-  if (res.status === 204 || res.status === 201) {
-    const text = await res.text();
-    if (!text) return undefined as T;
-    return JSON.parse(text);
-  }
-  return res.json();
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text);
 }
 
 // ── Auth ──
