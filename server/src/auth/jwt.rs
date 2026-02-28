@@ -58,15 +58,38 @@ pub async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Response {
+    let mut token_found = None;
+
+    // 1. Check Authorization header
     if let Some(auth_header) = req.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if let Ok(claims) = decode_token(&state.config.jwt_secret, token) {
-                    req.extensions_mut().insert(claims);
+                token_found = Some(token.to_string());
+            }
+        }
+    }
+
+    // 2. Fallback: check nearfm_session cookie
+    if token_found.is_none() {
+        if let Some(cookie_header) = req.headers().get("cookie") {
+            if let Ok(cookies) = cookie_header.to_str() {
+                for part in cookies.split(';') {
+                    let part = part.trim();
+                    if let Some(val) = part.strip_prefix("nearfm_session=") {
+                        token_found = Some(val.to_string());
+                        break;
+                    }
                 }
             }
         }
     }
+
+    if let Some(token) = token_found {
+        if let Ok(claims) = decode_token(&state.config.jwt_secret, &token) {
+            req.extensions_mut().insert(claims);
+        }
+    }
+
     next.run(req).await
 }
 

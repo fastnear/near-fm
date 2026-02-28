@@ -4,7 +4,7 @@ CREATE TABLE users (
     account_id VARCHAR(128) UNIQUE NOT NULL,
     display_name VARCHAR(100),
     avatar_url TEXT,
-    reputation_score DECIMAL(10,4) NOT NULL DEFAULT 1.0,
+    reputation_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
     total_uploads INTEGER NOT NULL DEFAULT 0,
     total_tips_received_yocto VARCHAR(40) NOT NULL DEFAULT '0',
     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -80,13 +80,13 @@ CREATE TABLE songs (
     lyrics TEXT,
     ai_model VARCHAR(100),
     audio_url TEXT NOT NULL,
-    audio_hash VARCHAR(64) UNIQUE NOT NULL,
+    audio_hash VARCHAR(64) NOT NULL,
     audio_duration_seconds INTEGER,
     audio_mime_type VARCHAR(50) NOT NULL DEFAULT 'audio/mpeg',
     cover_image_url TEXT,
     category_id INTEGER REFERENCES categories(id),
     language_id INTEGER REFERENCES languages(id),
-    score DECIMAL(12,4) NOT NULL DEFAULT 0,
+    score DOUBLE PRECISION NOT NULL DEFAULT 0,
     upvotes INTEGER NOT NULL DEFAULT 0,
     downvotes INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
@@ -104,7 +104,7 @@ CREATE INDEX idx_songs_score ON songs(score DESC) WHERE NOT is_deleted AND NOT i
 CREATE INDEX idx_songs_created ON songs(created_at DESC) WHERE NOT is_deleted AND NOT is_hidden;
 CREATE INDEX idx_songs_uploader ON songs(uploader_id);
 CREATE INDEX idx_songs_uuid ON songs(uuid);
-CREATE INDEX idx_songs_hash ON songs(audio_hash);
+CREATE UNIQUE INDEX idx_songs_audio_hash_active ON songs(audio_hash) WHERE NOT is_deleted AND NOT is_hidden;
 CREATE INDEX idx_songs_category ON songs(category_id);
 CREATE INDEX idx_songs_language ON songs(language_id);
 CREATE INDEX idx_songs_search ON songs USING GIN(search_vector);
@@ -135,7 +135,7 @@ CREATE TABLE votes (
     song_id INTEGER NOT NULL REFERENCES songs(id),
     user_id INTEGER NOT NULL REFERENCES users(id),
     value SMALLINT NOT NULL CHECK (value IN (-1, 1)),
-    weight DECIMAL(10,4) NOT NULL DEFAULT 1.0,
+    weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(song_id, user_id)
 );

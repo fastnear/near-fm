@@ -1,4 +1,9 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::State,
+    http::{header, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -35,7 +40,7 @@ pub struct UserResponse {
 pub async fn verify(
     State(state): State<AppState>,
     Json(req): Json<VerifyRequest>,
-) -> Result<Json<VerifyResponse>, (StatusCode, String)> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     // 0. Parse and validate JSON message
     let msg: serde_json::Value = serde_json::from_str(&req.message).map_err(|_| {
         (StatusCode::BAD_REQUEST, "Message must be JSON".to_string())
@@ -98,6 +103,7 @@ pub async fn verify(
     let user = queries::get_or_create_user(&state.db, &req.account_id, is_admin)
         .await
         .map_err(|e| {
+            tracing::error!("get_or_create_user failed for {}: {:?}", &req.account_id, e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Database error: {}", e),
@@ -118,7 +124,12 @@ pub async fn verify(
         )
     })?;
 
-    Ok(Json(VerifyResponse {
+    let cookie = format!(
+        "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; Max-Age=604800",
+        token
+    );
+
+    let body = Json(VerifyResponse {
         token,
         user: UserResponse {
             id: user.id,
@@ -127,5 +138,7 @@ pub async fn verify(
             is_admin: user.is_admin,
             reputation_score: user.reputation_score.to_string(),
         },
-    }))
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
 }

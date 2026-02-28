@@ -18,7 +18,7 @@ services:
   server:
     build: ./server
     ports:
-      - "8477:8080"
+      - "8477:8477"
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,6 +32,7 @@ services:
       ADMIN_ACCOUNTS: ${ADMIN_ACCOUNTS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3847}
       RUST_LOG: ${RUST_LOG:-nearfm_server=info,tower_http=info}
+      PORT: "8477"
 
   web:
     build:
@@ -42,7 +43,7 @@ services:
         NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
         NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
     ports:
-      - "3847:3000"
+      - "3847:3847"
     depends_on:
       - server
     environment:
@@ -50,6 +51,7 @@ services:
       NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
       NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
       NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
+      PORT: "3847"
 
 volumes:
   pgdata:

@@ -78,7 +78,8 @@ export default function RequestDetailPage() {
       // Refresh the request data
       const data = await getRequest(uuid);
       setRequest(data.request);
-    } catch (e) {
+    } catch (e: any) {
+      if (e.name === "WalletConnectionRequired") { setWithdrawing(false); return; }
       console.error("Failed to withdraw bounty:", e);
       setError(e instanceof Error ? e.message : "Failed to withdraw bounty");
     }
@@ -112,6 +113,8 @@ export default function RequestDetailPage() {
     );
   }
 
+  // Note: requester_id is a numeric DB FK, not the NEAR account string.
+  // Server-side auth enforces real ownership on withdraw; this is cosmetic only.
   const isRequester = accountId !== null && request.requester_id !== null;
   const isOpen = request.status === "open";
 

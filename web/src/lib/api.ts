@@ -6,34 +6,31 @@ async function fetchApi<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("nearfm_token") : null;
-
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options?.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   if (!res.ok) {
-    if (res.status === 401 && token) {
-      // Token expired — clear it so UI prompts re-sign-in
-      localStorage.removeItem("nearfm_token");
+    if (res.status === 401) {
+      // Session expired — notify UI to prompt re-sign-in
       window.dispatchEvent(new Event("nearfm_token_expired"));
     }
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204 || res.status === 201) {
+    const text = await res.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text);
+  }
   return res.json();
 }
 
@@ -81,6 +78,21 @@ export async function getSong(uuid: string): Promise<{ song: Song }> {
   return fetchApi(`/api/songs/${uuid}`);
 }
 
+export async function updateSong(uuid: string, data: {
+  title?: string;
+  description?: string;
+  lyrics?: string;
+  ai_model?: string;
+  cover_image_url?: string;
+  language_id?: number;
+  remove_cover?: boolean;
+}): Promise<{ song: Song }> {
+  return fetchApi(`/api/songs/${uuid}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function createSong(data: {
   title: string;
   description?: string;
@@ -100,9 +112,15 @@ export async function createSong(data: {
   });
 }
 
+export async function getUserVote(
+  uuid: string
+): Promise<{ upvotes: number; downvotes: number; user_vote: number }> {
+  return fetchApi(`/api/songs/${uuid}/vote`);
+}
+
 export async function voteSong(
   uuid: string,
-  value: 1 | -1
+  value: 1 | -1 | 0
 ): Promise<{ upvotes: number; downvotes: number; user_vote: number }> {
   return fetchApi(`/api/songs/${uuid}/vote`, {
     method: "POST",

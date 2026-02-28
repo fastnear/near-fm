@@ -33,6 +33,22 @@ const FASTFS_RECEIVER =
 const NETWORK =
   (process.env.NEXT_PUBLIC_NEAR_NETWORK as "testnet" | "mainnet") || "testnet";
 
+// Detect subdomain to choose which contract gets the function call access key
+const isUploadSubdomain =
+  typeof window !== "undefined" && window.location.hostname.startsWith("upload.");
+const SIGN_IN_CONTRACT = isUploadSubdomain ? FASTFS_RECEIVER : CONTRACT_ID;
+
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
+
+function clearCookie(name: string) {
+  document.cookie = `${name}=; Domain=.near.fm; Path=/; Max-Age=0`;
+  document.cookie = `${name}=; Path=/; Max-Age=0`;
+}
+
 interface NearWalletContextType {
   selector: WalletSelector | null;
   accountId: string | null;
@@ -40,8 +56,8 @@ interface NearWalletContextType {
   loading: boolean;
   isAuthenticated: boolean;
   signIn: () => void;
+  completeSignIn: () => Promise<boolean>;
   signOut: () => Promise<void>;
-  connectForTransactions: () => void;
   callFunction: (params: {
     contractId: string;
     method: string;
@@ -63,8 +79,8 @@ const NearWalletContext = createContext<NearWalletContextType>({
   loading: true,
   isAuthenticated: false,
   signIn: () => {},
+  completeSignIn: async () => false,
   signOut: async () => {},
-  connectForTransactions: () => {},
   callFunction: async () => "",
   viewMethod: async () => null,
 });
@@ -72,7 +88,6 @@ const NearWalletContext = createContext<NearWalletContextType>({
 export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [selector, setSelector] = useState<WalletSelector | null>(null);
   const [signInModal, setSignInModal] = useState<WalletSelectorModal | null>(null);
-  const [txModal, setTxModal] = useState<WalletSelectorModal | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,14 +96,19 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const pendingAuthRef = useRef(false);
 
   useEffect(() => {
-    setIsAuthenticated(!!localStorage.getItem("nearfm_token"));
-    const onExpired = () => setIsAuthenticated(false);
+    // Check session cookie
+    setIsAuthenticated(!!getCookie("nearfm_session"));
+    const onExpired = () => {
+      clearCookie("nearfm_session");
+      setIsAuthenticated(false);
+    };
     window.addEventListener("nearfm_token_expired", onExpired);
     return () => window.removeEventListener("nearfm_token_expired", onExpired);
   }, []);
 
   const doApiAuth = useCallback(async (w: Wallet, accId: string) => {
-    if (localStorage.getItem("nearfm_token")) {
+    // Already have session cookie
+    if (getCookie("nearfm_session")) {
       setIsAuthenticated(true);
       return;
     }
@@ -117,7 +137,8 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
 
     if (!signed) return;
 
-    const result = await verifyAuth({
+    // verifyAuth will set the session cookie via Set-Cookie header
+    await verifyAuth({
       account_id: signed.accountId || accId,
       public_key: signed.publicKey,
       signature: signed.signature,
@@ -126,7 +147,6 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       recipient: CONTRACT_ID,
     });
 
-    localStorage.setItem("nearfm_token", result.token);
     setIsAuthenticated(true);
   }, []);
 
@@ -142,14 +162,17 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         ],
       });
 
-      // Light modal for sign-in (no access key requested)
-      const signMod = setupModal(sel, { contractId: "" });
-      // Full modal for transactions (requests function call access key)
-      const txMod = setupModal(sel, { contractId: FASTFS_RECEIVER });
+      // Sign-in modal — creates function call access key for the appropriate contract
+      // near.fm → near-fm contract (tips/withdrawals)
+      // upload.near.fm → FastFS contract (chunked uploads)
+      const signMod = setupModal(sel, { contractId: SIGN_IN_CONTRACT });
+
+      signMod.on("onHide", ({ hideReason }) => {
+        if (hideReason === "user-triggered") pendingAuthRef.current = false;
+      });
 
       setSelector(sel);
       setSignInModal(signMod);
-      setTxModal(txMod);
 
       const state = sel.store.getState();
       const accounts = state.accounts;
@@ -158,13 +181,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         setAccountId(acc.accountId);
         const w = await sel.wallet();
         setWallet(w);
-        if (!localStorage.getItem("nearfm_token")) {
-          try {
-            await doApiAuth(w, acc.accountId);
-          } catch (e) {
-            console.error("Auto-auth failed:", e);
-          }
-        } else {
+        if (getCookie("nearfm_session")) {
           setIsAuthenticated(true);
         }
       }
@@ -179,7 +196,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
           try {
             const w = await sel.wallet();
             setWallet(w);
-            if (pendingAuthRef.current && !localStorage.getItem("nearfm_token")) {
+            if (pendingAuthRef.current && !getCookie("nearfm_session")) {
               pendingAuthRef.current = false;
               await doApiAuth(w, accId);
             }
@@ -189,7 +206,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         } else {
           setAccountId(null);
           setWallet(null);
-          localStorage.removeItem("nearfm_token");
+          clearCookie("nearfm_session");
           setIsAuthenticated(false);
         }
       });
@@ -204,23 +221,30 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     signInModal?.show();
   }, [signInModal]);
 
-  // Sign out: clears wallet connection + API token
+  // Complete sign in: run signMessage with already-connected wallet
+  const completeSignIn = useCallback(async (): Promise<boolean> => {
+    if (!wallet || !accountId) return false;
+    try {
+      await doApiAuth(wallet, accountId);
+      return true;
+    } catch (e) {
+      console.error("Complete sign-in failed:", e);
+      return false;
+    }
+  }, [wallet, accountId, doApiAuth]);
+
+  // Sign out: clears wallet connection + session cookie
   const signOut = useCallback(async () => {
     if (wallet) {
       await wallet.signOut();
     }
     setAccountId(null);
     setWallet(null);
-    localStorage.removeItem("nearfm_token");
+    clearCookie("nearfm_session");
     setIsAuthenticated(false);
   }, [wallet]);
 
-  // For tips/uploads — connect with function call access key
-  const connectForTransactions = useCallback(() => {
-    txModal?.show();
-  }, [txModal]);
-
-  // callFunction — checks wallet, prompts connection if missing
+  // callFunction — tries the transaction directly, wallet handles access key prompts
   const callFunction = useCallback(
     async (params: {
       contractId: string;
@@ -230,8 +254,9 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       deposit?: string;
     }) => {
       if (!wallet) {
-        txModal?.show();
-        throw new Error("Please connect your wallet to perform transactions");
+        const err = new Error("Please connect your wallet to perform transactions");
+        err.name = "WalletConnectionRequired";
+        throw err;
       }
 
       const result = await wallet.signAndSendTransaction({
@@ -252,7 +277,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         (result as { transaction?: { hash?: string } })?.transaction?.hash || "";
       return txHash;
     },
-    [wallet, txModal]
+    [wallet]
   );
 
   const viewMethod = useCallback(
@@ -304,8 +329,8 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         loading,
         isAuthenticated,
         signIn,
+        completeSignIn,
         signOut,
-        connectForTransactions,
         callFunction,
         viewMethod,
       }}

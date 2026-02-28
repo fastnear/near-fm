@@ -2,23 +2,40 @@ use sqlx::PgPool;
 
 const MAX_AUDIO_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
 
+const VALIDATION_DELAY_SECS: u64 = 30;
+const VALIDATION_RETRIES: u32 = 3;
+const RETRY_DELAY_SECS: u64 = 15;
+
 /// Validate an audio file by checking its HTTP response metadata.
+///
+/// Waits for FastFS to index the data before checking, then retries on failure.
 ///
 /// Checks performed:
 /// - HTTP status is 200
-/// - Content-Type header starts with "audio/"
+/// - Content-Type header starts with "audio/" or "video/"
 /// - Content-Length is at most 50 MB
 ///
 /// On success: marks the song as validated.
 /// On failure: hides the song and creates a notification for the uploader.
 async fn validate_audio(pool: &PgPool, song_id: i32, audio_url: String) {
-    match do_validate(pool, song_id, &audio_url).await {
-        Ok(()) => {
-            tracing::info!(song_id, "Audio validation passed");
-        }
-        Err(reason) => {
-            tracing::warn!(song_id, %reason, "Audio validation failed, hiding song");
-            mark_invalid(pool, song_id, &reason).await;
+    // Wait for FastFS to index the uploaded data
+    tokio::time::sleep(std::time::Duration::from_secs(VALIDATION_DELAY_SECS)).await;
+
+    for attempt in 0..VALIDATION_RETRIES {
+        match do_validate(pool, song_id, &audio_url).await {
+            Ok(()) => {
+                tracing::info!(song_id, "Audio validation passed");
+                return;
+            }
+            Err(reason) => {
+                if attempt + 1 < VALIDATION_RETRIES {
+                    tracing::info!(song_id, attempt, %reason, "Audio validation attempt failed, retrying");
+                    tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
+                } else {
+                    tracing::warn!(song_id, %reason, "Audio validation failed, hiding song");
+                    mark_invalid(pool, song_id, &reason).await;
+                }
+            }
         }
     }
 }
@@ -47,9 +64,9 @@ async fn do_validate(pool: &PgPool, song_id: i32, audio_url: &str) -> Result<(),
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if !content_type.starts_with("audio/") {
+    if !content_type.starts_with("audio/") && !content_type.starts_with("video/") {
         return Err(format!(
-            "Invalid content type: expected audio/*, got '{}'",
+            "Invalid content type: expected audio/* or video/*, got '{}'",
             content_type
         ));
     }

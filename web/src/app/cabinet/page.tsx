@@ -54,7 +54,7 @@ const TABS: { key: TabKey; label: string }[] = [
 // ── Main component ──
 
 export default function CabinetPage() {
-  const { accountId, isAuthenticated, signIn, callFunction, viewMethod, loading: walletLoading } = useNearWallet();
+  const { accountId, signIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
 
   if (walletLoading) {
@@ -66,7 +66,7 @@ export default function CabinetPage() {
     );
   }
 
-  if (!accountId || !isAuthenticated) {
+  if (!accountId) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -460,8 +460,10 @@ function notificationText(notif: Notification): string {
     }
     case "submission_to_request":
       return `A new song was submitted to your request${data.song_title ? `: "${data.song_title}"` : ""}`;
+    case "audio_validation_failed":
+      return `Audio validation failed${data.reason ? `: ${data.reason}` : ""}`;
     default:
-      return "You have a new notification";
+      return `You have a new notification (${notif.type})`;
   }
 }
 

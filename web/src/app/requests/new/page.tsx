@@ -8,7 +8,7 @@ import { createRequest, getLanguages } from "@/lib/api";
 import { createBountyAction } from "@/lib/near/contract";
 
 export default function NewRequestPage() {
-  const { accountId, isAuthenticated, signIn, callFunction } = useNearWallet();
+  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
   const router = useRouter();
 
   const [title, setTitle] = useState("");
@@ -18,18 +18,27 @@ export default function NewRequestPage() {
   const [languages, setLanguages] = useState<Language[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
 
   useEffect(() => {
-    getLanguages().then(setLanguages).catch(console.error);
+    getLanguages()
+      .then((langs) => {
+        setLanguages(langs);
+        if (!languageId) {
+          const english = langs.find((l) => l.code === "en");
+          if (english) setLanguageId(english.id);
+        }
+      })
+      .catch(console.error);
   }, []);
 
-  if (!accountId || !isAuthenticated) {
+  if (!accountId) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12">
           <h1 className="text-2xl font-bold mb-4">Create a Song Request</h1>
           <p className="text-slate-400 mb-6">
-            Sign in to create a song request with a bounty
+            Sign in with your NEAR account to create a song request with a bounty
           </p>
           <button
             onClick={signIn}
@@ -42,7 +51,14 @@ export default function NewRequestPage() {
     );
   }
 
+  const handleSign = async () => {
+    setSigning(true);
+    await completeSignIn();
+    setSigning(false);
+  };
+
   const handleSubmit = async () => {
+
     if (!title.trim()) {
       setError("Title is required");
       return;
@@ -89,7 +105,7 @@ export default function NewRequestPage() {
 
       // 3. Redirect to requests list
       router.push("/requests");
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to create request:", e);
       setError(e instanceof Error ? e.message : "Failed to create request");
     }
@@ -185,19 +201,35 @@ export default function NewRequestPage() {
           </div>
         )}
 
-        {/* Submit */}
-        <button
-          onClick={handleSubmit}
-          disabled={submitting}
-          className="w-full py-3 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none font-medium transition"
-        >
-          {submitting ? "Creating Request..." : "Create Request"}
-        </button>
-
-        <p className="text-xs text-slate-600 text-center">
-          By creating a request, your bounty will be locked in a smart contract
-          until you award it to a song or withdraw it.
-        </p>
+        {/* Auth + Submit */}
+        {!isAuthenticated ? (
+          <div className="space-y-3">
+            <button
+              onClick={handleSign}
+              disabled={signing}
+              className="w-full py-3 btn-primary rounded-xl disabled:opacity-50 font-medium transition"
+            >
+              {signing ? "Waiting for signature..." : "Sign message to authorize"}
+            </button>
+            <p className="text-xs text-slate-500 text-center">
+              One-time signature to verify your wallet. After signing you can create requests.
+            </p>
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="w-full py-3 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none font-medium transition"
+            >
+              {submitting ? "Creating Request..." : "Create Request"}
+            </button>
+            <p className="text-xs text-slate-600 text-center">
+              By creating a request, your bounty will be locked in a smart contract
+              until you award it to a song or withdraw it.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

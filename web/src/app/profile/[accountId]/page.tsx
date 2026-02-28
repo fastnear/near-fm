@@ -38,8 +38,9 @@ export default function ProfilePage() {
       setError(null);
       try {
         const data: any = await getUserProfile(accountId);
-        setUser(data.user);
-        setSongs(data.songs ?? []);
+        const { songs: userSongs, ...userData } = data;
+        setUser(userData);
+        setSongs(userSongs ?? []);
       } catch (e) {
         console.error("Failed to load profile:", e);
         setError("User not found or failed to load profile.");

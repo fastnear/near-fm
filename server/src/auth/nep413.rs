@@ -61,13 +61,13 @@ pub fn verify_nep413_signature(
     );
 
     // Construct NEP-413 Borsh payload
-    // Format: u32(tag_len) + tag_bytes + borsh(payload)
-    let tag = b"NEP0413";
+    // Format: u32(tag) + borsh(payload)
+    // Tag per NEP-413 spec: 2^31 + 413 = 2147484061
+    let tag: u32 = (1 << 31) + 413;
     let mut borsh_data: Vec<u8> = Vec::new();
 
-    // Tag as Borsh string: u32 LE length + bytes
-    borsh_data.extend_from_slice(&(tag.len() as u32).to_le_bytes());
-    borsh_data.extend_from_slice(tag);
+    // Tag as u32 LE
+    borsh_data.extend_from_slice(&tag.to_le_bytes());
 
     // Payload fields as Borsh:
     // message: string (u32 len + bytes)

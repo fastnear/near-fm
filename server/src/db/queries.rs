@@ -216,7 +216,7 @@ pub async fn check_audio_hash_exists(
     audio_hash: &str,
 ) -> Result<bool, sqlx::Error> {
     let row = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM songs WHERE audio_hash = $1)",
+        "SELECT EXISTS(SELECT 1 FROM songs WHERE audio_hash = $1 AND NOT is_deleted AND NOT is_hidden)",
     )
     .bind(audio_hash)
     .fetch_one(pool)
@@ -258,6 +258,32 @@ pub async fn upsert_vote(
     .bind(weight)
     .execute(pool)
     .await?;
+
+    // Recalculate song vote counts
+    sqlx::query(
+        r#"UPDATE songs SET
+            upvotes = (SELECT COALESCE(SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
+            downvotes = (SELECT COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
+            updated_at = NOW()
+           WHERE id = $1"#,
+    )
+    .bind(song_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn delete_vote(
+    pool: &PgPool,
+    song_id: i32,
+    user_id: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM votes WHERE song_id = $1 AND user_id = $2")
+        .bind(song_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
 
     // Recalculate song vote counts
     sqlx::query(

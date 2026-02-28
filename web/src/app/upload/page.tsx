@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import type { Language } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { createSong, getSongs, getLanguages } from "@/lib/api";
@@ -14,8 +13,7 @@ import {
 } from "@/lib/near/fastfs";
 
 export default function UploadPage() {
-  const { accountId, isAuthenticated, signIn, connectForTransactions, callFunction } = useNearWallet();
-  const router = useRouter();
+  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
 
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
@@ -29,6 +27,7 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -45,9 +44,9 @@ export default function UploadPage() {
       .catch(console.error);
   }, []);
 
-  if (!accountId || !isAuthenticated) {
+  if (!accountId) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-20 text-center">
+      <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center">
             <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -55,14 +54,30 @@ export default function UploadPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
-          <p className="text-slate-400 mb-8">
-            Sign in to upload AI-generated music
-          </p>
+          {isAuthenticated ? (
+            <>
+              <p className="text-slate-400 mb-3">
+                Connect your wallet to FastFS decentralized storage to upload files.
+              </p>
+              <p className="text-slate-500 text-xs mb-8">
+                This is a one-time connection for file uploads, separate from your near.fm session.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-slate-400 mb-3">
+                Connect your NEAR wallet to upload AI-generated music.
+              </p>
+              <p className="text-slate-500 text-xs mb-8">
+                Some features on near.fm (tips, voting) will require a separate wallet connection later.
+              </p>
+            </>
+          )}
           <button
             onClick={signIn}
             className="btn-primary px-8 py-3 rounded-xl text-sm"
           >
-            Sign in
+            {isAuthenticated ? "Connect to FastFS" : "Connect Wallet"}
           </button>
         </div>
       </div>
@@ -76,7 +91,15 @@ export default function UploadPage() {
     reader.readAsDataURL(file);
   };
 
+  const handleSign = async () => {
+    setSigning(true);
+    await completeSignIn();
+    setSigning(false);
+  };
+
   const handleUpload = async () => {
+    if (!accountId) { signIn(); return; }
+
     if (!audioFile || !title.trim()) {
       setError("Title and audio file are required");
       return;
@@ -168,7 +191,8 @@ export default function UploadPage() {
         language_id: languageId,
       });
 
-      router.push(`/song/${song.uuid}`);
+      // Redirect to song page on near.fm
+      window.location.href = `https://near.fm/song/${song.uuid}`;
     } catch (e) {
       console.error("Upload failed:", e);
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -334,14 +358,29 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Submit */}
-        <button
-          onClick={handleUpload}
-          disabled={uploading || !audioFile || !title.trim()}
-          className="w-full py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
-        >
-          {uploading ? "Uploading..." : "Upload Song"}
-        </button>
+        {/* Auth + Submit */}
+        {!isAuthenticated ? (
+          <div className="space-y-3">
+            <button
+              onClick={handleSign}
+              disabled={signing}
+              className="w-full py-3.5 btn-primary rounded-xl disabled:opacity-50"
+            >
+              {signing ? "Waiting for signature..." : "Sign message to authorize"}
+            </button>
+            <p className="text-xs text-slate-500 text-center">
+              One-time signature to verify your wallet. After signing you can upload.
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={handleUpload}
+            disabled={uploading || !audioFile || !title.trim()}
+            className="w-full py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+          >
+            {uploading ? "Uploading..." : "Upload Song"}
+          </button>
+        )}
       </div>
     </div>
   );

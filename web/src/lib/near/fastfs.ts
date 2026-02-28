@@ -140,12 +140,15 @@ export async function uploadToFastFS(
   const txHashes: string[] = [];
 
   for (const part of parts) {
+    // gas=1 transactions intentionally fail on-chain but data is still recorded.
+    // Catch errors per chunk (like the reference implementation) to avoid
+    // aborting the entire upload when a chunk's wallet popup is dismissed.
     const txHash = await callFunction({
       contractId: FASTFS_CONTRACT,
       method: "__fastdata_fastfs",
       args: part.encoded,
       gas: "1",
-    });
+    }).catch(() => "");
     txHashes.push(txHash);
     onProgress?.(part.partIndex + 1, part.totalParts);
   }

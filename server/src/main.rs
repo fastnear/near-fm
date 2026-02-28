@@ -4,7 +4,7 @@ use axum::{
     extract::DefaultBodyLimit,
     http::{HeaderValue, Method},
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PUT,
             Method::PATCH,
             Method::DELETE,
             Method::OPTIONS,
@@ -72,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
         ])
+        .allow_credentials(true)
         .allow_origin(
             config
                 .cors_origins
@@ -80,53 +82,32 @@ async fn main() -> anyhow::Result<()> {
                 .collect::<Vec<_>>(),
         );
 
-    // Public routes (no auth required)
-    let public = Router::new()
-        .route("/api/songs", get(routes::songs::list_songs))
-        .route("/api/songs/{uuid}", get(routes::songs::get_song))
-        .route(
-            "/api/songs/{uuid}/play",
-            post(routes::songs::increment_play),
-        )
-        .route("/api/requests", get(routes::requests::list_requests))
-        .route("/api/requests/{uuid}", get(routes::requests::get_request))
-        .route("/api/users/{account_id}", get(routes::users::get_profile))
-        .route("/api/categories", get(routes::admin::list_categories))
-        .route(
-            "/api/languages",
-            get(|state: axum::extract::State<AppState>| async move {
-                let langs = db::queries::list_languages(&state.db).await.unwrap_or_default();
-                axum::Json(langs)
-            }),
-        )
-        .route("/api/auth/verify", post(routes::auth::verify));
-
-    // Authenticated routes
-    let authenticated = Router::new()
-        .route("/api/songs", post(routes::songs::create_song))
-        .route("/api/songs/{uuid}/vote", post(routes::songs::vote_song))
-        .route(
-            "/api/songs/{uuid}/report",
-            post(routes::songs::report_song),
-        )
+    // All routes in a single router — auth middleware is pass-through
+    // (handlers call require_auth/require_admin to enforce authentication)
+    let app = Router::new()
+        // Songs
+        .route("/api/songs", get(routes::songs::list_songs).post(routes::songs::create_song))
+        .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
+        .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
+        .route("/api/songs/:uuid/vote", get(routes::songs::get_vote).post(routes::songs::vote_song))
+        .route("/api/songs/:uuid/report", post(routes::songs::report_song))
+        // Requests
+        .route("/api/requests", get(routes::requests::list_requests).post(routes::requests::create_request))
+        .route("/api/requests/:uuid", get(routes::requests::get_request).patch(routes::requests::update_request))
+        .route("/api/requests/:uuid/submissions", post(routes::requests::submit_to_request))
+        // Tips
         .route("/api/tips", post(routes::tips::record_tip))
-        .route("/api/requests", post(routes::requests::create_request))
+        // Users
+        .route("/api/users/:account_id", get(routes::users::get_profile))
         .route(
-            "/api/requests/{uuid}",
-            patch(routes::requests::update_request),
-        )
-        .route(
-            "/api/requests/{uuid}/submissions",
-            post(routes::requests::submit_to_request),
-        )
-        .route(
-            "/api/users/{account_id}/bookmarks",
+            "/api/users/:account_id/bookmarks",
             get(routes::users::list_bookmarks).post(routes::users::add_bookmark),
         )
         .route(
-            "/api/users/{account_id}/bookmarks/{song_uuid}",
+            "/api/users/:account_id/bookmarks/:song_uuid",
             delete(routes::users::remove_bookmark),
         )
+        // Notifications
         .route(
             "/api/notifications",
             get(|state: axum::extract::State<AppState>, extensions: axum::http::Extensions| async move {
@@ -155,40 +136,34 @@ async fn main() -> anyhow::Result<()> {
                 Ok::<_, (axum::http::StatusCode, String)>(axum::http::StatusCode::OK)
             }),
         )
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::jwt::auth_middleware,
-        ));
-
-    // Admin routes
-    let admin = Router::new()
+        // Auth
+        .route("/api/auth/verify", post(routes::auth::verify))
+        // Admin
         .route("/api/admin/categories", post(routes::admin::create_category))
-        .route(
-            "/api/admin/categories/{id}",
-            delete(routes::admin::delete_category),
-        )
+        .route("/api/admin/categories/:id", delete(routes::admin::delete_category))
         .route("/api/admin/reports", get(routes::admin::list_reports))
+        .route("/api/admin/reports/:id", patch(routes::admin::review_report))
         .route(
-            "/api/admin/reports/{id}",
-            patch(routes::admin::review_report),
-        )
-        .route(
-            "/api/admin/songs/{uuid}",
+            "/api/admin/songs/:uuid",
             patch(routes::admin::moderate_song).delete(routes::admin::delete_song),
         )
+        .route("/api/admin/config", get(routes::admin::get_config).patch(routes::admin::update_config))
         .route(
-            "/api/admin/config",
-            get(routes::admin::get_config).patch(routes::admin::update_config),
+            "/api/categories",
+            get(routes::admin::list_categories),
         )
+        .route(
+            "/api/languages",
+            get(|state: axum::extract::State<AppState>| async move {
+                let langs = db::queries::list_languages(&state.db).await.unwrap_or_default();
+                axum::Json(langs)
+            }),
+        )
+        // Global middleware
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::jwt::auth_middleware,
-        ));
-
-    let app = Router::new()
-        .merge(public)
-        .merge(authenticated)
-        .merge(admin)
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB

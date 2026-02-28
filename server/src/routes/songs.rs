@@ -184,8 +184,8 @@ pub async fn vote_song(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    if req.value != 1 && req.value != -1 {
-        return Err((StatusCode::BAD_REQUEST, "Vote value must be 1 or -1".to_string()));
+    if req.value != 1 && req.value != -1 && req.value != 0 {
+        return Err((StatusCode::BAD_REQUEST, "Vote value must be 1, -1, or 0".to_string()));
     }
 
     let song = queries::get_song_by_uuid(&state.db, &uuid)
@@ -193,18 +193,25 @@ pub async fn vote_song(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
 
-    // Get voter's reputation for vote weight
-    let voter = queries::get_user_by_account(&state.db, &claims.sub)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+    if req.value == 0 {
+        // Remove vote
+        queries::delete_vote(&state.db, song.id, claims.user_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    } else {
+        // Get voter's reputation for vote weight
+        let voter = queries::get_user_by_account(&state.db, &claims.sub)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
-    use std::str::FromStr;
-    let weight: f64 = f64::from_str(&voter.reputation_score.to_string()).unwrap_or(1.0);
+        use std::str::FromStr;
+        let weight: f64 = f64::from_str(&voter.reputation_score.to_string()).unwrap_or(1.0);
 
-    queries::upsert_vote(&state.db, song.id, claims.user_id, req.value, weight)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        queries::upsert_vote(&state.db, song.id, claims.user_id, req.value, weight)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
 
     // Get updated counts
     let updated = queries::get_song_by_uuid(&state.db, &uuid)
@@ -224,6 +231,31 @@ pub struct PlayCountResponse {
     pub play_count: i32,
 }
 
+pub async fn get_vote(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+) -> Result<Json<VoteResponse>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let song = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    let user_vote = queries::get_user_vote(&state.db, song.id, claims.user_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .unwrap_or(0);
+
+    Ok(Json(VoteResponse {
+        upvotes: song.upvotes,
+        downvotes: song.downvotes,
+        user_vote,
+    }))
+}
+
 pub async fn increment_play(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
@@ -237,6 +269,68 @@ pub async fn increment_play(
 #[derive(Debug, Deserialize)]
 pub struct ReportSongRequest {
     pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateSongRequest {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub lyrics: Option<String>,
+    pub ai_model: Option<String>,
+    pub cover_image_url: Option<String>,
+    pub language_id: Option<i32>,
+    #[serde(default)]
+    pub remove_cover: bool,
+}
+
+pub async fn update_song(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+    Json(req): Json<UpdateSongRequest>,
+) -> Result<Json<SongDetailResponse>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let song = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    // Only owner or admin can edit
+    if song.uploader_id != claims.user_id && !claims.is_admin {
+        return Err((StatusCode::FORBIDDEN, "Not authorized to edit this song".to_string()));
+    }
+
+    sqlx::query(
+        r#"UPDATE songs SET
+            title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            lyrics = COALESCE($3, lyrics),
+            ai_model = COALESCE($4, ai_model),
+            cover_image_url = CASE WHEN $6 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE cover_image_url END,
+            language_id = COALESCE($7, language_id),
+            updated_at = NOW()
+           WHERE uuid = $8"#,
+    )
+    .bind(&req.title)
+    .bind(&req.description)
+    .bind(&req.lyrics)
+    .bind(&req.ai_model)
+    .bind(&req.cover_image_url)
+    .bind(req.remove_cover)
+    .bind(&req.language_id)
+    .bind(&uuid)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let updated = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Song not found after update".to_string()))?;
+
+    Ok(Json(SongDetailResponse { song: updated }))
 }
 
 pub async fn report_song(
