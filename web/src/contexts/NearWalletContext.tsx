@@ -288,8 +288,8 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     }) => {
       const rpcUrl =
         NETWORK === "mainnet"
-          ? "https://rpc.mainnet.near.org"
-          : "https://rpc.testnet.near.org";
+          ? "https://rpc.mainnet.fastnear.com"
+          : "https://rpc.testnet.fastnear.com";
 
       const argsBase64 = btoa(JSON.stringify(params.args));
 
