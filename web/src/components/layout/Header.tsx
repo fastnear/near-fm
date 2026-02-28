@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getNotifications } from "@/lib/api";
+import { AnimatedLogo } from "@/components/AnimatedLogo";
 
 function NavLink({ href, children, className = "" }: { href: string; children: React.ReactNode; className?: string }) {
   return (
@@ -46,9 +47,7 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Logo */}
         <a href={`${base}/`} className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-white/90 flex items-center justify-center">
-            <img src="/favicon-32x32.png" alt="near.fm" className="w-7 h-7" />
-          </div>
+          <AnimatedLogo className="w-10 h-10" variant="header" />
           <span className="text-xl font-bold text-gradient">
             near.fm
           </span>
@@ -59,6 +58,7 @@ export function Header() {
           <a href={`${base}/`} className={navLinkClass}>Feed</a>
           <a href={`${base}/requests`} className={navLinkClass}>Requests</a>
           <a href="https://upload.near.fm/" className={navLinkClass}>Upload</a>
+          <a href={`${base}/about`} className={navLinkClass}>About</a>
           <a href={`${base}/cabinet`} className={navLinkClass}>
             Cabinet
             {!isUpload && unreadCount > 0 && (
