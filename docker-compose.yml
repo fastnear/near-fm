@@ -15,6 +15,22 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-mainnet:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: nearfm
+      POSTGRES_USER: nearfm
+      POSTGRES_PASSWORD: ${DB_PASSWORD_MAINNET:-nearfm_dev}
+    ports:
+      - "5508:5432"
+    volumes:
+      - pgdata_mainnet:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nearfm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   server:
     build: ./server
     ports:
@@ -22,8 +38,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      postgres-mainnet:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://nearfm:${DB_PASSWORD:-nearfm_dev}@postgres:5432/nearfm
+      DATABASE_URL: ${DATABASE_URL:-postgres://nearfm:nearfm_dev@postgres:5432/nearfm}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
       CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
@@ -55,3 +73,4 @@ services:
 
 volumes:
   pgdata:
+  pgdata_mainnet:

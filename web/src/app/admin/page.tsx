@@ -17,6 +17,7 @@ import {
   getAdminComments,
   moderateComment,
   toggleMuteUser,
+  toggleBanUser,
 } from "@/lib/api";
 import type { AdminComment } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
@@ -774,6 +775,7 @@ function CommentsPanel() {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [muteLoading, setMuteLoading] = useState<string | null>(null);
+  const [banLoading, setBanLoading] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
@@ -820,6 +822,21 @@ function CommentsPanel() {
       setError(e instanceof Error ? e.message : "Mute failed");
     }
     setMuteLoading(null);
+  };
+
+  const handleToggleBan = async (accountId: string, ban: boolean) => {
+    const msg = ban
+      ? `Ban user "${accountId}"? This will hide all their songs, comments, and delete their votes.`
+      : `Unban user "${accountId}"? Their songs and comments will be restored.`;
+    if (!window.confirm(msg)) return;
+    setBanLoading(accountId);
+    try {
+      await toggleBanUser(accountId, ban);
+      await fetchComments();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ban failed");
+    }
+    setBanLoading(null);
   };
 
   return (
@@ -898,6 +915,13 @@ function CommentsPanel() {
                     className="px-3 py-1.5 text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
                   >
                     Mute User
+                  </button>
+                  <button
+                    onClick={() => handleToggleBan(comment.author_account_id, true)}
+                    disabled={banLoading === comment.author_account_id}
+                    className="px-3 py-1.5 text-xs font-medium bg-red-600/10 hover:bg-red-600/20 text-red-400 disabled:opacity-50 rounded-lg border border-red-600/20 transition"
+                  >
+                    Ban
                   </button>
                 </div>
               </div>

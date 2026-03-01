@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Song } from "@/types";
 import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment } from "@/lib/api";
 import type { Comment } from "@/lib/api";
+import { getBalanceRpc } from "@/lib/near/contract";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { VoteButtons } from "@/components/song/VoteButtons";
@@ -27,6 +28,7 @@ export function SongDetail({ uuid }: { uuid: string }) {
   const [commentText, setCommentText] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState("");
+  const [hasBalance, setHasBalance] = useState<boolean | null>(null);
   const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
   const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
 
@@ -54,6 +56,18 @@ export function SongDetail({ uuid }: { uuid: string }) {
       getComments(uuid).then(setComments).catch(console.error);
     }
   }, [uuid]);
+
+  // Check virtual balance for commenting
+  useEffect(() => {
+    if (accountId) {
+      getBalanceRpc(accountId)
+        .then((bal) => {
+          const ONE_NEAR = BigInt("1000000000000000000000000");
+          setHasBalance(BigInt(bal) >= ONE_NEAR);
+        })
+        .catch(() => setHasBalance(null));
+    }
+  }, [accountId]);
 
   useEffect(() => {
     if (isAuthenticated && accountId && song) {
@@ -491,47 +505,60 @@ export function SongDetail({ uuid }: { uuid: string }) {
 
                 {/* Comment input */}
                 {accountId ? (
-                  <div className="mb-4">
-                    <div className="flex gap-2">
-                      <textarea
-                        value={commentText}
-                        onChange={(e) => {
-                          setCommentText(e.target.value);
-                          setCommentError("");
-                        }}
-                        placeholder="Write a comment... (requires 1+ NEAR virtual balance)"
-                        rows={2}
-                        maxLength={2000}
-                        className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none resize-none"
-                      />
-                      <button
-                        onClick={async () => {
-                          if (!commentText.trim()) return;
-                          if (!isAuthenticated) {
-                            completeSignIn();
-                            return;
-                          }
-                          setCommentSubmitting(true);
-                          setCommentError("");
-                          try {
-                            const newComment = await createComment(uuid, commentText.trim());
-                            setComments((prev) => [...prev, newComment]);
-                            setCommentText("");
-                          } catch (e: any) {
-                            setCommentError(e instanceof Error ? e.message : "Failed to post comment");
-                          }
-                          setCommentSubmitting(false);
-                        }}
-                        disabled={commentSubmitting || !commentText.trim()}
-                        className="self-end px-4 py-2.5 btn-primary rounded-xl text-sm disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        {commentSubmitting ? "..." : "Post"}
-                      </button>
+                  hasBalance === false ? (
+                    <div className="mb-4 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl px-4 py-3 text-sm">
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      <span>
+                        You need at least 1 NEAR in your{" "}
+                        <Link href="/cabinet" className="text-amber-200 underline hover:text-white transition-colors">virtual balance</Link>
+                        {" "}to leave comments.
+                      </span>
                     </div>
-                    {commentError && (
-                      <p className="mt-1.5 text-xs text-rose-400">{commentError}</p>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="mb-4">
+                      <div className="flex gap-2">
+                        <textarea
+                          value={commentText}
+                          onChange={(e) => {
+                            setCommentText(e.target.value);
+                            setCommentError("");
+                          }}
+                          placeholder="Write a comment..."
+                          rows={2}
+                          maxLength={2000}
+                          className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none resize-none"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!commentText.trim()) return;
+                            if (!isAuthenticated) {
+                              completeSignIn();
+                              return;
+                            }
+                            setCommentSubmitting(true);
+                            setCommentError("");
+                            try {
+                              const newComment = await createComment(uuid, commentText.trim());
+                              setComments((prev) => [...prev, newComment]);
+                              setCommentText("");
+                            } catch (e: any) {
+                              setCommentError(e instanceof Error ? e.message : "Failed to post comment");
+                            }
+                            setCommentSubmitting(false);
+                          }}
+                          disabled={commentSubmitting || !commentText.trim()}
+                          className="self-end px-4 py-2.5 btn-primary rounded-xl text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          {commentSubmitting ? "..." : "Post"}
+                        </button>
+                      </div>
+                      {commentError && (
+                        <p className="mt-1.5 text-xs text-rose-400">{commentError}</p>
+                      )}
+                    </div>
+                  )
                 ) : (
                   <p className="text-sm text-slate-500 mb-4">
                     <button onClick={signIn} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     auth::jwt::require_auth,
     db::{models::SongRequest, queries},
+    near::tx_verify,
     AppState,
 };
 
@@ -86,6 +87,17 @@ pub async fn create_request(
 ) -> Result<Json<SongRequest>, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
 
     let uuid = req.uuid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
@@ -176,6 +188,51 @@ pub async fn update_request(
 
     if existing.requester_id != claims.user_id {
         return Err((StatusCode::FORBIDDEN, "Not the request owner".to_string()));
+    }
+
+    // Verify on-chain transactions
+    if req.status == "awarded" {
+        if let Some(ref tx_hash) = req.award_tx_hash {
+            let verified = tx_verify::verify_near_tx(
+                &state.config.near_rpc_url,
+                tx_hash,
+                &claims.sub,
+            )
+            .await
+            .map_err(|e| {
+                tracing::warn!("Award TX verification failed for {}: {}", tx_hash, e);
+                (StatusCode::BAD_REQUEST, format!("Transaction verification failed: {}", e))
+            })?;
+
+            if verified.method_name != "award_bounty" {
+                return Err((StatusCode::BAD_REQUEST, "Wrong contract method for award".to_string()));
+            }
+            if verified.receiver_id != state.config.contract_id {
+                return Err((StatusCode::BAD_REQUEST, "Transaction sent to wrong contract".to_string()));
+            }
+        }
+    }
+
+    if req.status == "withdrawn" {
+        if let Some(ref tx_hash) = req.withdrawal_tx_hash {
+            let verified = tx_verify::verify_near_tx(
+                &state.config.near_rpc_url,
+                tx_hash,
+                &claims.sub,
+            )
+            .await
+            .map_err(|e| {
+                tracing::warn!("Withdraw TX verification failed for {}: {}", tx_hash, e);
+                (StatusCode::BAD_REQUEST, format!("Transaction verification failed: {}", e))
+            })?;
+
+            if verified.method_name != "withdraw_bounty" {
+                return Err((StatusCode::BAD_REQUEST, "Wrong contract method for withdrawal".to_string()));
+            }
+            if verified.receiver_id != state.config.contract_id {
+                return Err((StatusCode::BAD_REQUEST, "Transaction sent to wrong contract".to_string()));
+            }
+        }
     }
 
     let updated = sqlx::query_as::<_, SongRequest>(
@@ -277,6 +334,17 @@ pub async fn submit_to_request(
 ) -> Result<StatusCode, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
 
     let request = sqlx::query_as::<_, SongRequest>(
         "SELECT * FROM song_requests WHERE uuid = $1 AND status = 'open'",

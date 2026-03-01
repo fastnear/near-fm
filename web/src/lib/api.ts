@@ -359,3 +359,10 @@ export async function toggleMuteUser(accountId: string, is_muted: boolean): Prom
     body: JSON.stringify({ is_muted }),
   });
 }
+
+export async function toggleBanUser(accountId: string, is_banned: boolean): Promise<void> {
+  return fetchApi(`/api/admin/users/${accountId}/ban`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_banned }),
+  });
+}

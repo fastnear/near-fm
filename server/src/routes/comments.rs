@@ -173,12 +173,18 @@ pub async fn create_comment(
         return Err((StatusCode::BAD_REQUEST, "Comment must be 1-2000 characters".to_string()));
     }
 
-    // Check if user is muted
-    let is_muted: bool = sqlx::query_scalar("SELECT is_muted FROM users WHERE id = $1")
-        .bind(claims.user_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Check if user is banned or muted
+    let (is_banned, is_muted): (bool, bool) = sqlx::query_as(
+        "SELECT is_banned, is_muted FROM users WHERE id = $1",
+    )
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
 
     if is_muted {
         return Err((StatusCode::FORBIDDEN, "Your account has been muted".to_string()));
@@ -203,12 +209,16 @@ pub async fn create_comment(
         ));
     }
 
-    // Get song_id
-    let song_id: i32 = sqlx::query_scalar("SELECT id FROM songs WHERE uuid = $1")
+    // Get song_id and uploader
+    let song_row: Option<(i32, i32, String)> = sqlx::query_as(
+        "SELECT id, uploader_id, title FROM songs WHERE uuid = $1"
+    )
         .bind(&uuid)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (song_id, uploader_id, song_title) = song_row
         .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
 
     // Insert comment
@@ -226,6 +236,33 @@ pub async fn create_comment(
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Notify song uploader (don't notify yourself)
+    if uploader_id != claims.user_id {
+        let truncated_body: String = body.chars().take(97).collect();
+        let truncated_body = if body.chars().count() > 100 {
+            format!("{}...", truncated_body)
+        } else {
+            body.clone()
+        };
+        let message = format!(
+            "{} commented on your song \"{}\": \"{}\"",
+            claims.sub, song_title, truncated_body
+        );
+        let data = serde_json::json!({
+            "message": message,
+            "song_uuid": uuid,
+            "comment_id": comment.id,
+        });
+        let _ = sqlx::query(
+            r#"INSERT INTO notifications (user_id, type, data)
+               VALUES ($1, 'comment', $2)"#,
+        )
+        .bind(uploader_id)
+        .bind(&data)
+        .execute(&state.db)
+        .await;
+    }
 
     Ok(Json(comment))
 }

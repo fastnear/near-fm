@@ -362,3 +362,99 @@ pub async fn update_config(
 
     Ok(StatusCode::OK)
 }
+
+// ── Ban user ──
+
+#[derive(Debug, Deserialize)]
+pub struct BanUserBody {
+    pub is_banned: bool,
+}
+
+pub async fn admin_toggle_ban(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    extensions: Extensions,
+    Json(req): Json<BanUserBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    // Get the user id
+    let user_id: Option<i32> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE account_id = $1",
+    )
+    .bind(&account_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let user_id = user_id.ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    // Update ban status
+    sqlx::query("UPDATE users SET is_banned = $1 WHERE id = $2")
+        .bind(req.is_banned)
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if req.is_banned {
+        // Hide all songs
+        sqlx::query("UPDATE songs SET is_hidden = TRUE WHERE uploader_id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+
+        // Hide all comments
+        sqlx::query("UPDATE comments SET is_hidden = TRUE WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+
+        // Delete all votes and recalculate affected songs
+        let affected_song_ids: Vec<i32> = sqlx::query_scalar(
+            "SELECT DISTINCT song_id FROM votes WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        sqlx::query("DELETE FROM votes WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+
+        // Recalculate vote counts for affected songs
+        for song_id in affected_song_ids {
+            sqlx::query(
+                r#"UPDATE songs SET
+                    upvotes = COALESCE((SELECT COUNT(*) FROM votes WHERE song_id = $1 AND value = 1), 0),
+                    downvotes = COALESCE((SELECT COUNT(*) FROM votes WHERE song_id = $1 AND value = -1), 0)
+                   WHERE id = $1"#,
+            )
+            .bind(song_id)
+            .execute(&state.db)
+            .await
+            .ok();
+        }
+    } else {
+        // Unban: restore songs and comments
+        sqlx::query("UPDATE songs SET is_hidden = FALSE WHERE uploader_id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+
+        sqlx::query("UPDATE comments SET is_hidden = FALSE WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+    }
+
+    Ok(StatusCode::OK)
+}

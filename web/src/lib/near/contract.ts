@@ -140,6 +140,14 @@ export async function getCommissionRate(): Promise<number> {
 }
 
 /**
+ * View: get virtual balance via RPC (no wallet needed).
+ */
+export async function getBalanceRpc(accountId: string): Promise<string> {
+  const result = await rpcViewCall("get_balance", { account_id: accountId });
+  return typeof result === "string" ? result : String(result);
+}
+
+/**
  * View: get virtual balance.
  */
 export async function getBalance(

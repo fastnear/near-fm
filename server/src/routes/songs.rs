@@ -94,6 +94,17 @@ pub async fn create_song(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
+
     // Check deduplication
     let exists = queries::check_audio_hash_exists(&state.db, &req.audio_hash)
         .await
@@ -222,6 +233,17 @@ pub async fn vote_song(
 ) -> Result<Json<VoteResponse>, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
 
     if req.value != 1 && req.value != -1 && req.value != 0 {
         return Err((StatusCode::BAD_REQUEST, "Vote value must be 1, -1, or 0".to_string()));

@@ -97,16 +97,10 @@ export function Header() {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-2.5 text-xs">
-        <a href={`${base}/`} className="flex flex-col items-center gap-1 text-slate-400 hover:text-white transition-colors">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-          </svg>
+        <a href={`${base}/`} className="text-slate-400 hover:text-white transition-colors py-1">
           Feed
         </a>
-        <a href={`${base}/requests`} className="flex flex-col items-center gap-1 text-slate-400 hover:text-white transition-colors">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-          </svg>
+        <a href={`${base}/requests`} className="text-slate-400 hover:text-white transition-colors py-1">
           Requests
         </a>
         <a href="https://upload.near.fm/" className="flex flex-col items-center gap-1 text-slate-400 hover:text-white transition-colors">
@@ -117,13 +111,13 @@ export function Header() {
           </div>
           Upload
         </a>
-        <a href={`${base}/cabinet`} className="relative flex flex-col items-center gap-1 text-slate-400 hover:text-white transition-colors">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-          </svg>
+        <a href={`${base}/about`} className="text-slate-400 hover:text-white transition-colors py-1">
+          About
+        </a>
+        <a href={`${base}/cabinet`} className="relative text-slate-400 hover:text-white transition-colors py-1">
           Cabinet
           {!isUpload && unreadCount > 0 && (
-            <span className="absolute -top-1 right-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 shadow-lg shadow-purple-500/30">
+            <span className="absolute -top-2 -right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 shadow-lg shadow-purple-500/30">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}

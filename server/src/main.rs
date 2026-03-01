@@ -15,6 +15,7 @@ mod config;
 mod db;
 mod feed;
 mod near;
+mod rate_limit;
 mod reputation;
 mod routes;
 mod validation;
@@ -82,23 +83,49 @@ async fn main() -> anyhow::Result<()> {
                 .collect::<Vec<_>>(),
         );
 
-    // All routes in a single router — auth middleware is pass-through
+    // Rate limiters
+    let strict_limiter = rate_limit::strict();
+    let moderate_limiter = rate_limit::moderate();
+
+    // Strict rate-limited routes (5 req/min per IP) — RPC calls / financial writes
+    let strict_routes = Router::new()
+        .route("/api/tips", post(routes::tips::record_tip))
+        .route("/api/songs/:uuid/comments", post(routes::comments::create_comment))
+        .route("/api/requests/:uuid", patch(routes::requests::update_request))
+        .layer(middleware::from_fn_with_state(
+            strict_limiter,
+            rate_limit::rate_limit_middleware,
+        ));
+
+    // Moderate rate-limited routes (30 req/min per IP) — auth / writes
+    let moderate_routes = Router::new()
+        .route("/api/auth/verify", post(routes::auth::verify))
+        .route("/api/songs", post(routes::songs::create_song))
+        .route("/api/requests", post(routes::requests::create_request))
+        .route("/api/songs/:uuid/vote", post(routes::songs::vote_song))
+        .route("/api/songs/:uuid/report", post(routes::songs::report_song))
+        .layer(middleware::from_fn_with_state(
+            moderate_limiter,
+            rate_limit::rate_limit_middleware,
+        ));
+
+    // All routes — auth middleware is pass-through
     // (handlers call require_auth/require_admin to enforce authentication)
     let app = Router::new()
-        // Songs
-        .route("/api/songs", get(routes::songs::list_songs).post(routes::songs::create_song))
+        // Merge rate-limited routes
+        .merge(strict_routes)
+        .merge(moderate_routes)
+        // Songs (GET + PUT not rate-limited)
+        .route("/api/songs", get(routes::songs::list_songs))
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
         .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
-        .route("/api/songs/:uuid/vote", get(routes::songs::get_vote).post(routes::songs::vote_song))
-        .route("/api/songs/:uuid/report", post(routes::songs::report_song))
-        // Requests
-        .route("/api/requests", get(routes::requests::list_requests).post(routes::requests::create_request))
-        .route("/api/requests/:uuid", get(routes::requests::get_request).patch(routes::requests::update_request))
+        .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
+        // Requests (GET not rate-limited)
+        .route("/api/requests", get(routes::requests::list_requests))
+        .route("/api/requests/:uuid", get(routes::requests::get_request))
         .route("/api/requests/:uuid/submissions", get(routes::requests::list_submissions).post(routes::requests::submit_to_request))
-        // Comments
-        .route("/api/songs/:uuid/comments", get(routes::comments::list_comments).post(routes::comments::create_comment))
-        // Tips
-        .route("/api/tips", post(routes::tips::record_tip))
+        // Comments (GET not rate-limited)
+        .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route(
@@ -138,8 +165,6 @@ async fn main() -> anyhow::Result<()> {
                 Ok::<_, (axum::http::StatusCode, String)>(axum::http::StatusCode::OK)
             }),
         )
-        // Auth
-        .route("/api/auth/verify", post(routes::auth::verify))
         // Admin
         .route("/api/admin/categories", post(routes::admin::create_category))
         .route("/api/admin/categories/:id", delete(routes::admin::delete_category))
@@ -154,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/comments", get(routes::comments::admin_list_comments))
         .route("/api/admin/comments/:id", patch(routes::comments::admin_moderate_comment))
         .route("/api/admin/users/:account_id/mute", patch(routes::comments::admin_toggle_mute))
+        .route("/api/admin/users/:account_id/ban", patch(routes::admin::admin_toggle_ban))
         .route("/api/admin/config", get(routes::admin::get_config).patch(routes::admin::update_config))
         .route(
             "/api/categories",

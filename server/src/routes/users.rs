@@ -34,21 +34,21 @@ pub async fn get_profile(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
-    let songs = queries::list_songs(
-        &state.db,
-        "latest",
-        None,
-        None,
-        None,
-        None,
-        50,
-        0,
+    let songs = sqlx::query_as::<_, SongWithUploader>(
+        r#"SELECT s.*,
+            u.account_id AS uploader_account_id,
+            u.display_name AS uploader_display_name,
+            u.reputation_score AS uploader_reputation
+           FROM songs s
+           JOIN users u ON s.uploader_id = u.id
+           WHERE s.uploader_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
+           ORDER BY s.created_at DESC
+           LIMIT 50"#,
     )
+    .bind(user.id)
+    .fetch_all(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .into_iter()
-    .filter(|s| s.uploader_id == user.id)
-    .collect();
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Get vote activity stats
     let (total_likes_given, total_dislikes_given): (i64, i64) = sqlx::query_as(

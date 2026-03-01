@@ -1,7 +1,7 @@
 use axum::{extract::State, http::{Extensions, StatusCode}, Json};
 use serde::{Deserialize, Serialize};
 
-use crate::{auth::jwt::require_auth, db::queries, AppState};
+use crate::{auth::jwt::require_auth, db::queries, near::tx_verify, AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct RecordTipRequest {
@@ -24,11 +24,45 @@ pub async fn record_tip(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
+    // Verify transaction on-chain
+    let verified = tx_verify::verify_near_tx(
+        &state.config.near_rpc_url,
+        &req.tx_hash,
+        &claims.sub,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!("TX verification failed for {}: {}", req.tx_hash, e);
+        (StatusCode::BAD_REQUEST, format!("Transaction verification failed: {}", e))
+    })?;
+
+    let expected_method = if req.from_balance { "tip_from_balance" } else { "tip" };
+    if verified.method_name != expected_method {
+        return Err((StatusCode::BAD_REQUEST, format!(
+            "Wrong contract method: expected {}, got {}", expected_method, verified.method_name
+        )));
+    }
+    if verified.receiver_id != state.config.contract_id {
+        return Err((StatusCode::BAD_REQUEST, "Transaction sent to wrong contract".to_string()));
+    }
+
     // Get the song
     let song = queries::get_song_by_uuid(&state.db, &req.song_uuid)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    // Use on-chain amount instead of client-provided amount
+    let amount_yocto = if req.from_balance {
+        // For tip_from_balance, amount is in args
+        verified.args_json["amount"]
+            .as_str()
+            .unwrap_or(&req.amount_yocto)
+            .to_string()
+    } else {
+        // For direct tip, amount is the deposit
+        if verified.deposit != "0" { verified.deposit.clone() } else { req.amount_yocto.clone() }
+    };
 
     // Record the tip
     let tip_id = sqlx::query_scalar::<_, i32>(
@@ -39,12 +73,18 @@ pub async fn record_tip(
     .bind(song.id)
     .bind(claims.user_id)
     .bind(song.uploader_id)
-    .bind(&req.amount_yocto)
+    .bind(&amount_yocto)
     .bind(&req.tx_hash)
     .bind(req.from_balance)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        if e.to_string().contains("idx_tips_tx_hash_unique") {
+            (StatusCode::CONFLICT, "This transaction has already been recorded".to_string())
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    })?;
 
     // Update song tips total
     sqlx::query(
@@ -54,7 +94,7 @@ pub async fn record_tip(
             )::TEXT
            WHERE id = $2"#,
     )
-    .bind(&req.amount_yocto)
+    .bind(&amount_yocto)
     .bind(song.id)
     .execute(&state.db)
     .await
@@ -68,7 +108,7 @@ pub async fn record_tip(
             )::TEXT
            WHERE id = $2"#,
     )
-    .bind(&req.amount_yocto)
+    .bind(&amount_yocto)
     .bind(song.uploader_id)
     .execute(&state.db)
     .await
