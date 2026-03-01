@@ -15,7 +15,7 @@ import { serialize as borshSerialize, type Schema } from "borsh";
 
 const CHUNK_SIZE = 1 << 20; // 1 MB
 const FASTFS_CONTRACT =
-  process.env.NEXT_PUBLIC_FASTFS_RECEIVER || "fastfs.testnet";
+  process.env.NEXT_PUBLIC_CONTRACT_ID || "near-fm.testnet";
 
 // ── Borsh Schema (matches reference: fastnear/fastdata-drag-and-drop) ──
 

@@ -495,7 +495,7 @@ function notificationText(notif: Notification): string {
   switch (notif.type) {
     case "tip_received": {
       const amount = data.amount_yocto as string | undefined;
-      const from = data.from_account_id as string | undefined;
+      const from = (data.from_account || data.from_account_id) as string | undefined;
       const nearAmount = amount ? yoctoToNear(amount) : "?";
       return `You received a tip of ${nearAmount} NEAR${from ? ` from ${from}` : ""}`;
     }

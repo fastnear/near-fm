@@ -366,3 +366,29 @@ export async function toggleBanUser(accountId: string, is_banned: boolean): Prom
     body: JSON.stringify({ is_banned }),
   });
 }
+
+export interface AdminSongScore {
+  uuid: string;
+  title: string;
+  uploader_account_id: string;
+  score: number;
+  upvotes: number;
+  downvotes: number;
+  weighted_upvotes: number;
+  weighted_downvotes: number;
+  play_count: number;
+  play_score: number;
+  tips_near: number;
+  tips_score: number;
+  newbie_multiplier: number;
+  age_hours: number;
+  age_divisor: number;
+  base_score: number;
+  is_hidden: boolean;
+  is_deleted: boolean;
+  created_at: string;
+}
+
+export async function getAdminSongScores(): Promise<AdminSongScore[]> {
+  return fetchApi("/api/admin/songs/scores");
+}

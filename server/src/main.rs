@@ -170,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/categories/:id", delete(routes::admin::delete_category))
         .route("/api/admin/reports", get(routes::admin::list_reports))
         .route("/api/admin/reports/:id", patch(routes::admin::review_report))
+        .route("/api/admin/songs/scores", get(routes::admin::list_song_scores))
         .route(
             "/api/admin/songs/:uuid",
             patch(routes::admin::moderate_song).delete(routes::admin::delete_song),

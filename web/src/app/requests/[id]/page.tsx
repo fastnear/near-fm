@@ -343,7 +343,7 @@ export default function RequestDetailPage() {
                 .
               </p>
               <Link
-                href={`https://upload.near.fm/upload?fulfills_request_id=${request.id}&request_uuid=${request.uuid}`}
+                href={`/upload?fulfills_request_id=${request.id}&request_uuid=${request.uuid}`}
                 className="inline-flex items-center px-5 py-2.5 btn-primary rounded-xl text-sm font-medium transition"
               >
                 Submit a Song

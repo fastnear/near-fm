@@ -18,8 +18,9 @@ import {
   moderateComment,
   toggleMuteUser,
   toggleBanUser,
+  getAdminSongScores,
 } from "@/lib/api";
-import type { AdminComment } from "@/lib/api";
+import type { AdminComment, AdminSongScore } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 
 type Tab = "reports" | "categories" | "songs" | "requests" | "comments";
@@ -389,13 +390,158 @@ function CategoriesPanel() {
 
 // ── Songs Tab ──
 
+function ScoreBar({ value, max, color }: { value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(Math.abs(value) / max * 100, 100) : 0;
+  return (
+    <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
+      <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function SongScoreRow({ song, maxBase }: { song: AdminSongScore; maxBase: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const ageStr = song.age_hours < 24
+    ? `${song.age_hours.toFixed(1)}h`
+    : `${(song.age_hours / 24).toFixed(1)}d`;
+
+  return (
+    <div className={`glass-card rounded-xl ${song.is_hidden ? "opacity-50" : ""}`}>
+      <div
+        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-white/[0.02] transition"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Score */}
+        <div className="w-16 text-right shrink-0">
+          <span className="text-sm font-bold text-purple-400">
+            {song.score.toFixed(4)}
+          </span>
+        </div>
+
+        {/* Title + uploader */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <a
+              href={`/song/${song.uuid}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-slate-200 truncate hover:text-purple-400 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {song.title}
+            </a>
+            {song.is_hidden && (
+              <span className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded border bg-rose-500/10 text-rose-400 border-rose-500/20">
+                hidden
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 truncate">
+            {song.uploader_account_id} &middot; {ageStr} ago
+          </p>
+        </div>
+
+        {/* Quick stats */}
+        <div className="hidden sm:flex items-center gap-4 text-xs text-slate-500 shrink-0">
+          <span title="Upvotes / Downvotes">{song.upvotes}/{song.downvotes}</span>
+          <span title="Plays">{song.play_count} plays</span>
+          <span title="Tips">{song.tips_near.toFixed(2)} N</span>
+        </div>
+
+        {/* Expand arrow */}
+        <svg
+          className={`w-4 h-4 text-slate-600 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4 pt-1 border-t border-white/[0.04]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            {/* Votes */}
+            <div className="space-y-1.5">
+              <p className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">Votes (weighted)</p>
+              <div className="flex justify-between text-slate-300">
+                <span>Weighted upvotes</span>
+                <span className="text-[#00ec97] font-mono">+{song.weighted_upvotes.toFixed(2)}</span>
+              </div>
+              <ScoreBar value={song.weighted_upvotes} max={maxBase} color="bg-[#00ec97]" />
+              <div className="flex justify-between text-slate-300">
+                <span>Weighted downvotes</span>
+                <span className="text-rose-400 font-mono">-{song.weighted_downvotes.toFixed(2)}</span>
+              </div>
+              <ScoreBar value={song.weighted_downvotes} max={maxBase} color="bg-rose-400" />
+              <div className="flex justify-between text-slate-400 pt-1 border-t border-white/[0.04]">
+                <span>Net votes</span>
+                <span className="font-mono">{(song.weighted_upvotes - song.weighted_downvotes).toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Signals */}
+            <div className="space-y-1.5">
+              <p className="text-slate-500 font-medium uppercase tracking-wider text-[10px]">Signals</p>
+              <div className="flex justify-between text-slate-300">
+                <span>Plays ({song.play_count})</span>
+                <span className="text-cyan-400 font-mono">+{song.play_score.toFixed(2)}</span>
+              </div>
+              <ScoreBar value={song.play_score} max={maxBase} color="bg-cyan-400" />
+              <div className="flex justify-between text-slate-300">
+                <span>Tips ({song.tips_near.toFixed(2)} NEAR)</span>
+                <span className="text-amber-400 font-mono">+{song.tips_score.toFixed(2)}</span>
+              </div>
+              <ScoreBar value={song.tips_score} max={maxBase} color="bg-amber-400" />
+            </div>
+
+            {/* Formula breakdown */}
+            <div className="sm:col-span-2 glass rounded-lg p-3 space-y-1 font-mono text-[11px]">
+              <div className="flex justify-between text-slate-400">
+                <span>base = votes + plays + tips</span>
+                <span>{song.base_score.toFixed(4)}</span>
+              </div>
+              {song.newbie_multiplier < 1 && (
+                <div className="flex justify-between text-amber-400">
+                  <span>newbie penalty</span>
+                  <span>&times; {song.newbie_multiplier}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-slate-400">
+                <span>age divisor = max({song.age_hours.toFixed(1)}h - 24, 0) + 2) ^ 1.8</span>
+                <span>&divide; {song.age_divisor.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-purple-400 font-bold border-t border-white/[0.06] pt-1">
+                <span>final score</span>
+                <span>{song.score.toFixed(6)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SongsPanel() {
+  const [mode, setMode] = useState<"scores" | "search">("scores");
+  const [scores, setScores] = useState<AdminSongScore[]>([]);
+  const [scoresLoading, setScoresLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Load scores
+  useEffect(() => {
+    if (mode !== "scores") return;
+    setScoresLoading(true);
+    getAdminSongScores()
+      .then(setScores)
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load scores"))
+      .finally(() => setScoresLoading(false));
+  }, [mode]);
 
   // Debounce search input
   useEffect(() => {
@@ -420,8 +566,8 @@ function SongsPanel() {
   }, [debouncedQuery]);
 
   useEffect(() => {
-    searchSongs();
-  }, [searchSongs]);
+    if (mode === "search") searchSongs();
+  }, [searchSongs, mode]);
 
   const handleToggleHide = async (song: Song) => {
     setActionLoading(song.uuid);
@@ -435,13 +581,7 @@ function SongsPanel() {
   };
 
   const handleDelete = async (song: Song) => {
-    if (
-      !window.confirm(
-        `Permanently delete "${song.title}"? This cannot be undone.`
-      )
-    ) {
-      return;
-    }
+    if (!window.confirm(`Permanently delete "${song.title}"? This cannot be undone.`)) return;
     setActionLoading(song.uuid);
     try {
       await deleteSong(song.uuid);
@@ -452,100 +592,173 @@ function SongsPanel() {
     setActionLoading(null);
   };
 
+  const maxBase = scores.length > 0 ? Math.max(...scores.map((s) => Math.abs(s.base_score)), 1) : 1;
+
   return (
     <div className="space-y-4">
-      {/* Search */}
-      <div>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search songs by title..."
-          className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
-        />
+      {/* Mode toggle */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setMode("scores")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+            mode === "scores"
+              ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+              : "bg-white/[0.04] text-slate-500 border-white/[0.08] hover:text-slate-300"
+          }`}
+        >
+          All Songs (by score)
+        </button>
+        <button
+          onClick={() => setMode("search")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+            mode === "search"
+              ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+              : "bg-white/[0.04] text-slate-500 border-white/[0.08] hover:text-slate-300"
+          }`}
+        >
+          Search & Moderate
+        </button>
       </div>
 
-      {/* Error */}
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
-      {/* Results */}
-      {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="glass-card rounded-xl p-4 animate-pulse">
-              <div className="h-4 skeleton rounded w-1/3 mb-2" />
-              <div className="h-3 skeleton rounded w-1/2" />
-            </div>
-          ))}
-        </div>
-      ) : !debouncedQuery.trim() ? (
-        <div className="text-center py-16">
-          <p className="text-slate-500">
-            Enter a search term to find songs
-          </p>
-        </div>
-      ) : songs.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-slate-500">No songs found</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {songs.map((song) => (
-            <div
-              key={song.uuid}
-              className="glass-card rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="text-sm font-medium text-slate-200 truncate">
-                    {song.title}
-                  </span>
-                  {song.is_hidden && (
-                    <span className="inline-block px-2 py-0.5 text-xs font-medium rounded border bg-rose-500/10 text-rose-400 border-rose-500/20">
-                      hidden
-                    </span>
-                  )}
+      {mode === "scores" ? (
+        <>
+          {scoresLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="glass-card rounded-xl p-4 animate-pulse">
+                  <div className="h-4 skeleton rounded w-1/3 mb-2" />
+                  <div className="h-3 skeleton rounded w-1/2" />
                 </div>
-                <p className="text-xs text-slate-500">
-                  Uploaded by{" "}
-                  <span className="text-slate-400">
-                    {song.uploader_display_name || song.uploader_account_id}
-                  </span>
-                  {" "}&middot;{" "}
-                  {formatDate(song.created_at)}
-                </p>
+              ))}
+            </div>
+          ) : scores.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-slate-500">No songs found</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                {scores.map((song, i) => (
+                  <div key={song.uuid} className="flex items-start gap-2">
+                    <span className="text-xs text-slate-600 font-mono w-6 text-right pt-3.5 shrink-0">
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <SongScoreRow song={song} maxBase={maxBase} />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={`/song/${song.uuid}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-1.5 text-slate-500 hover:text-white hover:bg-white/[0.06] rounded-lg border border-white/[0.08] transition"
-                  title="Open song"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
-                </a>
-                <button
-                  onClick={() => handleToggleHide(song)}
-                  disabled={actionLoading === song.uuid}
-                  className="px-3 py-1.5 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50 rounded-lg border border-white/[0.08] transition"
-                >
-                  {song.is_hidden ? "Unhide" : "Hide"}
-                </button>
-                <button
-                  onClick={() => handleDelete(song)}
-                  disabled={actionLoading === song.uuid}
-                  className="px-3 py-1.5 text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
-                >
-                  Delete
-                </button>
+              {/* Formula explanation */}
+              <div className="glass-card rounded-xl p-5 mt-6">
+                <h3 className="text-sm font-semibold text-slate-300 mb-3">How the trending score is calculated</h3>
+                <div className="font-mono text-xs text-slate-400 space-y-1.5">
+                  <p><span className="text-slate-300">base</span> = weighted_upvotes - weighted_downvotes + log10(plays) &times; 2 + log10(tips_NEAR + 1) &times; 9</p>
+                  <p><span className="text-amber-400">if</span> uploader has &lt; 3 uploads AND reputation &lt; 1.5: <span className="text-amber-400">base &times;= 0.5</span> (newbie penalty)</p>
+                  <p><span className="text-cyan-400">effective_age</span> = max(age_hours - 24, 0) &mdash; no decay in first 24 hours</p>
+                  <p><span className="text-purple-400">score</span> = base / (effective_age + 2) ^ 1.8</p>
+                </div>
+                <div className="mt-3 text-xs text-slate-500 space-y-1">
+                  <p>Vote weight = voter&apos;s reputation &times; anti-spam (voters with reputation &le; 1.0 get &times;0.5)</p>
+                  <p>Scores are recalculated every 5 minutes by the server</p>
+                </div>
               </div>
+            </>
+          )}
+        </>
+      ) : (
+        /* Search mode - same as before */
+        <>
+          <div>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search songs by title..."
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="glass-card rounded-xl p-4 animate-pulse">
+                  <div className="h-4 skeleton rounded w-1/3 mb-2" />
+                  <div className="h-3 skeleton rounded w-1/2" />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : !debouncedQuery.trim() ? (
+            <div className="text-center py-16">
+              <p className="text-slate-500">Enter a search term to find songs</p>
+            </div>
+          ) : songs.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-slate-500">No songs found</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {songs.map((song) => (
+                <div
+                  key={song.uuid}
+                  className="glass-card rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <span className="text-sm font-medium text-slate-200 truncate">
+                        {song.title}
+                      </span>
+                      {song.is_hidden && (
+                        <span className="inline-block px-2 py-0.5 text-xs font-medium rounded border bg-rose-500/10 text-rose-400 border-rose-500/20">
+                          hidden
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Uploaded by{" "}
+                      <span className="text-slate-400">
+                        {song.uploader_display_name || song.uploader_account_id}
+                      </span>
+                      {" "}&middot;{" "}
+                      {formatDate(song.created_at)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={`/song/${song.uuid}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 text-slate-500 hover:text-white hover:bg-white/[0.06] rounded-lg border border-white/[0.08] transition"
+                      title="Open song"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                    <button
+                      onClick={() => handleToggleHide(song)}
+                      disabled={actionLoading === song.uuid}
+                      className="px-3 py-1.5 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50 rounded-lg border border-white/[0.08] transition"
+                    >
+                      {song.is_hidden ? "Unhide" : "Hide"}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(song)}
+                      disabled={actionLoading === song.uuid}
+                      className="px-3 py-1.5 text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

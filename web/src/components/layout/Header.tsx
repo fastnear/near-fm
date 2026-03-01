@@ -20,16 +20,10 @@ function NavLink({ href, children, className = "" }: { href: string; children: R
 export function Header() {
   const { accountId, signIn, signOut, isAuthenticated, loading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [isUpload, setIsUpload] = useState(false);
+  const base = "";
 
   useEffect(() => {
-    setIsUpload(window.location.hostname.startsWith("upload."));
-  }, []);
-
-  const base = isUpload ? "https://near.fm" : "";
-
-  useEffect(() => {
-    if (isUpload || !accountId || !isAuthenticated) {
+    if (!accountId || !isAuthenticated) {
       setUnreadCount(0);
       return;
     }
@@ -38,7 +32,7 @@ export function Header() {
         setUnreadCount(notifs.filter((n) => !n.is_read).length);
       })
       .catch(() => {});
-  }, [accountId, isAuthenticated, isUpload]);
+  }, [accountId, isAuthenticated]);
 
   const navLinkClass = "relative text-sm text-slate-300 hover:text-white transition-colors duration-200 after:absolute after:bottom-0 after:left-0 after:w-0 after:h-[2px] after:bg-gradient-to-r after:from-purple-500 after:to-cyan-500 after:transition-all after:duration-300 hover:after:w-full";
 
@@ -57,11 +51,11 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-8">
           <a href={`${base}/`} className={navLinkClass}>Feed</a>
           <a href={`${base}/requests`} className={navLinkClass}>Requests</a>
-          <a href="https://upload.near.fm/" className={navLinkClass}>Upload</a>
+          <a href={`${base}/upload`} className={navLinkClass}>Upload</a>
           <a href={`${base}/about`} className={navLinkClass}>About</a>
           <a href={`${base}/cabinet`} className={navLinkClass}>
             Cabinet
-            {!isUpload && unreadCount > 0 && (
+            {unreadCount > 0 && (
               <span className="absolute -top-2.5 -right-5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-lg shadow-purple-500/30 animate-pulse">
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
@@ -71,26 +65,22 @@ export function Header() {
 
         {/* Wallet */}
         <div className="flex items-center gap-3">
-          {!isUpload && (
-            <>
-              {loading ? (
-                <div className="w-28 h-9 rounded-xl skeleton" />
-              ) : accountId ? (
-                <Link
-                  href={`/profile/${accountId}`}
-                  className="px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all truncate max-w-[160px]"
-                >
-                  {accountId}
-                </Link>
-              ) : (
-                <button
-                  onClick={signIn}
-                  className="btn-primary px-5 py-2 text-sm rounded-xl"
-                >
-                  Sign in
-                </button>
-              )}
-            </>
+          {loading ? (
+            <div className="w-28 h-9 rounded-xl skeleton" />
+          ) : accountId ? (
+            <Link
+              href={`/profile/${accountId}`}
+              className="px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all truncate max-w-[160px]"
+            >
+              {accountId}
+            </Link>
+          ) : (
+            <button
+              onClick={signIn}
+              className="btn-primary px-5 py-2 text-sm rounded-xl"
+            >
+              Sign in
+            </button>
           )}
         </div>
       </div>
@@ -103,7 +93,7 @@ export function Header() {
         <a href={`${base}/requests`} className="text-slate-400 hover:text-white transition-colors py-1">
           Requests
         </a>
-        <a href="https://upload.near.fm/" className="text-slate-400 hover:text-white transition-colors py-1">
+        <a href={`${base}/upload`} className="text-slate-400 hover:text-white transition-colors py-1">
           Upload
         </a>
         <a href={`${base}/about`} className="text-slate-400 hover:text-white transition-colors py-1">
@@ -111,7 +101,7 @@ export function Header() {
         </a>
         <a href={`${base}/cabinet`} className="relative text-slate-400 hover:text-white transition-colors py-1">
           Cabinet
-          {!isUpload && unreadCount > 0 && (
+          {unreadCount > 0 && (
             <span className="absolute -top-2 -right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 shadow-lg shadow-purple-500/30">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>

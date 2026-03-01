@@ -26,15 +26,8 @@ import "@near-wallet-selector/modal-ui/styles.css";
 
 const CONTRACT_ID =
   process.env.NEXT_PUBLIC_CONTRACT_ID || "near-fm.testnet";
-const FASTFS_RECEIVER =
-  process.env.NEXT_PUBLIC_FASTFS_RECEIVER || "fastfs.testnet";
 const NETWORK =
   (process.env.NEXT_PUBLIC_NEAR_NETWORK as "testnet" | "mainnet") || "testnet";
-
-// Detect subdomain to choose which contract gets the function call access key
-const isUploadSubdomain =
-  typeof window !== "undefined" && window.location.hostname.startsWith("upload.");
-const SIGN_IN_CONTRACT = isUploadSubdomain ? FASTFS_RECEIVER : CONTRACT_ID;
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -158,10 +151,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         ],
       });
 
-      // Sign-in modal — creates function call access key for the appropriate contract
-      // near.fm → near-fm contract (tips/withdrawals)
-      // upload.near.fm → FastFS contract (chunked uploads)
-      const signMod = setupModal(sel, { contractId: SIGN_IN_CONTRACT });
+      const signMod = setupModal(sel, { contractId: CONTRACT_ID });
 
       signMod.on("onHide", ({ hideReason }) => {
         if (hideReason === "user-triggered") pendingAuthRef.current = false;

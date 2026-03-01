@@ -6,12 +6,15 @@ use std::time::Duration;
 /// Formula:
 ///   base = weighted_upvotes - weighted_downvotes
 ///        + log10(max(plays, 1)) * 2
-///        + log10(max(tips_near, 0.01) + 1) * 3
+///        + log10(max(tips_near, 0.01) + 1) * 9
+///
+///   Vote weights: voters with reputation <= 1.0 get weight * 0.5 (anti-spam)
 ///
 ///   If uploader.total_uploads < 3 AND uploader.reputation_score < 1.5:
 ///       base *= 0.5   (newbie penalty)
 ///
-///   score = base / (hours_age + 2)^1.8
+///   effective_age = max(hours_age - 24, 0)   (no decay in first 24h)
+///   score = base / (effective_age + 2)^1.8
 pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         r#"
@@ -25,14 +28,14 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                     COALESCE(v_agg.weighted_upvotes, 0)
                     - COALESCE(v_agg.weighted_downvotes, 0)
                     + LOG(GREATEST(s.play_count, 1)::NUMERIC) * 2
-                    + LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 3
+                    + LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 9
                 )
                 * CASE
                     WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
                     ELSE 1.0
                   END
                 / POWER(
-                    EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 + 2,
+                    GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 24, 0) + 2,
                     1.8
                   )
                 AS new_score
@@ -41,9 +44,16 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
             LEFT JOIN (
                 SELECT
                     v.song_id,
-                    SUM(CASE WHEN v.value > 0 THEN v.value::NUMERIC * v.weight ELSE 0 END) AS weighted_upvotes,
-                    SUM(CASE WHEN v.value < 0 THEN ABS(v.value::NUMERIC * v.weight) ELSE 0 END) AS weighted_downvotes
+                    SUM(CASE WHEN v.value > 0
+                        THEN v.value::NUMERIC * v.weight
+                             * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                        ELSE 0 END) AS weighted_upvotes,
+                    SUM(CASE WHEN v.value < 0
+                        THEN ABS(v.value::NUMERIC * v.weight)
+                             * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                        ELSE 0 END) AS weighted_downvotes
                 FROM votes v
+                JOIN users vu ON vu.id = v.user_id
                 GROUP BY v.song_id
             ) v_agg ON v_agg.song_id = s.id
             WHERE s.is_deleted = FALSE

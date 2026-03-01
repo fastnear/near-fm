@@ -363,6 +363,103 @@ pub async fn update_config(
     Ok(StatusCode::OK)
 }
 
+// ── Song scores (admin analytics) ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AdminSongScore {
+    pub uuid: String,
+    pub title: String,
+    pub uploader_account_id: String,
+    pub score: f64,
+    pub upvotes: i32,
+    pub downvotes: i32,
+    pub weighted_upvotes: f64,
+    pub weighted_downvotes: f64,
+    pub play_count: i32,
+    pub play_score: f64,
+    pub tips_near: f64,
+    pub tips_score: f64,
+    pub newbie_multiplier: f64,
+    pub age_hours: f64,
+    pub age_divisor: f64,
+    pub base_score: f64,
+    pub is_hidden: bool,
+    pub is_deleted: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_song_scores(
+    State(state): State<AppState>,
+    extensions: Extensions,
+) -> Result<Json<Vec<AdminSongScore>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let songs = sqlx::query_as::<_, AdminSongScore>(
+        r#"
+        SELECT
+            s.uuid,
+            s.title,
+            u.account_id AS uploader_account_id,
+            s.score,
+            s.upvotes,
+            s.downvotes,
+            COALESCE(v_agg.weighted_upvotes, 0)::FLOAT8 AS weighted_upvotes,
+            COALESCE(v_agg.weighted_downvotes, 0)::FLOAT8 AS weighted_downvotes,
+            s.play_count,
+            (LOG(GREATEST(s.play_count, 1)::NUMERIC) * 2)::FLOAT8 AS play_score,
+            (CAST(s.total_tips_yocto AS NUMERIC) / 1e24)::FLOAT8 AS tips_near,
+            (LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 9)::FLOAT8 AS tips_score,
+            (CASE
+                WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
+                ELSE 1.0
+            END)::FLOAT8 AS newbie_multiplier,
+            (EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0)::FLOAT8 AS age_hours,
+            POWER(GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 24, 0) + 2, 1.8)::FLOAT8 AS age_divisor,
+            (
+                (
+                    COALESCE(v_agg.weighted_upvotes, 0)
+                    - COALESCE(v_agg.weighted_downvotes, 0)
+                    + LOG(GREATEST(s.play_count, 1)::NUMERIC) * 2
+                    + LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 9
+                )
+                * CASE
+                    WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
+                    ELSE 1.0
+                  END
+            )::FLOAT8 AS base_score,
+            s.is_hidden,
+            s.is_deleted,
+            s.created_at
+        FROM songs s
+        JOIN users u ON u.id = s.uploader_id
+        LEFT JOIN (
+            SELECT
+                v.song_id,
+                SUM(CASE WHEN v.value > 0
+                    THEN v.value::NUMERIC * v.weight
+                         * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                    ELSE 0 END) AS weighted_upvotes,
+                SUM(CASE WHEN v.value < 0
+                    THEN ABS(v.value::NUMERIC * v.weight)
+                         * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                    ELSE 0 END) AS weighted_downvotes
+            FROM votes v
+            JOIN users vu ON vu.id = v.user_id
+            GROUP BY v.song_id
+        ) v_agg ON v_agg.song_id = s.id
+        WHERE s.is_deleted = FALSE
+        ORDER BY s.score DESC
+        LIMIT 500
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(songs))
+}
+
 // ── Ban user ──
 
 #[derive(Debug, Deserialize)]

@@ -84,30 +84,14 @@ function UploadPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
-          {isAuthenticated ? (
-            <>
-              <p className="text-slate-400 mb-3">
-                Connect your wallet to FastFS decentralized storage to upload files.
-              </p>
-              <p className="text-slate-500 text-xs mb-8">
-                This is a one-time connection for file uploads, separate from your near.fm session.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-slate-400 mb-3">
-                Connect your NEAR wallet to upload AI-generated music.
-              </p>
-              <p className="text-slate-500 text-xs mb-8">
-                Some features on near.fm (tips, voting) will require a separate wallet connection later.
-              </p>
-            </>
-          )}
+          <p className="text-slate-400 mb-8">
+            Connect your NEAR wallet to upload AI-generated music.
+          </p>
           <button
             onClick={signIn}
             className="btn-primary px-8 py-3 rounded-xl text-sm"
           >
-            {isAuthenticated ? "Connect to FastFS" : "Connect Wallet"}
+            Connect Wallet
           </button>
         </div>
       </div>
