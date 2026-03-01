@@ -157,7 +157,7 @@ export function SongDetail({ uuid }: { uuid: string }) {
 
       <div className="flex flex-col md:flex-row gap-8">
         {/* Cover */}
-        <div className="relative w-full md:w-80 flex-shrink-0">
+        <div className="relative w-full md:w-80 flex-shrink-0 self-start">
           <div className="aspect-square rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shadow-2xl">
             {song.cover_image_url ? (
               <img
@@ -555,7 +555,21 @@ export function SongDetail({ uuid }: { uuid: string }) {
                         </button>
                       </div>
                       {commentError && (
-                        <p className="mt-1.5 text-xs text-rose-400">{commentError}</p>
+                        <p className="mt-1.5 text-xs text-rose-400">
+                          {commentError.includes("1 NEAR") ? (
+                            <>
+                              You need at least 1 NEAR in your{" "}
+                              <Link href="/cabinet" className="underline hover:text-rose-300 transition-colors">virtual balance</Link>
+                              {" "}to leave comments.
+                            </>
+                          ) : commentError.includes("banned") ? (
+                            "Your account has been banned."
+                          ) : commentError.includes("muted") ? (
+                            "Your account has been muted."
+                          ) : (
+                            commentError
+                          )}
+                        </p>
                       )}
                     </div>
                   )

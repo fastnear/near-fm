@@ -529,13 +529,17 @@ function notificationText(notif: Notification): string {
 function NotificationsTab() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [markingRead, setMarkingRead] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getNotifications();
       setNotifications(data);
+
+      // Auto-mark all as read
+      if (data.some((n: Notification) => !n.is_read)) {
+        markAllNotificationsRead().catch(() => {});
+      }
     } catch (e) {
       console.error("Failed to load notifications:", e);
     }
@@ -545,21 +549,6 @@ function NotificationsTab() {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
-
-  const handleMarkAllRead = async () => {
-    setMarkingRead(true);
-    try {
-      await markAllNotificationsRead();
-      setNotifications((prev) =>
-        prev.map((n) => ({ ...n, is_read: true }))
-      );
-    } catch (e) {
-      console.error("Failed to mark notifications read:", e);
-    }
-    setMarkingRead(false);
-  };
-
-  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   if (loading) {
     return (
@@ -593,22 +582,6 @@ function NotificationsTab() {
 
   return (
     <div>
-      {/* Header with mark all read */}
-      {unreadCount > 0 && (
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-slate-400">
-            {unreadCount} unread notification{unreadCount !== 1 ? "s" : ""}
-          </p>
-          <button
-            onClick={handleMarkAllRead}
-            disabled={markingRead}
-            className="text-sm text-purple-400 hover:text-purple-300 transition disabled:opacity-50"
-          >
-            {markingRead ? "Marking..." : "Mark all read"}
-          </button>
-        </div>
-      )}
-
       {/* Notification list */}
       <div className="space-y-2">
         {notifications.map((notif) => (

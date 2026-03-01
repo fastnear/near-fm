@@ -33,7 +33,7 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
 
         {/* Play button overlay */}
         <button
-          onClick={() => feedSongs ? playFromFeed(song, feedSongs) : togglePlay(song)}
+          onClick={() => isActive ? togglePlay(song) : (feedSongs ? playFromFeed(song, feedSongs) : togglePlay(song))}
           className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-all duration-300"
         >
           <div

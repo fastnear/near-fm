@@ -162,13 +162,9 @@ export default function AboutPage() {
           are handled by a smart contract with transparent, verifiable logic. Authentication uses NEP-413
           signed messages &mdash; no passwords, no email, just your NEAR wallet.
         </p>
-        <div className="flex flex-wrap gap-2">
-          {["NEAR Protocol", "Rust", "Next.js", "TypeScript", "PostgreSQL", "FastFS", "Docker"].map((tech) => (
-            <span key={tech} className="px-3 py-1 text-xs rounded-full border border-white/[0.08] bg-white/[0.04] text-slate-400">
-              {tech}
-            </span>
-          ))}
-        </div>
+        <p className="text-slate-400 text-sm">
+          Created by <a href="https://fastnear.com" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00ec97] transition-colors">FastNEAR</a>, powered by <a href="https://near.org" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00ec97] transition-colors">NEAR Blockchain</a>.
+        </p>
       </section>
 
       {/* CTA */}
