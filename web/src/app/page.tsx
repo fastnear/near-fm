@@ -17,7 +17,7 @@ export default function FeedPage() {
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
-  const { setQueue, radioMode } = useAudioPlayer();
+  const { setFeedSongs, playFromFeed } = useAudioPlayer();
 
   const fetchSongs = useCallback(async () => {
     setLoading(true);
@@ -32,15 +32,12 @@ export default function FeedPage() {
         limit: 24,
       });
       setSongs(data.songs);
-
-      if (radioMode) {
-        setQueue(data.songs);
-      }
+      setFeedSongs(data.songs);
     } catch (e) {
       console.error("Failed to load songs:", e);
     }
     setLoading(false);
-  }, [sort, period, languageId, categoryId, searchQuery, page, radioMode, setQueue]);
+  }, [sort, period, languageId, categoryId, searchQuery, page, setFeedSongs]);
 
   useEffect(() => {
     fetchSongs();
@@ -99,7 +96,7 @@ export default function FeedPage() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {songs.map((song) => (
-            <SongCard key={song.uuid} song={song} />
+            <SongCard key={song.uuid} song={song} feedSongs={songs} />
           ))}
         </div>
       )}

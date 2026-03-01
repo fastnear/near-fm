@@ -17,10 +17,10 @@ impl NearFmContract {
         U128(self.total_commission_collected)
     }
 
-    pub fn get_bounty_deposit(&self, request_uuid: String) -> Option<(AccountId, U128)> {
+    pub fn get_bounty_deposit(&self, request_uuid: String) -> Option<(AccountId, U128, U128)> {
         self.bounty_deposits
             .get(&request_uuid)
-            .map(|info| (info.requester, U128(info.amount)))
+            .map(|info| (info.requester, U128(info.amount), U128(info.expires_at_ns as u128)))
     }
 
     pub fn get_owner(&self) -> AccountId {

@@ -94,7 +94,9 @@ async fn main() -> anyhow::Result<()> {
         // Requests
         .route("/api/requests", get(routes::requests::list_requests).post(routes::requests::create_request))
         .route("/api/requests/:uuid", get(routes::requests::get_request).patch(routes::requests::update_request))
-        .route("/api/requests/:uuid/submissions", post(routes::requests::submit_to_request))
+        .route("/api/requests/:uuid/submissions", get(routes::requests::list_submissions).post(routes::requests::submit_to_request))
+        // Comments
+        .route("/api/songs/:uuid/comments", get(routes::comments::list_comments).post(routes::comments::create_comment))
         // Tips
         .route("/api/tips", post(routes::tips::record_tip))
         // Users
@@ -147,6 +149,11 @@ async fn main() -> anyhow::Result<()> {
             "/api/admin/songs/:uuid",
             patch(routes::admin::moderate_song).delete(routes::admin::delete_song),
         )
+        .route("/api/admin/requests", get(routes::admin::list_requests))
+        .route("/api/admin/requests/:uuid", patch(routes::admin::moderate_request))
+        .route("/api/admin/comments", get(routes::comments::admin_list_comments))
+        .route("/api/admin/comments/:id", patch(routes::comments::admin_moderate_comment))
+        .route("/api/admin/users/:account_id/mute", patch(routes::comments::admin_toggle_mute))
         .route("/api/admin/config", get(routes::admin::get_config).patch(routes::admin::update_config))
         .route(
             "/api/categories",

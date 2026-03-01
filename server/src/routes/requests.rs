@@ -11,6 +11,19 @@ use crate::{
     AppState,
 };
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SubmissionWithSong {
+    pub id: i32,
+    pub request_id: i32,
+    pub song_id: i32,
+    pub submitter_id: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub song_uuid: String,
+    pub song_title: String,
+    pub song_cover_image_url: Option<String>,
+    pub submitter_account_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListRequestsQuery {
     pub status: Option<String>,
@@ -21,7 +34,7 @@ pub struct ListRequestsQuery {
 
 #[derive(Debug, Serialize)]
 pub struct RequestsListResponse {
-    pub requests: Vec<SongRequest>,
+    pub requests: Vec<SongRequestWithRequester>,
     pub page: i64,
 }
 
@@ -36,16 +49,16 @@ pub async fn list_requests(
     let sort = params.sort.as_deref().unwrap_or("latest");
 
     let order = match sort {
-        "bounty" => "CAST(bounty_amount_yocto AS NUMERIC) DESC",
-        _ => "created_at DESC",
+        "bounty" => "CAST(sr.bounty_amount_yocto AS NUMERIC) DESC",
+        _ => "sr.created_at DESC",
     };
 
     let sql = format!(
-        "SELECT * FROM song_requests WHERE status = $1 ORDER BY {} LIMIT $2 OFFSET $3",
+        "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.status = $1 AND NOT sr.is_hidden ORDER BY {} LIMIT $2 OFFSET $3",
         order
     );
 
-    let requests = sqlx::query_as::<_, SongRequest>(&sql)
+    let requests = sqlx::query_as::<_, SongRequestWithRequester>(&sql)
         .bind(status)
         .bind(limit)
         .bind(offset)
@@ -58,6 +71,7 @@ pub async fn list_requests(
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRequestBody {
+    pub uuid: Option<String>,
     pub title: String,
     pub description: String,
     pub bounty_tx_hash: String,
@@ -73,12 +87,12 @@ pub async fn create_request(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    let uuid = uuid::Uuid::new_v4().to_string();
+    let uuid = req.uuid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let request = sqlx::query_as::<_, SongRequest>(
         r#"INSERT INTO song_requests
-            (uuid, requester_id, title, description, bounty_amount_yocto, bounty_tx_hash, language_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (uuid, requester_id, title, description, bounty_amount_yocto, bounty_tx_hash, language_id, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '30 days')
            RETURNING *"#,
     )
     .bind(&uuid)
@@ -95,12 +109,34 @@ pub async fn create_request(
     Ok(Json(request))
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SongRequestWithRequester {
+    pub id: i32,
+    pub uuid: String,
+    pub requester_id: i32,
+    pub title: String,
+    pub description: String,
+    pub bounty_amount_yocto: String,
+    pub bounty_tx_hash: String,
+    pub status: String,
+    pub awarded_song_id: Option<i32>,
+    pub award_tx_hash: Option<String>,
+    pub withdrawal_penalty_yocto: Option<String>,
+    pub withdrawal_tx_hash: Option<String>,
+    pub language_id: Option<i32>,
+    pub is_hidden: bool,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub requester_account_id: String,
+}
+
 pub async fn get_request(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
-) -> Result<Json<SongRequest>, (StatusCode, String)> {
-    let request = sqlx::query_as::<_, SongRequest>(
-        "SELECT * FROM song_requests WHERE uuid = $1",
+) -> Result<Json<SongRequestWithRequester>, (StatusCode, String)> {
+    let request = sqlx::query_as::<_, SongRequestWithRequester>(
+        "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.uuid = $1",
     )
     .bind(&uuid)
     .fetch_optional(&state.db)
@@ -161,6 +197,70 @@ pub async fn update_request(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Send notifications when bounty is awarded
+    if req.status == "awarded" {
+        if let Some(awarded_song_id) = req.awarded_song_id {
+            // Get all submissions for this request
+            let submissions = sqlx::query_as::<_, (i32, i32)>(
+                "SELECT submitter_id, song_id FROM request_submissions WHERE request_id = $1"
+            )
+            .bind(existing.id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+            // Get the winning song title
+            let winner_title: Option<String> = sqlx::query_scalar(
+                "SELECT title FROM songs WHERE id = $1"
+            )
+            .bind(awarded_song_id)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
+
+            for (submitter_id, song_id) in &submissions {
+                if *song_id == awarded_song_id {
+                    // Notify the winner
+                    queries::create_notification(
+                        &state.db,
+                        *submitter_id,
+                        "bounty_awarded",
+                        &serde_json::json!({
+                            "request_uuid": uuid,
+                            "request_title": existing.title,
+                            "song_title": winner_title,
+                            "bounty_amount_yocto": existing.bounty_amount_yocto,
+                        }),
+                    )
+                    .await
+                    .ok();
+                } else {
+                    // Notify losers — encourage to keep participating
+                    let loser_song_title: Option<String> = sqlx::query_scalar(
+                        "SELECT title FROM songs WHERE id = $1"
+                    )
+                    .bind(song_id)
+                    .fetch_optional(&state.db)
+                    .await
+                    .unwrap_or(None);
+
+                    queries::create_notification(
+                        &state.db,
+                        *submitter_id,
+                        "bounty_not_awarded",
+                        &serde_json::json!({
+                            "request_uuid": uuid,
+                            "request_title": existing.title,
+                            "song_title": loser_song_title,
+                        }),
+                    )
+                    .await
+                    .ok();
+                }
+            }
+        }
+    }
+
     Ok(Json(updated))
 }
 
@@ -219,4 +319,35 @@ pub async fn submit_to_request(
     .ok();
 
     Ok(StatusCode::CREATED)
+}
+
+pub async fn list_submissions(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<Vec<SubmissionWithSong>>, (StatusCode, String)> {
+    let request = sqlx::query_as::<_, SongRequest>(
+        "SELECT * FROM song_requests WHERE uuid = $1",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Request not found".to_string()))?;
+
+    let submissions = sqlx::query_as::<_, SubmissionWithSong>(
+        r#"SELECT rs.id, rs.request_id, rs.song_id, rs.submitter_id, rs.created_at,
+                  s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
+                  u.account_id AS submitter_account_id
+           FROM request_submissions rs
+           JOIN songs s ON s.id = rs.song_id
+           JOIN users u ON u.id = rs.submitter_id
+           WHERE rs.request_id = $1 AND NOT s.is_deleted
+           ORDER BY rs.created_at DESC"#,
+    )
+    .bind(request.id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(submissions))
 }

@@ -16,13 +16,17 @@ enum StorageKey {
     BountyDeposits,
 }
 
-/// Stored bounty info: who created it and how much was deposited.
+/// Stored bounty info: who created it, how much, and when it expires.
 #[derive(BorshDeserialize, BorshSerialize)]
 #[borsh(crate = "near_sdk::borsh")]
 pub struct BountyInfo {
     pub requester: AccountId,
     pub amount: u128,
+    pub expires_at_ns: u64, // nanosecond timestamp
 }
+
+/// 30 days in nanoseconds
+pub const BOUNTY_DURATION_NS: u64 = 30 * 24 * 60 * 60 * 1_000_000_000;
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
@@ -42,9 +46,9 @@ impl NearFmContract {
     pub fn new(owner: AccountId) -> Self {
         Self {
             owner,
-            commission_rate_bps: 0,
+            commission_rate_bps: 500, // 5%
             total_commission_collected: 0,
-            withdrawal_penalty_bps: 500, // 5%
+            withdrawal_penalty_bps: 2000, // 20%
             balances: LookupMap::new(StorageKey::Balances),
             bounty_deposits: LookupMap::new(StorageKey::BountyDeposits),
         }

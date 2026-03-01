@@ -82,6 +82,7 @@ pub struct CreateSongRequest {
     pub audio_mime_type: Option<String>,
     pub cover_image_url: Option<String>,
     pub language_id: Option<i32>,
+    pub category_id: Option<i32>,
     pub fulfills_request_id: Option<i32>,
 }
 
@@ -118,6 +119,7 @@ pub async fn create_song(
         mime,
         req.cover_image_url.as_deref(),
         req.language_id,
+        req.category_id,
         req.fulfills_request_id,
     )
     .await
@@ -130,8 +132,45 @@ pub async fn create_song(
         .await
         .ok();
 
+    // Auto-submit to bounty request if fulfills_request_id is set
+    if let Some(request_id) = req.fulfills_request_id {
+        if let Ok(Some(request)) = sqlx::query_as::<_, crate::db::models::SongRequest>(
+            "SELECT * FROM song_requests WHERE id = $1 AND status = 'open'"
+        )
+        .bind(request_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            // Create submission record
+            sqlx::query(
+                "INSERT INTO request_submissions (request_id, song_id, submitter_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
+            )
+            .bind(request.id)
+            .bind(song.id)
+            .bind(claims.user_id)
+            .execute(&state.db)
+            .await
+            .ok();
+
+            // Notify the requester
+            queries::create_notification(
+                &state.db,
+                request.requester_id,
+                "submission_to_request",
+                &serde_json::json!({
+                    "request_uuid": request.uuid,
+                    "song_uuid": uuid,
+                    "song_title": req.title,
+                    "submitter": claims.sub,
+                }),
+            )
+            .await
+            .ok();
+        }
+    }
+
     // Spawn background audio validation
-    crate::validation::spawn_validation(state.db.clone(), song.id, req.audio_url.clone());
+    crate::validation::spawn_validation(state.db.clone(), song.id, req.audio_url.clone(), req.cover_image_url.clone());
 
     // Return song with uploader info
     let result = queries::get_song_by_uuid(&state.db, &uuid)

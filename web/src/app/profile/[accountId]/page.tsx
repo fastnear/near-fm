@@ -63,8 +63,8 @@ export default function ProfilePage() {
               <div className="h-4 skeleton rounded w-32" />
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-8">
+            {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-16 skeleton rounded-xl" />
             ))}
           </div>
@@ -95,9 +95,12 @@ export default function ProfilePage() {
   }
 
   const displayName = user.display_name as string | null;
-  const reputationScore = user.reputation_score as string;
+  const reputationRaw = parseFloat(user.reputation_score as string);
+  const reputationScore = Number.isFinite(reputationRaw) ? Math.round(reputationRaw * 100) / 100 : 0;
   const totalUploads = user.total_uploads as number;
   const totalTipsYocto = user.total_tips_received_yocto as string;
+  const totalLikesGiven = (user.total_likes_given as number) ?? 0;
+  const totalDislikesGiven = (user.total_dislikes_given as number) ?? 0;
   const memberSince = user.created_at as string;
 
   return (
@@ -126,7 +129,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-8">
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
             <p className="text-2xl font-bold text-white">{reputationScore}</p>
             <p className="text-xs text-slate-400 mt-1">Reputation</p>
@@ -142,6 +145,14 @@ export default function ProfilePage() {
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
             <p className="text-2xl font-bold text-white">{songs.length}</p>
             <p className="text-xs text-slate-400 mt-1">Songs</p>
+          </div>
+          <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
+            <p className="text-2xl font-bold text-[#00ec97]">{totalLikesGiven}</p>
+            <p className="text-xs text-slate-400 mt-1">Likes Given</p>
+          </div>
+          <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
+            <p className="text-2xl font-bold text-rose-400">{totalDislikesGiven}</p>
+            <p className="text-xs text-slate-400 mt-1">Dislikes Given</p>
           </div>
         </div>
       </div>

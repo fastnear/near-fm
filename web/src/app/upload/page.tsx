@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import type { Language } from "@/types";
+import { Suspense, useState, useRef, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import type { Language, Category, SongRequest } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { createSong, getSongs, getLanguages } from "@/lib/api";
+import { createSong, getSongs, getLanguages, getCategories, getRequest } from "@/lib/api";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
@@ -12,9 +13,26 @@ import {
   getRelativePath,
 } from "@/lib/near/fastfs";
 
-export default function UploadPage() {
-  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
+function formatNear(yocto: string): string {
+  const near = Number(yocto) / 1e24;
+  return near % 1 === 0 ? near.toFixed(0) : near.toFixed(2);
+}
 
+export default function UploadPageWrapper() {
+  return (
+    <Suspense fallback={<div className="max-w-2xl mx-auto px-4 py-10"><div className="h-8 skeleton rounded w-1/3 mb-8" /></div>}>
+      <UploadPage />
+    </Suspense>
+  );
+}
+
+function UploadPage() {
+  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
+  const searchParams = useSearchParams();
+  const fulfillsRequestId = searchParams.get("fulfills_request_id");
+  const requestUuid = searchParams.get("request_uuid");
+
+  const [bountyRequest, setBountyRequest] = useState<SongRequest | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -23,7 +41,9 @@ export default function UploadPage() {
   const [lyrics, setLyrics] = useState("");
   const [aiModel, setAiModel] = useState("");
   const [languageId, setLanguageId] = useState<number | undefined>();
+  const [categoryId, setCategoryId] = useState<number | undefined>();
   const [languages, setLanguages] = useState<Language[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const [error, setError] = useState("");
@@ -42,7 +62,17 @@ export default function UploadPage() {
         }
       })
       .catch(console.error);
+    getCategories()
+      .then(setCategories)
+      .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!requestUuid) return;
+    getRequest(requestUuid)
+      .then((data) => setBountyRequest((data as any).request ?? data as any))
+      .catch(console.error);
+  }, [requestUuid]);
 
   if (!accountId) {
     return (
@@ -109,6 +139,35 @@ export default function UploadPage() {
     setError("");
 
     try {
+      // Upload cover first (small file) — gives FastFS more time to index
+      // while the larger audio file uploads after
+      let coverUrl: string | undefined;
+      if (coverFile) {
+        setUploadProgress("Uploading cover image...");
+        const coverBuffer = await coverFile.arrayBuffer();
+        const coverBytes = new Uint8Array(coverBuffer);
+        const coverHash = await computeFileHash(coverBytes);
+        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
+        const coverParts = prepareFastFSUpload(
+          coverRelPath,
+          coverFile.type || "image/jpeg",
+          coverBytes
+        );
+
+        await uploadToFastFS(
+          (params) =>
+            callFunction({
+              contractId: params.contractId,
+              method: params.method,
+              args: params.args,
+              gas: params.gas,
+            }),
+          coverParts
+        );
+
+        coverUrl = getFastFSUrl(accountId, coverRelPath);
+      }
+
       setUploadProgress("Reading audio file...");
       const audioBuffer = await audioFile.arrayBuffer();
       const audioBytes = new Uint8Array(audioBuffer);
@@ -151,33 +210,6 @@ export default function UploadPage() {
 
       const audioUrl = getFastFSUrl(accountId, audioRelPath);
 
-      let coverUrl: string | undefined;
-      if (coverFile) {
-        setUploadProgress("Uploading cover image...");
-        const coverBuffer = await coverFile.arrayBuffer();
-        const coverBytes = new Uint8Array(coverBuffer);
-        const coverHash = await computeFileHash(coverBytes);
-        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
-        const coverParts = prepareFastFSUpload(
-          coverRelPath,
-          coverFile.type || "image/jpeg",
-          coverBytes
-        );
-
-        await uploadToFastFS(
-          (params) =>
-            callFunction({
-              contractId: params.contractId,
-              method: params.method,
-              args: params.args,
-              gas: params.gas,
-            }),
-          coverParts
-        );
-
-        coverUrl = getFastFSUrl(accountId, coverRelPath);
-      }
-
       setUploadProgress("Saving song...");
       const song = await createSong({
         title: title.trim(),
@@ -189,6 +221,8 @@ export default function UploadPage() {
         audio_mime_type: audioFile.type || "audio/mpeg",
         cover_image_url: coverUrl,
         language_id: languageId,
+        category_id: categoryId,
+        fulfills_request_id: fulfillsRequestId ? Number(fulfillsRequestId) : undefined,
       });
 
       // Redirect to song page on near.fm
@@ -207,6 +241,24 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto px-4 py-10">
       <h1 className="text-2xl font-bold text-white mb-2">Upload a Song</h1>
       <p className="text-slate-500 text-sm mb-8">Share your AI-generated music with the world</p>
+
+      {bountyRequest && (
+        <div className="glass-card rounded-2xl p-5 mb-6 border-l-4 border-l-purple-500">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs text-purple-400 font-medium uppercase tracking-wide mb-1">Fulfilling bounty request</p>
+              <p className="text-white font-semibold">{bountyRequest.title}</p>
+              {bountyRequest.description && (
+                <p className="text-slate-400 text-sm mt-1 line-clamp-2">{bountyRequest.description}</p>
+              )}
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-lg font-bold text-purple-400">{formatNear(bountyRequest.bounty_amount_yocto)} NEAR</div>
+              <div className="text-xs text-slate-500">bounty</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* Audio file */}
@@ -339,6 +391,27 @@ export default function UploadPage() {
             ))}
           </select>
         </div>
+
+        {/* Category */}
+        {categories.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-slate-400 mb-2">Category</label>
+            <select
+              value={categoryId ?? ""}
+              onChange={(e) =>
+                setCategoryId(e.target.value ? Number(e.target.value) : undefined)
+              }
+              className={inputClass}
+            >
+              <option value="">Select category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

@@ -5,8 +5,8 @@ import type { Song } from "@/types";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { VoteButtons } from "./VoteButtons";
 
-export function SongCard({ song }: { song: Song }) {
-  const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
+export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }) {
+  const { currentSong, isPlaying, togglePlay, playFromFeed } = useAudioPlayer();
   const isActive = currentSong?.uuid === song.uuid;
 
   return (
@@ -33,7 +33,7 @@ export function SongCard({ song }: { song: Song }) {
 
         {/* Play button overlay */}
         <button
-          onClick={() => togglePlay(song)}
+          onClick={() => feedSongs ? playFromFeed(song, feedSongs) : togglePlay(song)}
           className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-all duration-300"
         >
           <div

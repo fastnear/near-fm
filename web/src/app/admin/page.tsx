@@ -12,9 +12,16 @@ import {
   getSongs,
   moderateSong,
   deleteSong,
+  getAdminRequests,
+  moderateRequest,
+  getAdminComments,
+  moderateComment,
+  toggleMuteUser,
 } from "@/lib/api";
+import type { AdminComment } from "@/lib/api";
+import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 
-type Tab = "reports" | "categories" | "songs";
+type Tab = "reports" | "categories" | "songs" | "requests" | "comments";
 
 interface Report {
   id: number;
@@ -509,6 +516,17 @@ function SongsPanel() {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={`/song/${song.uuid}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 text-slate-500 hover:text-white hover:bg-white/[0.06] rounded-lg border border-white/[0.08] transition"
+                  title="Open song"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                </a>
                 <button
                   onClick={() => handleToggleHide(song)}
                   disabled={actionLoading === song.uuid}
@@ -532,11 +550,382 @@ function SongsPanel() {
   );
 }
 
+// ── Requests Tab ──
+
+function RequestsPanel() {
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [editingUuid, setEditingUuid] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const searchRequests = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      let all = await getAdminRequests();
+      if (debouncedQuery.trim()) {
+        const q = debouncedQuery.toLowerCase();
+        all = all.filter(
+          (r: any) =>
+            r.title.toLowerCase().includes(q) ||
+            r.description.toLowerCase().includes(q) ||
+            (r.requester_account_id && r.requester_account_id.toLowerCase().includes(q))
+        );
+      }
+      setRequests(all);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load requests");
+    }
+    setLoading(false);
+  }, [debouncedQuery]);
+
+  useEffect(() => {
+    searchRequests();
+  }, [searchRequests]);
+
+  const handleToggleHide = async (req: any) => {
+    setActionLoading(req.uuid);
+    try {
+      await moderateRequest(req.uuid, { is_hidden: !req.is_hidden });
+      await searchRequests();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    }
+    setActionLoading(null);
+  };
+
+  const handleStartEdit = (req: any) => {
+    setEditingUuid(req.uuid);
+    setEditTitle(req.title);
+    setEditDescription(req.description);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingUuid) return;
+    setActionLoading(editingUuid);
+    try {
+      await moderateRequest(editingUuid, {
+        title: editTitle,
+        description: editDescription,
+      });
+      setEditingUuid(null);
+      await searchRequests();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    }
+    setActionLoading(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingUuid(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search requests by title, description, or account..."
+          className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+        />
+      </div>
+
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="glass-card rounded-xl p-4 animate-pulse">
+              <div className="h-4 skeleton rounded w-1/3 mb-2" />
+              <div className="h-3 skeleton rounded w-1/2" />
+            </div>
+          ))}
+        </div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-slate-500">No requests found</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {requests.map((req: any) => (
+            <div
+              key={req.uuid}
+              className="glass-card rounded-xl px-4 py-3"
+            >
+              {editingUuid === req.uuid ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Title</label>
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="w-full border border-white/[0.08] bg-white/[0.04] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows={3}
+                      className="w-full border border-white/[0.08] bg-white/[0.04] rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition resize-none"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSaveEdit}
+                      disabled={actionLoading === req.uuid}
+                      className="px-4 py-1.5 text-xs font-medium btn-primary disabled:opacity-50 rounded-lg transition"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="px-4 py-1.5 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] rounded-lg border border-white/[0.08] transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <span className="text-sm font-medium text-slate-200 truncate">
+                        {req.title}
+                      </span>
+                      <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded border ${
+                        req.status === "open"
+                          ? "bg-[#00ec97]/10 text-[#00ec97] border-[#00ec97]/20"
+                          : "bg-white/[0.04] text-slate-400 border-white/[0.08]"
+                      }`}>
+                        {req.status}
+                      </span>
+                      {req.is_hidden && (
+                        <span className="inline-block px-2 py-0.5 text-xs font-medium rounded border bg-rose-500/10 text-rose-400 border-rose-500/20">
+                          hidden
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 line-clamp-1">
+                      {req.description}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      by {req.requester_account_id} &middot; {formatDate(req.created_at)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={`/requests/${req.uuid}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 text-slate-500 hover:text-white hover:bg-white/[0.06] rounded-lg border border-white/[0.08] transition"
+                      title="Open request"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                      </svg>
+                    </a>
+                    <button
+                      onClick={() => handleStartEdit(req)}
+                      className="px-3 py-1.5 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] rounded-lg border border-white/[0.08] transition"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleToggleHide(req)}
+                      disabled={actionLoading === req.uuid}
+                      className="px-3 py-1.5 text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
+                    >
+                      {req.is_hidden ? "Unhide" : "Hide"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Comments Tab ──
+
+function CommentsPanel() {
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [comments, setComments] = useState<AdminComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [muteLoading, setMuteLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const fetchComments = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getAdminComments(debouncedQuery.trim() || undefined);
+      setComments(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load comments");
+    }
+    setLoading(false);
+  }, [debouncedQuery]);
+
+  useEffect(() => {
+    fetchComments();
+  }, [fetchComments]);
+
+  const handleToggleHide = async (comment: AdminComment) => {
+    setActionLoading(comment.id);
+    try {
+      await moderateComment(comment.id, !comment.is_hidden);
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === comment.id ? { ...c, is_hidden: !c.is_hidden } : c
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    }
+    setActionLoading(null);
+  };
+
+  const handleToggleMute = async (accountId: string, mute: boolean) => {
+    if (!window.confirm(`${mute ? "Mute" : "Unmute"} user "${accountId}"?`)) return;
+    setMuteLoading(accountId);
+    try {
+      await toggleMuteUser(accountId, mute);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Mute failed");
+    }
+    setMuteLoading(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search comments by text or account..."
+          className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+        />
+      </div>
+
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="glass-card rounded-xl p-4 animate-pulse">
+              <div className="h-4 skeleton rounded w-1/3 mb-2" />
+              <div className="h-3 skeleton rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+      ) : comments.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-slate-500">No comments found</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {comments.map((comment) => (
+            <div
+              key={comment.id}
+              className={`glass-card rounded-xl px-4 py-3 ${comment.is_hidden ? "opacity-60" : ""}`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="text-sm font-medium text-slate-300">
+                      {comment.author_display_name || comment.author_account_id}
+                    </span>
+                    {comment.is_hidden && (
+                      <span className="inline-block px-2 py-0.5 text-xs font-medium rounded border bg-rose-500/10 text-rose-400 border-rose-500/20">
+                        hidden
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-300 mb-1.5 whitespace-pre-wrap">{comment.body}</p>
+                  <p className="text-xs text-slate-600">
+                    on{" "}
+                    <a
+                      href={`/song/${comment.song_uuid}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-slate-500 hover:text-purple-400 transition-colors"
+                    >
+                      {comment.song_title}
+                    </a>
+                    {" "}&middot;{" "}
+                    {formatDate(comment.created_at)}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleToggleHide(comment)}
+                    disabled={actionLoading === comment.id}
+                    className="px-3 py-1.5 text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-50 rounded-lg border border-white/[0.08] transition"
+                  >
+                    {comment.is_hidden ? "Show" : "Hide"}
+                  </button>
+                  <button
+                    onClick={() => handleToggleMute(comment.author_account_id, true)}
+                    disabled={muteLoading === comment.author_account_id}
+                    className="px-3 py-1.5 text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
+                  >
+                    Mute User
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Admin Page ──
+
+function yoctoToNear(yocto: string): string {
+  const near = Number(yocto) / 1e24;
+  return near < 0.01 ? near.toFixed(6) : near.toFixed(2);
+}
 
 export default function AdminPage() {
   const { accountId, signIn, loading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<Tab>("reports");
+  const [commission, setCommission] = useState<string | null>(null);
+  const [commissionRate, setCommissionRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    getTotalCommission().then(setCommission).catch(() => {});
+    getCommissionRate().then(setCommissionRate).catch(() => {});
+  }, []);
 
   if (loading) {
     return (
@@ -567,20 +956,32 @@ export default function AdminPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "reports", label: "Reports" },
-    { key: "categories", label: "Categories" },
     { key: "songs", label: "Songs" },
+    { key: "requests", label: "Requests" },
+    { key: "comments", label: "Comments" },
+    { key: "categories", label: "Categories" },
   ];
 
   return (
     <div>
       <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Signed in as{" "}
-            <span className="text-slate-400 font-mono">{accountId}</span>
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Signed in as{" "}
+              <span className="text-slate-400 font-mono">{accountId}</span>
+            </p>
+          </div>
+          {commission !== null && (
+            <div className="glass-card rounded-xl px-4 py-3 text-right">
+              <p className="text-lg font-bold text-[#00ec97]">{yoctoToNear(commission)} NEAR</p>
+              <p className="text-xs text-slate-500">
+                Platform commission{commissionRate !== null ? ` (${commissionRate / 100}%)` : ""}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -602,8 +1003,10 @@ export default function AdminPage() {
 
         {/* Tab Content */}
         {activeTab === "reports" && <ReportsPanel />}
-        {activeTab === "categories" && <CategoriesPanel />}
         {activeTab === "songs" && <SongsPanel />}
+        {activeTab === "requests" && <RequestsPanel />}
+        {activeTab === "comments" && <CommentsPanel />}
+        {activeTab === "categories" && <CategoriesPanel />}
       </div>
     </div>
   );

@@ -221,6 +221,102 @@ pub async fn delete_song(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ── Request moderation ──
+
+#[derive(Debug, Deserialize)]
+pub struct AdminListRequestsQuery {
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AdminRequestRow {
+    pub id: i32,
+    pub uuid: String,
+    pub requester_id: i32,
+    pub title: String,
+    pub description: String,
+    pub bounty_amount_yocto: String,
+    pub bounty_tx_hash: String,
+    pub status: String,
+    pub awarded_song_id: Option<i32>,
+    pub award_tx_hash: Option<String>,
+    pub withdrawal_penalty_yocto: Option<String>,
+    pub withdrawal_tx_hash: Option<String>,
+    pub language_id: Option<i32>,
+    pub is_hidden: bool,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub requester_account_id: String,
+}
+
+pub async fn list_requests(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    axum::extract::Query(params): axum::extract::Query<AdminListRequestsQuery>,
+) -> Result<Json<Vec<AdminRequestRow>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let limit = params.limit.unwrap_or(100).min(200);
+
+    let requests = if let Some(status) = &params.status {
+        sqlx::query_as::<_, AdminRequestRow>(
+            "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.status = $1 ORDER BY sr.created_at DESC LIMIT $2"
+        )
+        .bind(status)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+    } else {
+        sqlx::query_as::<_, AdminRequestRow>(
+            "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id ORDER BY sr.created_at DESC LIMIT $1"
+        )
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+    }
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(requests))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModerateRequestBody {
+    pub is_hidden: Option<bool>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
+pub async fn moderate_request(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+    Json(req): Json<ModerateRequestBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    sqlx::query(
+        r#"UPDATE song_requests SET
+            is_hidden = COALESCE($1, is_hidden),
+            title = COALESCE($2, title),
+            description = COALESCE($3, description),
+            updated_at = NOW()
+           WHERE uuid = $4"#,
+    )
+    .bind(req.is_hidden)
+    .bind(&req.title)
+    .bind(&req.description)
+    .bind(&uuid)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::OK)
+}
+
 // ── Platform config ──
 
 pub async fn get_config(

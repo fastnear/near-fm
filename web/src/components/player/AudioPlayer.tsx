@@ -23,14 +23,14 @@ export function AudioPlayer() {
     currentTime,
     duration,
     volume,
-    radioMode,
+    playMode,
+    setPlayMode,
     pause,
     resume,
     next,
     previous,
     seek,
     setVolume,
-    toggleRadioMode,
     queue,
   } = useAudioPlayer();
 
@@ -231,19 +231,37 @@ export function AudioPlayer() {
             />
           </div>
 
-          {/* Radio mode */}
+          {/* Play mode toggle: radio → repeat → none */}
           <button
-            onClick={toggleRadioMode}
+            onClick={() => {
+              const modes: Array<"radio" | "repeat" | "none"> = ["radio", "repeat", "none"];
+              const idx = modes.indexOf(playMode);
+              setPlayMode(modes[(idx + 1) % 3]);
+            }}
             className={`hidden sm:flex items-center gap-1 text-xs px-2 py-1.5 rounded-xl transition-all ${
-              radioMode
+              playMode !== "none"
                 ? "bg-gradient-to-r from-purple-500/20 to-cyan-500/20 text-purple-300 border border-purple-500/20"
                 : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
             }`}
+            title={playMode === "radio" ? "Radio: auto-play next" : playMode === "repeat" ? "Repeat current song" : "Stop after song ends"}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
-            </svg>
-            <span className="hidden lg:inline">Radio</span> {queue.length > 0 && `(${queue.length})`}
+            {playMode === "radio" ? (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
+              </svg>
+            ) : playMode === "repeat" ? (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+              </svg>
+            )}
+            <span className="hidden lg:inline">
+              {playMode === "radio" ? "Radio" : playMode === "repeat" ? "Repeat" : "Off"}
+            </span>
           </button>
 
           {/* Open song page */}

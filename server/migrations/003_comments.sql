@@ -1,0 +1,13 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_muted BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS comments (
+    id SERIAL PRIMARY KEY,
+    song_id INTEGER NOT NULL REFERENCES songs(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    body VARCHAR(2000) NOT NULL,
+    is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_song ON comments(song_id);
+CREATE INDEX IF NOT EXISTS idx_comments_user ON comments(user_id);

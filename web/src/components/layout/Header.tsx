@@ -76,20 +76,12 @@ export function Header() {
               {loading ? (
                 <div className="w-28 h-9 rounded-xl skeleton" />
               ) : accountId ? (
-                <div className="flex items-center gap-3">
-                  <Link
-                    href={`/profile/${accountId}`}
-                    className="px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all truncate max-w-[160px]"
-                  >
-                    {accountId}
-                  </Link>
-                  <button
-                    onClick={signOut}
-                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                  >
-                    Sign out
-                  </button>
-                </div>
+                <Link
+                  href={`/profile/${accountId}`}
+                  className="px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all truncate max-w-[160px]"
+                >
+                  {accountId}
+                </Link>
               ) : (
                 <button
                   onClick={signIn}

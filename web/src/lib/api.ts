@@ -101,6 +101,7 @@ export async function createSong(data: {
   audio_mime_type?: string;
   cover_image_url?: string;
   language_id?: number;
+  category_id?: number;
   fulfills_request_id?: number;
 }): Promise<Song> {
   return fetchApi("/api/songs", {
@@ -173,7 +174,31 @@ export async function getRequest(uuid: string): Promise<{ request: SongRequest }
   return fetchApi(`/api/requests/${uuid}`);
 }
 
+export async function getRequestSubmissions(uuid: string): Promise<{
+  id: number;
+  song_id: number;
+  song_uuid: string;
+  song_title: string;
+  song_cover_image_url: string | null;
+  submitter_account_id: string;
+  created_at: string;
+}[]> {
+  return fetchApi(`/api/requests/${uuid}/submissions`);
+}
+
+export async function updateRequest(uuid: string, data: {
+  status: string;
+  awarded_song_id?: number;
+  award_tx_hash?: string;
+}): Promise<any> {
+  return fetchApi(`/api/requests/${uuid}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function createRequest(data: {
+  uuid?: string;
   title: string;
   description: string;
   bounty_amount_yocto: string;
@@ -260,6 +285,17 @@ export async function deleteCategory(id: number): Promise<void> {
   return fetchApi(`/api/admin/categories/${id}`, { method: "DELETE" });
 }
 
+export async function getAdminRequests(): Promise<any[]> {
+  return fetchApi("/api/admin/requests");
+}
+
+export async function moderateRequest(uuid: string, data: { is_hidden?: boolean; title?: string; description?: string }): Promise<void> {
+  return fetchApi(`/api/admin/requests/${uuid}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function moderateSong(uuid: string, data: { is_hidden?: boolean; category_id?: number }): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, {
     method: "PATCH",
@@ -269,4 +305,57 @@ export async function moderateSong(uuid: string, data: { is_hidden?: boolean; ca
 
 export async function deleteSong(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, { method: "DELETE" });
+}
+
+// ── Comments ──
+
+export interface Comment {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+}
+
+export async function getComments(songUuid: string): Promise<Comment[]> {
+  return fetchApi(`/api/songs/${songUuid}/comments`);
+}
+
+export async function createComment(songUuid: string, body: string): Promise<Comment> {
+  return fetchApi(`/api/songs/${songUuid}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export interface AdminComment {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  song_uuid: string;
+  song_title: string;
+}
+
+export async function getAdminComments(search?: string): Promise<AdminComment[]> {
+  const params = search ? `?search=${encodeURIComponent(search)}` : "";
+  return fetchApi(`/api/admin/comments${params}`);
+}
+
+export async function moderateComment(id: number, is_hidden: boolean): Promise<void> {
+  return fetchApi(`/api/admin/comments/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_hidden }),
+  });
+}
+
+export async function toggleMuteUser(accountId: string, is_muted: boolean): Promise<void> {
+  return fetchApi(`/api/admin/users/${accountId}/mute`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_muted }),
+  });
 }

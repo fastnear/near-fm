@@ -1,0 +1,323 @@
+use axum::{
+    extract::{Path, Query, State},
+    http::{Extensions, StatusCode},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
+use crate::{
+    auth::jwt::{require_admin, require_auth},
+    AppState,
+};
+
+// ── Types ──
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct CommentRow {
+    pub id: i32,
+    pub body: String,
+    pub is_hidden: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub author_account_id: String,
+    pub author_display_name: Option<String>,
+    pub author_avatar_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCommentBody {
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AdminCommentsQuery {
+    pub search: Option<String>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct AdminCommentRow {
+    pub id: i32,
+    pub body: String,
+    pub is_hidden: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub author_account_id: String,
+    pub author_display_name: Option<String>,
+    pub song_uuid: String,
+    pub song_title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModerateCommentBody {
+    pub is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MuteUserBody {
+    pub is_muted: bool,
+}
+
+// ── RPC balance check ──
+
+/// Check virtual balance on NEAR contract via RPC.
+/// Returns balance in yoctoNEAR as u128.
+async fn check_virtual_balance(
+    rpc_url: &str,
+    contract_id: &str,
+    account_id: &str,
+) -> Result<u128, String> {
+    let args_json = serde_json::json!({ "account_id": account_id });
+    let args_b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        serde_json::to_string(&args_json).unwrap(),
+    );
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "query",
+        "params": {
+            "request_type": "call_function",
+            "finality": "final",
+            "account_id": contract_id,
+            "method_name": "get_balance",
+            "args_base64": args_b64,
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("RPC request failed: {}", e))?;
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("RPC response parse failed: {}", e))?;
+
+    if let Some(err) = json.get("error") {
+        return Err(format!("RPC error: {}", err));
+    }
+
+    let result_bytes = json["result"]["result"]
+        .as_array()
+        .ok_or("Invalid RPC response format")?;
+
+    let bytes: Vec<u8> = result_bytes
+        .iter()
+        .filter_map(|v| v.as_u64().map(|n| n as u8))
+        .collect();
+
+    let decoded = String::from_utf8(bytes).map_err(|e| format!("UTF-8 decode error: {}", e))?;
+
+    // Result is a JSON string like "\"1000000000000000000000000\""
+    let balance_str: String =
+        serde_json::from_str(&decoded).map_err(|e| format!("JSON parse error: {}", e))?;
+
+    balance_str
+        .parse::<u128>()
+        .map_err(|e| format!("Balance parse error: {}", e))
+}
+
+const ONE_NEAR_YOCTO: u128 = 1_000_000_000_000_000_000_000_000;
+
+// ── Public endpoints ──
+
+/// GET /api/songs/:uuid/comments
+pub async fn list_comments(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+) -> Result<Json<Vec<CommentRow>>, (StatusCode, String)> {
+    // Check if caller is admin (to show hidden comments)
+    let is_admin = require_admin(&extensions).is_ok();
+
+    let hidden_filter = if is_admin { "" } else { "AND c.is_hidden = FALSE" };
+
+    let query = format!(
+        r#"SELECT c.id, c.body, c.is_hidden, c.created_at,
+                  u.account_id AS author_account_id,
+                  u.display_name AS author_display_name,
+                  u.avatar_url AS author_avatar_url
+           FROM comments c
+           JOIN users u ON u.id = c.user_id
+           JOIN songs s ON s.id = c.song_id
+           WHERE s.uuid = $1 {}
+           ORDER BY c.created_at ASC"#,
+        hidden_filter
+    );
+
+    let comments = sqlx::query_as::<_, CommentRow>(&query)
+        .bind(&uuid)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(comments))
+}
+
+/// POST /api/songs/:uuid/comments
+pub async fn create_comment(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+    Json(req): Json<CreateCommentBody>,
+) -> Result<Json<CommentRow>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let body = req.body.trim().to_string();
+    if body.is_empty() || body.len() > 2000 {
+        return Err((StatusCode::BAD_REQUEST, "Comment must be 1-2000 characters".to_string()));
+    }
+
+    // Check if user is muted
+    let is_muted: bool = sqlx::query_scalar("SELECT is_muted FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_muted {
+        return Err((StatusCode::FORBIDDEN, "Your account has been muted".to_string()));
+    }
+
+    // Check virtual balance >= 1 NEAR via RPC
+    let balance = check_virtual_balance(
+        &state.config.near_rpc_url,
+        &state.config.contract_id,
+        &claims.sub,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!("Balance check failed for {}: {}", claims.sub, e);
+        (StatusCode::SERVICE_UNAVAILABLE, format!("Balance check failed: {}", e))
+    })?;
+
+    if balance < ONE_NEAR_YOCTO {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You need at least 1 NEAR in your virtual balance to comment".to_string(),
+        ));
+    }
+
+    // Get song_id
+    let song_id: i32 = sqlx::query_scalar("SELECT id FROM songs WHERE uuid = $1")
+        .bind(&uuid)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    // Insert comment
+    let comment = sqlx::query_as::<_, CommentRow>(
+        r#"INSERT INTO comments (song_id, user_id, body)
+           VALUES ($1, $2, $3)
+           RETURNING id, body, is_hidden, created_at,
+                     (SELECT account_id FROM users WHERE id = $2) AS author_account_id,
+                     (SELECT display_name FROM users WHERE id = $2) AS author_display_name,
+                     (SELECT avatar_url FROM users WHERE id = $2) AS author_avatar_url"#,
+    )
+    .bind(song_id)
+    .bind(claims.user_id)
+    .bind(&body)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(comment))
+}
+
+// ── Admin endpoints ──
+
+/// GET /api/admin/comments
+pub async fn admin_list_comments(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Query(query): Query<AdminCommentsQuery>,
+) -> Result<Json<Vec<AdminCommentRow>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let comments = if let Some(search) = &query.search {
+        let pattern = format!("%{}%", search);
+        sqlx::query_as::<_, AdminCommentRow>(
+            r#"SELECT c.id, c.body, c.is_hidden, c.created_at,
+                      u.account_id AS author_account_id,
+                      u.display_name AS author_display_name,
+                      s.uuid AS song_uuid,
+                      s.title AS song_title
+               FROM comments c
+               JOIN users u ON u.id = c.user_id
+               JOIN songs s ON s.id = c.song_id
+               WHERE c.body ILIKE $1 OR u.account_id ILIKE $1
+               ORDER BY c.created_at DESC
+               LIMIT 100"#,
+        )
+        .bind(&pattern)
+        .fetch_all(&state.db)
+        .await
+    } else {
+        sqlx::query_as::<_, AdminCommentRow>(
+            r#"SELECT c.id, c.body, c.is_hidden, c.created_at,
+                      u.account_id AS author_account_id,
+                      u.display_name AS author_display_name,
+                      s.uuid AS song_uuid,
+                      s.title AS song_title
+               FROM comments c
+               JOIN users u ON u.id = c.user_id
+               JOIN songs s ON s.id = c.song_id
+               ORDER BY c.created_at DESC
+               LIMIT 100"#,
+        )
+        .fetch_all(&state.db)
+        .await
+    }
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(comments))
+}
+
+/// PATCH /api/admin/comments/:id
+pub async fn admin_moderate_comment(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    extensions: Extensions,
+    Json(req): Json<ModerateCommentBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    if let Some(is_hidden) = req.is_hidden {
+        sqlx::query("UPDATE comments SET is_hidden = $1 WHERE id = $2")
+            .bind(is_hidden)
+            .bind(id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    Ok(StatusCode::OK)
+}
+
+/// PATCH /api/admin/users/:account_id/mute
+pub async fn admin_toggle_mute(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    extensions: Extensions,
+    Json(req): Json<MuteUserBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    sqlx::query("UPDATE users SET is_muted = $1 WHERE account_id = $2")
+        .bind(req.is_muted)
+        .bind(&account_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::OK)
+}

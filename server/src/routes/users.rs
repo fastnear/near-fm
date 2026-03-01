@@ -19,6 +19,8 @@ pub struct UserProfileResponse {
     pub reputation_score: String,
     pub total_uploads: i32,
     pub total_tips_received_yocto: String,
+    pub total_likes_given: i64,
+    pub total_dislikes_given: i64,
     pub created_at: String,
     pub songs: Vec<SongWithUploader>,
 }
@@ -48,6 +50,15 @@ pub async fn get_profile(
     .filter(|s| s.uploader_id == user.id)
     .collect();
 
+    // Get vote activity stats
+    let (total_likes_given, total_dislikes_given): (i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE user_id = $1"
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     Ok(Json(UserProfileResponse {
         account_id: user.account_id,
         display_name: user.display_name,
@@ -55,6 +66,8 @@ pub async fn get_profile(
         reputation_score: user.reputation_score.to_string(),
         total_uploads: user.total_uploads,
         total_tips_received_yocto: user.total_tips_received_yocto,
+        total_likes_given,
+        total_dislikes_given,
         created_at: user.created_at.to_rfc3339(),
         songs,
     }))

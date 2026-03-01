@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { SongRequest } from "@/types";
-import { getRequest } from "@/lib/api";
-import { withdrawBountyAction } from "@/lib/near/contract";
+import { getRequest, getRequestSubmissions, updateRequest } from "@/lib/api";
+import { awardBountyAction, withdrawBountyAction } from "@/lib/near/contract";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 
 function formatNear(yocto: string): string {
@@ -42,17 +42,29 @@ export default function RequestDetailPage() {
   const { accountId, callFunction } = useNearWallet();
 
   const [request, setRequest] = useState<SongRequest | null>(null);
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [awarding, setAwarding] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   const uuid = params.id as string;
 
+  const refreshData = async () => {
+    try {
+      const [reqData, subs] = await Promise.all([
+        getRequest(uuid),
+        getRequestSubmissions(uuid),
+      ]);
+      setRequest((reqData as any).request ?? reqData as any);
+      setSubmissions(subs);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
-    getRequest(uuid)
-      .then((data) => setRequest(data.request))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    refreshData().finally(() => setLoading(false));
   }, [uuid]);
 
   const handleWithdraw = async () => {
@@ -75,15 +87,48 @@ export default function RequestDetailPage() {
         gas: action.gas,
       });
 
-      // Refresh the request data
-      const data = await getRequest(uuid);
-      setRequest(data.request);
+      await refreshData();
     } catch (e: any) {
       if (e.name === "WalletConnectionRequired") { setWithdrawing(false); return; }
       console.error("Failed to withdraw bounty:", e);
       setError(e instanceof Error ? e.message : "Failed to withdraw bounty");
     }
     setWithdrawing(false);
+  };
+
+  const handleAward = async (submission: any) => {
+    if (!request) return;
+
+    const confirmed = window.confirm(
+      `Award the bounty of ${formatNear(request.bounty_amount_yocto)} NEAR to "${submission.song_title}" by ${submission.submitter_account_id}?`
+    );
+    if (!confirmed) return;
+
+    setAwarding(submission.id);
+    setError("");
+
+    try {
+      const action = awardBountyAction(request.uuid, submission.submitter_account_id);
+      await callFunction({
+        contractId: action.contractId,
+        method: action.method,
+        args: action.args as Record<string, unknown>,
+        gas: action.gas,
+      });
+
+      // Update request status on backend
+      await updateRequest(uuid, {
+        status: "awarded",
+        awarded_song_id: submission.song_id,
+      });
+
+      await refreshData();
+    } catch (e: any) {
+      if (e.name === "WalletConnectionRequired") { setAwarding(null); return; }
+      console.error("Failed to award bounty:", e);
+      setError(e instanceof Error ? e.message : "Failed to award bounty");
+    }
+    setAwarding(null);
   };
 
   if (loading) {
@@ -113,10 +158,10 @@ export default function RequestDetailPage() {
     );
   }
 
-  // Note: requester_id is a numeric DB FK, not the NEAR account string.
-  // Server-side auth enforces real ownership on withdraw; this is cosmetic only.
-  const isRequester = accountId !== null && request.requester_id !== null;
+  const isRequester = accountId !== null && (request as any).requester_account_id === accountId;
   const isOpen = request.status === "open";
+  const isExpired = request.expires_at ? new Date(request.expires_at) <= new Date() : false;
+  const canWithdraw = isRequester && isOpen && isExpired;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
@@ -169,6 +214,17 @@ export default function RequestDetailPage() {
 
         {/* Meta info */}
         <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 mb-6 border-t border-white/[0.06] pt-6">
+          {(request as any).requester_account_id && (
+            <div>
+              <span className="text-slate-600">Requester:</span>{" "}
+              <Link
+                href={`/profile/${(request as any).requester_account_id}`}
+                className="text-purple-400 hover:text-purple-300 transition"
+              >
+                {(request as any).requester_account_id}
+              </Link>
+            </div>
+          )}
           <div>
             <span className="text-slate-600">Created:</span>{" "}
             {formatDate(request.created_at)}
@@ -200,6 +256,76 @@ export default function RequestDetailPage() {
           )}
         </div>
 
+        {/* Submissions */}
+        {submissions.length > 0 && (
+          <div className="mb-6 border-t border-white/[0.06] pt-6">
+            <h2 className="text-sm font-medium text-slate-400 mb-3">
+              Submissions ({submissions.length})
+            </h2>
+            <div className="space-y-2">
+              {submissions.map((sub: any) => (
+                <div
+                  key={sub.id}
+                  className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {/* Mini cover */}
+                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-white/[0.04] flex-shrink-0">
+                      {sub.song_cover_image_url ? (
+                        <img
+                          src={sub.song_cover_image_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-600 text-lg">
+                          &#9835;
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <Link
+                        href={`/song/${sub.song_uuid}`}
+                        className="text-sm font-medium text-slate-200 hover:text-purple-400 transition truncate block"
+                      >
+                        {sub.song_title}
+                      </Link>
+                      <p className="text-xs text-slate-500">
+                        by{" "}
+                        <Link
+                          href={`/profile/${sub.submitter_account_id}`}
+                          className="text-purple-400 hover:text-purple-300 transition"
+                        >
+                          {sub.submitter_account_id}
+                        </Link>
+                        {" "}&middot; {formatDate(sub.created_at)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Award button (requester only, open status) */}
+                  {isRequester && isOpen && (
+                    <button
+                      onClick={() => handleAward(sub)}
+                      disabled={awarding === sub.id}
+                      className="px-4 py-1.5 text-xs font-medium bg-[#00ec97]/10 hover:bg-[#00ec97]/20 text-[#00ec97] disabled:opacity-30 rounded-lg border border-[#00ec97]/20 transition flex-shrink-0"
+                    >
+                      {awarding === sub.id ? "Awarding..." : "Award Bounty"}
+                    </button>
+                  )}
+
+                  {/* Show winner badge if this song was awarded */}
+                  {request.awarded_song_id === sub.song_id && (
+                    <span className="px-3 py-1 text-xs font-medium bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex-shrink-0">
+                      Winner
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         {isOpen && (
           <div className="border-t border-white/[0.06] pt-6 space-y-4">
@@ -217,30 +343,38 @@ export default function RequestDetailPage() {
                 .
               </p>
               <Link
-                href={`/upload?fulfills_request_id=${request.id}`}
+                href={`https://upload.near.fm/upload?fulfills_request_id=${request.id}&request_uuid=${request.uuid}`}
                 className="inline-flex items-center px-5 py-2.5 btn-primary rounded-xl text-sm font-medium transition"
               >
                 Submit a Song
               </Link>
             </div>
 
-            {/* Withdraw (requester only) */}
+            {/* Withdraw (requester only, after expiry) */}
             {isRequester && (
               <div className="bg-rose-500/[0.03] rounded-xl p-5 border border-rose-500/10">
                 <h3 className="text-base font-semibold mb-2">
                   Withdraw Bounty
                 </h3>
-                <p className="text-slate-400 text-sm mb-4">
-                  As the requester, you can withdraw your bounty. Note that a
-                  penalty may apply for early withdrawal.
-                </p>
+                {canWithdraw ? (
+                  <p className="text-slate-400 text-sm mb-4">
+                    The request has expired. You can withdraw your bounty with a 5% penalty fee.
+                    The refund will be added to your virtual balance.
+                  </p>
+                ) : (
+                  <p className="text-slate-400 text-sm mb-4">
+                    Withdrawal is available after the request expires
+                    {request.expires_at ? ` on ${formatDate(request.expires_at)}` : ""}.
+                    A 5% penalty fee applies.
+                  </p>
+                )}
                 {error && (
                   <p className="text-red-400 text-sm mb-3">{error}</p>
                 )}
                 <button
                   onClick={handleWithdraw}
-                  disabled={withdrawing}
-                  className="px-5 py-2.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-30 rounded-lg text-sm font-medium transition"
+                  disabled={withdrawing || !canWithdraw}
+                  className="px-5 py-2.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition"
                 >
                   {withdrawing ? "Withdrawing..." : "Withdraw Bounty"}
                 </button>

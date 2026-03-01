@@ -5,3 +5,4 @@ pub mod requests;
 pub mod users;
 pub mod reports;
 pub mod admin;
+pub mod comments;

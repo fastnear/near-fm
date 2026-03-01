@@ -133,6 +133,7 @@ pub struct SongRequest {
     pub withdrawal_penalty_yocto: Option<String>,
     pub withdrawal_tx_hash: Option<String>,
     pub language_id: Option<i32>,
+    pub is_hidden: bool,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

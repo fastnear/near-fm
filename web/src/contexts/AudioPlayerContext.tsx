@@ -12,6 +12,8 @@ import React, {
 import type { Song } from "@/types";
 import { incrementPlay } from "@/lib/api";
 
+type PlayMode = "radio" | "repeat" | "none";
+
 interface AudioPlayerContextType {
   currentSong: Song | null;
   isPlaying: boolean;
@@ -20,18 +22,20 @@ interface AudioPlayerContextType {
   duration: number;     // seconds
   volume: number;       // 0-1
   queue: Song[];
-  radioMode: boolean;
+  playMode: PlayMode;
   play: (song: Song) => void;
   pause: () => void;
   resume: () => void;
   togglePlay: (song: Song) => void;
+  playFromFeed: (song: Song, allSongs: Song[]) => void;
   next: () => void;
   previous: () => void;
   seek: (percent: number) => void;
   setVolume: (vol: number) => void;
   setQueue: (songs: Song[]) => void;
   addToQueue: (song: Song) => void;
-  toggleRadioMode: () => void;
+  setPlayMode: (mode: PlayMode) => void;
+  setFeedSongs: (songs: Song[]) => void;
 }
 
 const AudioPlayerContext = createContext<AudioPlayerContextType>({
@@ -42,18 +46,20 @@ const AudioPlayerContext = createContext<AudioPlayerContextType>({
   duration: 0,
   volume: 0.8,
   queue: [],
-  radioMode: false,
+  playMode: "radio",
   play: () => {},
   pause: () => {},
   resume: () => {},
   togglePlay: () => {},
+  playFromFeed: () => {},
   next: () => {},
   previous: () => {},
   seek: () => {},
   setVolume: () => {},
   setQueue: () => {},
   addToQueue: () => {},
-  toggleRadioMode: () => {},
+  setPlayMode: () => {},
+  setFeedSongs: () => {},
 });
 
 export function AudioPlayerProvider({ children }: { children: ReactNode }) {
@@ -65,8 +71,38 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(0.8);
   const [queue, setQueue] = useState<Song[]>([]);
-  const [radioMode, setRadioMode] = useState(false);
+  const [playMode, setPlayMode] = useState<PlayMode>("radio");
   const [history, setHistory] = useState<Song[]>([]);
+  const feedSongsRef = useRef<Song[]>([]);
+
+  // Refs for latest values (used in event handlers)
+  const queueRef = useRef(queue);
+  const playModeRef = useRef(playMode);
+  const currentSongRef = useRef(currentSong);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { playModeRef.current = playMode; }, [playMode]);
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
+
+  const playSong = useCallback(
+    (song: Song) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      const cur = currentSongRef.current;
+      if (cur) {
+        setHistory((h) => [cur, ...h.slice(0, 49)]);
+      }
+
+      audio.src = song.audio_url;
+      audio.play().catch(console.error);
+      setCurrentSong(song);
+      setIsPlaying(true);
+
+      // Track play count
+      incrementPlay(song.uuid).catch(() => {});
+    },
+    []
+  );
 
   // Initialize audio element
   useEffect(() => {
@@ -87,55 +123,37 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       });
 
       audioRef.current.addEventListener("ended", () => {
-        setIsPlaying(false);
-        // Auto-play next in queue
-        if (queue.length > 0) {
-          const nextSong = queue[0];
-          setQueue((q) => q.slice(1));
+        const mode = playModeRef.current;
+        const q = queueRef.current;
+        const audio = audioRef.current!;
+
+        if (mode === "repeat") {
+          audio.currentTime = 0;
+          audio.play().catch(console.error);
+          return;
+        }
+
+        if (mode === "none") {
+          setIsPlaying(false);
+          return;
+        }
+
+        // Radio mode
+        if (q.length > 0) {
+          const nextSong = q[0];
+          setQueue((prev) => prev.slice(1));
           playSong(nextSong);
+        } else if (feedSongsRef.current.length > 0) {
+          // Refill queue from feed songs and play first
+          const feed = feedSongsRef.current;
+          setQueue(feed.slice(1));
+          playSong(feed[0]);
+        } else {
+          setIsPlaying(false);
         }
       });
     }
-  }, []);
-
-  // Update ended handler when queue changes
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      if (queue.length > 0) {
-        const nextSong = queue[0];
-        setQueue((q) => q.slice(1));
-        playSong(nextSong);
-      }
-    };
-
-    audio.removeEventListener("ended", handleEnded);
-    audio.addEventListener("ended", handleEnded);
-    return () => audio.removeEventListener("ended", handleEnded);
-  }, [queue]);
-
-  const playSong = useCallback(
-    (song: Song) => {
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      if (currentSong) {
-        setHistory((h) => [currentSong, ...h.slice(0, 49)]);
-      }
-
-      audio.src = song.audio_url;
-      audio.play().catch(console.error);
-      setCurrentSong(song);
-      setIsPlaying(true);
-
-      // Track play count
-      incrementPlay(song.uuid).catch(() => {});
-    },
-    [currentSong]
-  );
+  }, [playSong]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -149,14 +167,27 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
 
   const togglePlay = useCallback(
     (song: Song) => {
-      if (currentSong?.uuid === song.uuid) {
+      if (currentSongRef.current?.uuid === song.uuid) {
         if (isPlaying) pause();
         else resume();
       } else {
         playSong(song);
       }
     },
-    [currentSong, isPlaying, pause, resume, playSong]
+    [isPlaying, pause, resume, playSong]
+  );
+
+  const playFromFeed = useCallback(
+    (song: Song, allSongs: Song[]) => {
+      // Store all songs for looping
+      feedSongsRef.current = allSongs;
+      // Set queue to songs after the clicked one
+      const idx = allSongs.findIndex((s) => s.uuid === song.uuid);
+      const remaining = idx >= 0 ? allSongs.slice(idx + 1) : allSongs;
+      setQueue(remaining);
+      playSong(song);
+    },
+    [playSong]
   );
 
   const next = useCallback(() => {
@@ -164,19 +195,24 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       const nextSong = queue[0];
       setQueue((q) => q.slice(1));
       playSong(nextSong);
+    } else if (playMode === "radio" && feedSongsRef.current.length > 0) {
+      const feed = feedSongsRef.current;
+      setQueue(feed.slice(1));
+      playSong(feed[0]);
     }
-  }, [queue, playSong]);
+  }, [queue, playMode, playSong]);
 
   const previous = useCallback(() => {
     if (history.length > 0) {
       const prevSong = history[0];
       setHistory((h) => h.slice(1));
-      if (currentSong) {
-        setQueue((q) => [currentSong, ...q]);
+      const cur = currentSongRef.current;
+      if (cur) {
+        setQueue((q) => [cur, ...q]);
       }
       playSong(prevSong);
     }
-  }, [history, currentSong, playSong]);
+  }, [history, playSong]);
 
   const seek = useCallback((percent: number) => {
     const audio = audioRef.current;
@@ -196,8 +232,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     setQueue((q) => [...q, song]);
   }, []);
 
-  const toggleRadioMode = useCallback(() => {
-    setRadioMode((r) => !r);
+  const setFeedSongs = useCallback((songs: Song[]) => {
+    feedSongsRef.current = songs;
   }, []);
 
   return (
@@ -210,18 +246,20 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         duration,
         volume,
         queue,
-        radioMode,
+        playMode,
         play: playSong,
         pause,
         resume,
         togglePlay,
+        playFromFeed,
         next,
         previous,
         seek,
         setVolume,
         setQueue,
         addToQueue,
-        toggleRadioMode,
+        setPlayMode,
+        setFeedSongs,
       }}
     >
       {children}

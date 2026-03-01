@@ -57,14 +57,15 @@ pub async fn create_song(
     audio_mime_type: &str,
     cover_image_url: Option<&str>,
     language_id: Option<i32>,
+    category_id: Option<i32>,
     fulfills_request_id: Option<i32>,
 ) -> Result<Song, sqlx::Error> {
     sqlx::query_as::<_, Song>(
         r#"INSERT INTO songs
             (uuid, uploader_id, title, description, lyrics, ai_model,
              audio_url, audio_hash, audio_duration_seconds, audio_mime_type,
-             cover_image_url, language_id, fulfills_request_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             cover_image_url, language_id, category_id, fulfills_request_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *"#,
     )
     .bind(uuid)
@@ -79,6 +80,7 @@ pub async fn create_song(
     .bind(audio_mime_type)
     .bind(cover_image_url)
     .bind(language_id)
+    .bind(category_id)
     .bind(fulfills_request_id)
     .fetch_one(pool)
     .await
@@ -177,7 +179,7 @@ pub async fn list_songs(
             u.reputation_score AS uploader_reputation
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
-           WHERE NOT s.is_deleted AND NOT s.is_hidden
+           WHERE NOT s.is_deleted AND NOT s.is_hidden AND s.is_validated
              AND ($3::INTEGER IS NULL OR s.language_id = $3)
              AND ($4::INTEGER IS NULL OR s.category_id = $4)
              AND ($5::TEXT IS NULL OR s.search_vector @@ plainto_tsquery('simple', $5))

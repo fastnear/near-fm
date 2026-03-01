@@ -180,6 +180,21 @@ export default function RequestsPage() {
                     {req.description}
                   </p>
                   <div className="flex items-center gap-4 text-xs text-slate-500">
+                    {(req as any).requester_account_id && (
+                      <span
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline"
+                      >
+                        by{" "}
+                        <Link
+                          href={`/profile/${(req as any).requester_account_id}`}
+                          className="text-purple-400 hover:text-purple-300 transition"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {(req as any).requester_account_id}
+                        </Link>
+                      </span>
+                    )}
                     <span>{formatDate(req.created_at)}</span>
                     {req.expires_at && (
                       <span>Expires {formatDate(req.expires_at)}</span>
@@ -190,7 +205,7 @@ export default function RequestsPage() {
                 {/* Bounty amount */}
                 <div className="flex-shrink-0 text-right">
                   <div className="text-lg font-bold text-purple-400">
-                    {formatNear(req.bounty_amount_yocto)} N
+                    {formatNear(req.bounty_amount_yocto)} NEAR
                   </div>
                   <div className="text-xs text-slate-500">bounty</div>
                 </div>

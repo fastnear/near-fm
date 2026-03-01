@@ -94,8 +94,9 @@ export default function NewRequestPage() {
         deposit: action.deposit,
       });
 
-      // 2. Create request in backend
+      // 2. Create request in backend (pass same UUID used on-chain)
       await createRequest({
+        uuid: requestUuid,
         title: title.trim(),
         description: description.trim(),
         bounty_amount_yocto: amountYoctoStr,
@@ -169,6 +170,10 @@ export default function NewRequestPage() {
             Minimum 1 NEAR. This amount will be locked on-chain and awarded to
             the creator whose song you choose.
           </p>
+          <p className="text-xs text-slate-600 mt-1">
+            You can pick a winner at any time. If no winner is chosen, you can withdraw
+            the bounty after 30 days with a 20% penalty fee. All payouts go to virtual balance.
+          </p>
         </div>
 
         {/* Language */}
@@ -225,8 +230,8 @@ export default function NewRequestPage() {
               {submitting ? "Creating Request..." : "Create Request"}
             </button>
             <p className="text-xs text-slate-600 text-center">
-              By creating a request, your bounty will be locked in a smart contract
-              until you award it to a song or withdraw it.
+              Your bounty will be locked in a smart contract.
+              Pick a winner anytime, or withdraw after 30 days (20% fee).
             </p>
           </>
         )}

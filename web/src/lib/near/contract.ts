@@ -97,6 +97,49 @@ export function withdrawBountyAction(requestUuid: string) {
 }
 
 /**
+ * View call helper — calls a view method on the contract via NEAR RPC.
+ */
+async function rpcViewCall(method: string, args: Record<string, unknown> = {}): Promise<any> {
+  const rpcUrl = process.env.NEXT_PUBLIC_NEAR_RPC_URL || "https://rpc.testnet.near.org";
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      method: "query",
+      params: {
+        request_type: "call_function",
+        finality: "final",
+        account_id: CONTRACT_ID,
+        method_name: method,
+        args_base64: btoa(JSON.stringify(args)),
+      },
+    }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message || "RPC error");
+  const bytes = json.result.result;
+  const decoded = new TextDecoder().decode(new Uint8Array(bytes));
+  return JSON.parse(decoded);
+}
+
+/**
+ * View: get total commission collected by the platform.
+ */
+export async function getTotalCommission(): Promise<string> {
+  const result = await rpcViewCall("get_total_commission");
+  return typeof result === "string" ? result : String(result);
+}
+
+/**
+ * View: get current commission rate in basis points.
+ */
+export async function getCommissionRate(): Promise<number> {
+  return rpcViewCall("get_commission_rate");
+}
+
+/**
  * View: get virtual balance.
  */
 export async function getBalance(

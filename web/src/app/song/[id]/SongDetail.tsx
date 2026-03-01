@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Song } from "@/types";
-import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong } from "@/lib/api";
+import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment } from "@/lib/api";
+import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { VoteButtons } from "@/components/song/VoteButtons";
@@ -22,6 +23,10 @@ export function SongDetail({ uuid }: { uuid: string }) {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ title: "", description: "", lyrics: "", ai_model: "" });
   const [editSaving, setEditSaving] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
   const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
 
@@ -30,6 +35,24 @@ export function SongDetail({ uuid }: { uuid: string }) {
       .then((data) => setSong(data.song))
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, [uuid]);
+
+  // Poll for validation status updates
+  useEffect(() => {
+    if (!song || song.is_validated || song.is_hidden) return;
+    const interval = setInterval(() => {
+      getSong(uuid)
+        .then((data) => setSong(data.song))
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [uuid, song?.is_validated, song?.is_hidden]);
+
+  // Load comments
+  useEffect(() => {
+    if (uuid) {
+      getComments(uuid).then(setComments).catch(console.error);
+    }
   }, [uuid]);
 
   useEffect(() => {
@@ -110,6 +133,14 @@ export function SongDetail({ uuid }: { uuid: string }) {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-10">
+      {/* Pending validation banner */}
+      {!song.is_validated && !song.is_hidden && (
+        <div className="mb-6 flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl px-4 py-3 text-sm">
+          <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          Waiting for decentralized storage indexing. Your song will appear in the feed once the audio file is available.
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row gap-8">
         {/* Cover */}
         <div className="relative w-full md:w-80 flex-shrink-0">
@@ -451,6 +482,121 @@ export function SongDetail({ uuid }: { uuid: string }) {
                   </pre>
                 </div>
               )}
+
+              {/* Comments */}
+              <div className="mt-8">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                  Comments {comments.length > 0 && `(${comments.length})`}
+                </h2>
+
+                {/* Comment input */}
+                {accountId ? (
+                  <div className="mb-4">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={commentText}
+                        onChange={(e) => {
+                          setCommentText(e.target.value);
+                          setCommentError("");
+                        }}
+                        placeholder="Write a comment... (requires 1+ NEAR virtual balance)"
+                        rows={2}
+                        maxLength={2000}
+                        className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none resize-none"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!commentText.trim()) return;
+                          if (!isAuthenticated) {
+                            completeSignIn();
+                            return;
+                          }
+                          setCommentSubmitting(true);
+                          setCommentError("");
+                          try {
+                            const newComment = await createComment(uuid, commentText.trim());
+                            setComments((prev) => [...prev, newComment]);
+                            setCommentText("");
+                          } catch (e: any) {
+                            setCommentError(e instanceof Error ? e.message : "Failed to post comment");
+                          }
+                          setCommentSubmitting(false);
+                        }}
+                        disabled={commentSubmitting || !commentText.trim()}
+                        className="self-end px-4 py-2.5 btn-primary rounded-xl text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        {commentSubmitting ? "..." : "Post"}
+                      </button>
+                    </div>
+                    {commentError && (
+                      <p className="mt-1.5 text-xs text-rose-400">{commentError}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500 mb-4">
+                    <button onClick={signIn} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.
+                  </p>
+                )}
+
+                {/* Comments list */}
+                {comments.length === 0 ? (
+                  <p className="text-sm text-slate-600">No comments yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {comments.map((comment) => (
+                      <div
+                        key={comment.id}
+                        className={`glass rounded-xl px-4 py-3 ${comment.is_hidden ? "opacity-50" : ""}`}
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          {comment.author_avatar_url ? (
+                            <img src={comment.author_avatar_url} alt="" className="w-5 h-5 rounded-full" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center">
+                              <span className="text-[10px] text-purple-400">
+                                {(comment.author_display_name || comment.author_account_id)[0].toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          <Link
+                            href={`/profile/${comment.author_account_id}`}
+                            className="text-sm text-slate-300 hover:text-purple-400 transition-colors font-medium"
+                          >
+                            {comment.author_display_name || comment.author_account_id}
+                          </Link>
+                          <span className="text-xs text-slate-600">
+                            {new Date(comment.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </span>
+                          {comment.is_hidden && (
+                            <span className="text-xs text-rose-400 ml-auto">hidden</span>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await moderateComment(comment.id, !comment.is_hidden);
+                                  setComments((prev) =>
+                                    prev.map((c) =>
+                                      c.id === comment.id ? { ...c, is_hidden: !c.is_hidden } : c
+                                    )
+                                  );
+                                } catch (e) {
+                                  console.error("Moderate comment failed:", e);
+                                }
+                              }}
+                              className="text-xs text-slate-500 hover:text-rose-400 transition-colors ml-auto"
+                              title={comment.is_hidden ? "Show comment" : "Hide comment"}
+                            >
+                              {comment.is_hidden ? "show" : "hide"}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-300 whitespace-pre-wrap">{comment.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
