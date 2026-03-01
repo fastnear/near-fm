@@ -291,6 +291,15 @@ export function SongDetail({ uuid }: { uuid: string }) {
                 {song.uploader_display_name || song.uploader_account_id}
               </Link>
 
+              {song.category_name && (
+                <Link
+                  href={`/?category=${song.category_id}`}
+                  className="inline-block mt-2 text-xs px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors"
+                >
+                  {song.category_name}
+                </Link>
+              )}
+
               {song.ai_model && (
                 <p className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

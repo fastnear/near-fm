@@ -94,9 +94,12 @@ pub async fn get_song_by_uuid(
         r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
            WHERE s.uuid = $1 AND NOT s.is_deleted"#,
     )
     .bind(uuid)
@@ -118,9 +121,12 @@ pub async fn list_songs(
         r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
            WHERE NOT s.is_deleted AND NOT s.is_hidden"#,
     );
 
@@ -176,9 +182,12 @@ pub async fn list_songs(
     let final_sql = r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
            WHERE NOT s.is_deleted AND NOT s.is_hidden AND s.is_validated
              AND ($3::INTEGER IS NULL OR s.language_id = $3)
              AND ($4::INTEGER IS NULL OR s.category_id = $4)

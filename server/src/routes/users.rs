@@ -38,9 +38,12 @@ pub async fn get_profile(
         r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
            WHERE s.uploader_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
            ORDER BY s.created_at DESC
            LIMIT 50"#,
@@ -143,10 +146,13 @@ pub async fn list_bookmarks(
         r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug
            FROM bookmarks b
            JOIN songs s ON b.song_id = s.id
            JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
            WHERE b.user_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
            ORDER BY b.created_at DESC"#,
     )

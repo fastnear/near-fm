@@ -19,6 +19,13 @@ export default function FeedPage() {
   const [page, setPage] = useState(1);
   const { setFeedSongs, playFromFeed } = useAudioPlayer();
 
+  // Read initial category from URL query param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cat = params.get("category");
+    if (cat) setCategoryId(Number(cat));
+  }, []);
+
   const fetchSongs = useCallback(async () => {
     setLoading(true);
     try {

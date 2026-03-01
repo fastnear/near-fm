@@ -70,6 +70,15 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
           {song.uploader_display_name || song.uploader_account_id}
         </Link>
 
+        {song.category_name && (
+          <Link
+            href={`/?category=${song.category_id}`}
+            className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors truncate"
+          >
+            {song.category_name}
+          </Link>
+        )}
+
         <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/[0.04]">
           <VoteButtons song={song} compact />
           <div className="flex items-center gap-1.5 text-[11px] text-slate-500">

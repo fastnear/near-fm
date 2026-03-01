@@ -76,6 +76,8 @@ pub struct SongWithUploader {
     pub uploader_account_id: String,
     pub uploader_display_name: Option<String>,
     pub uploader_reputation: f64,
+    pub category_name: Option<String>,
+    pub category_slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

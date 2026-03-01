@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { getUserProfile } from "@/lib/api";
+import { useNearWallet } from "@/contexts/NearWalletContext";
 import { SongCard } from "@/components/song/SongCard";
 import type { Song } from "@/types";
 
@@ -24,6 +25,8 @@ function formatDate(iso: string): string {
 export default function ProfilePage() {
   const params = useParams<{ accountId: string }>();
   const accountId = params.accountId;
+  const { accountId: currentUser, signOut } = useNearWallet();
+  const isOwnProfile = currentUser === accountId;
 
   const [user, setUser] = useState<Record<string, unknown> | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
@@ -113,7 +116,7 @@ export default function ProfilePage() {
             {(displayName || accountId).charAt(0).toUpperCase()}
           </div>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             {displayName && (
               <h1 className="text-2xl font-bold text-white truncate">
                 {displayName}
@@ -126,6 +129,15 @@ export default function ProfilePage() {
               Member since {formatDate(memberSince)}
             </p>
           </div>
+
+          {isOwnProfile && (
+            <button
+              onClick={signOut}
+              className="shrink-0 px-4 py-2 text-sm text-slate-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] rounded-xl transition-all"
+            >
+              Sign out
+            </button>
+          )}
         </div>
 
         {/* Stats */}
