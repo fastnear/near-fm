@@ -11,6 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://near.fm"),
   title: "near.fm — AI Music for NEAR",
   description:
     "Discover and share AI-generated music about NEAR Protocol. Listen, vote, tip artists with NEAR tokens.",
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
     siteName: "near.fm",
     images: [
       {
-        url: "/near-fm.png",
+        url: "/near-fm-hor.png",
         width: 1200,
         height: 630,
         alt: "NEAR FM",
@@ -42,7 +43,7 @@ export const metadata: Metadata = {
     title: "near.fm — AI Music for NEAR",
     description:
       "NEAR FM - decentralized radio for AI-generated music about the NEAR ecosystem",
-    images: ["/near-fm.png"],
+    images: ["/near-fm-hor.png"],
   },
 };
 
