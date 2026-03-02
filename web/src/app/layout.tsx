@@ -25,9 +25,24 @@ export const metadata: Metadata = {
   openGraph: {
     title: "near.fm — AI Music for NEAR",
     description:
-      "Discover and share AI-generated music about NEAR Protocol.",
+      "NEAR FM - decentralized radio for AI-generated music about the NEAR ecosystem",
     type: "website",
     siteName: "near.fm",
+    images: [
+      {
+        url: "/near-fm.png",
+        width: 1200,
+        height: 630,
+        alt: "NEAR FM",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "near.fm — AI Music for NEAR",
+    description:
+      "NEAR FM - decentralized radio for AI-generated music about the NEAR ecosystem",
+    images: ["/near-fm.png"],
   },
 };
 
