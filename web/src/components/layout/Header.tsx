@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getNotifications } from "@/lib/api";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
@@ -20,6 +21,9 @@ function NavLink({ href, children, className = "" }: { href: string; children: R
 export function Header() {
   const { accountId, signIn, signOut, isAuthenticated, loading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
+  const pathname = usePathname();
+  const router = useRouter();
+  const showBack = pathname !== "/" && pathname !== "/trending" && pathname !== "/latest" && pathname !== "/top";
   const base = "";
 
   useEffect(() => {
@@ -39,13 +43,26 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 glass-strong">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-        {/* Logo */}
-        <a href={`${base}/`} className="flex items-center gap-2.5 group">
-          <AnimatedLogo className="w-10 h-10" variant="header" />
-          <span className="text-xl font-bold text-gradient">
-            near.fm
-          </span>
-        </a>
+        {/* Back + Logo */}
+        <div className="flex items-center gap-1">
+          {showBack && (
+            <button
+              onClick={() => router.back()}
+              className="md:hidden p-1.5 -ml-1.5 text-slate-400 hover:text-white transition-colors"
+              aria-label="Back"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+            </button>
+          )}
+          <a href={`${base}/`} className="flex items-center gap-2.5 group">
+            <AnimatedLogo className="w-10 h-10" variant="header" />
+            <span className="text-xl font-bold text-gradient">
+              near.fm
+            </span>
+          </a>
+        </div>
 
         {/* Nav */}
         <nav className="hidden md:flex items-center gap-8">

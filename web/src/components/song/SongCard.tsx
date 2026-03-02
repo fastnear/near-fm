@@ -70,22 +70,43 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
           {song.uploader_display_name || song.uploader_account_id}
         </Link>
 
-        {song.category_name && (
-          <Link
-            href={`/?category=${song.category_id}`}
-            className="inline-block mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors truncate"
-          >
-            {song.category_name}
-          </Link>
-        )}
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {song.category_name && (
+            <Link
+              href={`/?category=${song.category_id}`}
+              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors truncate"
+            >
+              {song.category_name}
+            </Link>
+          )}
+          {song.genres?.slice(0, 2).map((g) => (
+            <Link
+              key={g.id}
+              href={`/genre/${g.slug}`}
+              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 hover:bg-cyan-500/20 transition-colors truncate"
+            >
+              {g.name}
+            </Link>
+          ))}
+        </div>
 
         <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/[0.04]">
           <VoteButtons song={song} compact />
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            </svg>
-            {song.play_count}
+          <div className="flex items-center gap-3 text-[11px] text-slate-500">
+            <div className="flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              </svg>
+              {song.play_count}
+            </div>
+            {song.comment_count > 0 && (
+              <div className="flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                </svg>
+                {song.comment_count}
+              </div>
+            )}
           </div>
         </div>
       </div>

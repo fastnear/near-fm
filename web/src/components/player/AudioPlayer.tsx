@@ -7,6 +7,7 @@ import { useNearWallet } from "@/contexts/NearWalletContext";
 import { addBookmark, removeBookmark, getBookmarks } from "@/lib/api";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
+import { AudioVisualizer } from "./AudioVisualizer";
 
 function formatTime(s: number): string {
   if (!s || !isFinite(s)) return "0:00";
@@ -35,13 +36,8 @@ export function AudioPlayer() {
   } = useAudioPlayer();
 
   const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
-  const [isUpload, setIsUpload] = useState(false);
   const [copied, setCopied] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
-
-  useEffect(() => {
-    setIsUpload(window.location.hostname.startsWith("upload."));
-  }, []);
 
   // Load bookmark state when song changes
   useEffect(() => {
@@ -56,7 +52,7 @@ export function AudioPlayer() {
     }
   }, [isAuthenticated, accountId, currentSong?.uuid]);
 
-  if (isUpload || !currentSong) return null;
+  if (!currentSong) return null;
 
   const songUrl = `/song/${currentSong.uuid}`;
 
@@ -84,6 +80,9 @@ export function AudioPlayer() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 glass-strong">
+      {/* Audio visualizer — desktop only */}
+      {isPlaying && <AudioVisualizer />}
+
       {/* Progress bar (clickable) */}
       <div
         className="h-1 bg-white/[0.06] cursor-pointer group relative"
@@ -159,7 +158,7 @@ export function AudioPlayer() {
 
           <button
             onClick={next}
-            className="hidden sm:block text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/[0.06] transition-all"
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/[0.06] transition-all"
             aria-label="Next"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">

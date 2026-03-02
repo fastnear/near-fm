@@ -19,6 +19,8 @@ pub struct ListSongsQuery {
     pub category: Option<i32>,
     pub q: Option<String>,
     pub audio_hash: Option<String>,
+    pub genre: Option<String>,
+    pub lang_code: Option<String>,
     pub page: Option<i64>,
     pub limit: Option<i64>,
 }
@@ -33,6 +35,7 @@ pub struct SongsListResponse {
 pub async fn list_songs(
     State(state): State<AppState>,
     Query(params): Query<ListSongsQuery>,
+    extensions: Extensions,
 ) -> Result<Json<SongsListResponse>, (StatusCode, String)> {
     let limit = params.limit.unwrap_or(20).min(100);
     let page = params.page.unwrap_or(1).max(1);
@@ -54,6 +57,35 @@ pub async fn list_songs(
         }));
     }
 
+    // Load user feed exclusions if authenticated
+    let (excluded_genre_ids, excluded_language_ids, excluded_category_ids, hide_no_cover) =
+        if let Some(claims) = extensions.get::<crate::auth::jwt::Claims>() {
+            let rows: Vec<(String, i32)> = sqlx::query_as(
+                "SELECT exclusion_type, exclusion_id FROM user_feed_exclusions WHERE user_id = $1"
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+            let mut eg = Vec::new();
+            let mut el = Vec::new();
+            let mut ec = Vec::new();
+            let mut no_cover = false;
+            for (t, id) in rows {
+                match t.as_str() {
+                    "genre" => eg.push(id),
+                    "language" => el.push(id),
+                    "category" => ec.push(id),
+                    "no_cover" => no_cover = true,
+                    _ => {}
+                }
+            }
+            (eg, el, ec, no_cover)
+        } else {
+            (vec![], vec![], vec![], false)
+        };
+
     let songs = queries::list_songs(
         &state.db,
         sort,
@@ -61,6 +93,12 @@ pub async fn list_songs(
         params.category,
         params.q.as_deref(),
         params.period.as_deref(),
+        params.genre.as_deref(),
+        params.lang_code.as_deref(),
+        &excluded_genre_ids,
+        &excluded_language_ids,
+        &excluded_category_ids,
+        hide_no_cover,
         limit,
         offset,
     )
@@ -84,6 +122,7 @@ pub struct CreateSongRequest {
     pub language_id: Option<i32>,
     pub category_id: Option<i32>,
     pub fulfills_request_id: Option<i32>,
+    pub genre_ids: Option<Vec<i32>>,
 }
 
 pub async fn create_song(
@@ -135,6 +174,13 @@ pub async fn create_song(
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Set genres
+    if let Some(ref genre_ids) = req.genre_ids {
+        queries::set_song_genres(&state.db, song.id, genre_ids)
+            .await
+            .ok();
+    }
 
     // Increment uploader's total_uploads
     sqlx::query("UPDATE users SET total_uploads = total_uploads + 1 WHERE id = $1")
@@ -340,6 +386,8 @@ pub struct UpdateSongRequest {
     pub ai_model: Option<String>,
     pub cover_image_url: Option<String>,
     pub language_id: Option<i32>,
+    pub category_id: Option<i32>,
+    pub genre_ids: Option<Vec<i32>>,
     #[serde(default)]
     pub remove_cover: bool,
 }
@@ -371,8 +419,9 @@ pub async fn update_song(
             ai_model = COALESCE($4, ai_model),
             cover_image_url = CASE WHEN $6 THEN NULL WHEN $5 IS NOT NULL THEN $5 ELSE cover_image_url END,
             language_id = COALESCE($7, language_id),
+            category_id = COALESCE($8, category_id),
             updated_at = NOW()
-           WHERE uuid = $8"#,
+           WHERE uuid = $9"#,
     )
     .bind(&req.title)
     .bind(&req.description)
@@ -381,10 +430,18 @@ pub async fn update_song(
     .bind(&req.cover_image_url)
     .bind(req.remove_cover)
     .bind(&req.language_id)
+    .bind(&req.category_id)
     .bind(&uuid)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Update genres if provided
+    if let Some(ref genre_ids) = req.genre_ids {
+        queries::set_song_genres(&state.db, song.id, genre_ids)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
 
     let updated = queries::get_song_by_uuid(&state.db, &uuid)
         .await

@@ -34,6 +34,14 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                     WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
                     ELSE 1.0
                   END
+                * CASE WHEN NOT EXISTS (SELECT 1 FROM song_genres sg WHERE sg.song_id = s.id) THEN 0.7 ELSE 1.0 END
+                * CASE WHEN s.language_id IS NULL THEN 0.7 ELSE 1.0 END
+                * CASE
+                    WHEN s.lyrics IS NULL OR s.lyrics = '' THEN 0.7
+                    WHEN LENGTH(s.lyrics) < 200 THEN 0.85
+                    ELSE 1.0
+                  END
+                * CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END
                 / POWER(
                     GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 24, 0) + 2,
                     1.8

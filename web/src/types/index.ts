@@ -44,6 +44,21 @@ export interface Song {
   // Category join fields
   category_name: string | null;
   category_slug: string | null;
+  // Comment count
+  comment_count: number;
+  // Genres
+  genres: Genre[];
+  // Language join fields
+  language_code: string | null;
+  language_name: string | null;
+}
+
+export interface Genre {
+  id: number;
+  name: string;
+  slug: string;
+  display_order: number;
+  created_at: string;
 }
 
 export interface Category {
@@ -83,6 +98,12 @@ export interface Notification {
   data: Record<string, unknown>;
   is_read: boolean;
   created_at: string;
+}
+
+export interface FeedPreferences {
+  excluded_genres: number[];
+  excluded_languages: number[];
+  excluded_categories: number[];
 }
 
 export type SortMode = "trending" | "latest" | "top";

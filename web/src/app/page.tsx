@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
 import { getSongs } from "@/lib/api";
 import { SongCard } from "@/components/song/SongCard";
@@ -8,23 +9,55 @@ import { FeedTabs } from "@/components/feed/FeedTabs";
 import { FeedFilters } from "@/components/feed/FeedFilters";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 
-export default function FeedPage() {
+function FeedPageInner() {
+  const searchParams = useSearchParams();
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortMode>("trending");
   const [period, setPeriod] = useState<TimePeriod>("week");
   const [languageId, setLanguageId] = useState<number | undefined>();
   const [categoryId, setCategoryId] = useState<number | undefined>();
+  const [genreSlug, setGenreSlug] = useState<string | undefined>();
+  const [langCode, setLangCode] = useState<string | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const { setFeedSongs, playFromFeed } = useAudioPlayer();
 
-  // Read initial category from URL query param
+  // Read initial params from URL
+  // Middleware rewrites /genre/:slug → /?genre=slug etc. but Next.js 16
+  // doesn't propagate rewritten search params to useSearchParams().
+  // So we also parse window.location.pathname directly.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const cat = params.get("category");
+    const pathname = window.location.pathname;
+
+    // /genre/:slug
+    const genreMatch = pathname.match(/^\/genre\/([^/]+)$/);
+    if (genreMatch) setGenreSlug(genreMatch[1]);
+
+    // /language/:code
+    const langMatch = pathname.match(/^\/language\/([^/]+)$/);
+    if (langMatch) setLangCode(langMatch[1]);
+
+    // /trending, /latest, /top
+    const sortRoutes: Record<string, SortMode> = {
+      "/trending": "trending",
+      "/latest": "latest",
+      "/top": "top",
+    };
+    if (sortRoutes[pathname]) setSort(sortRoutes[pathname]);
+
+    // Also check searchParams (for direct ?genre=rock etc.)
+    const cat = searchParams.get("category");
     if (cat) setCategoryId(Number(cat));
-  }, []);
+    const sortParam = searchParams.get("sort");
+    if (sortParam && ["trending", "latest", "top"].includes(sortParam)) {
+      setSort(sortParam as SortMode);
+    }
+    const genreParam = searchParams.get("genre");
+    if (genreParam) setGenreSlug(genreParam);
+    const langCodeParam = searchParams.get("lang_code");
+    if (langCodeParam) setLangCode(langCodeParam);
+  }, [searchParams]);
 
   const fetchSongs = useCallback(async () => {
     setLoading(true);
@@ -34,6 +67,8 @@ export default function FeedPage() {
         period: sort === "top" ? period : undefined,
         lang: languageId,
         category: categoryId,
+        genre: genreSlug,
+        lang_code: langCode,
         q: searchQuery || undefined,
         page,
         limit: 24,
@@ -44,7 +79,7 @@ export default function FeedPage() {
       console.error("Failed to load songs:", e);
     }
     setLoading(false);
-  }, [sort, period, languageId, categoryId, searchQuery, page, setFeedSongs]);
+  }, [sort, period, languageId, categoryId, genreSlug, langCode, searchQuery, page, setFeedSongs]);
 
   useEffect(() => {
     fetchSongs();
@@ -65,11 +100,13 @@ export default function FeedPage() {
         <FeedFilters
           languageId={languageId}
           categoryId={categoryId}
+          genreSlug={genreSlug}
           period={period}
           showPeriod={sort === "top"}
           searchQuery={searchDebounce}
           onLanguageChange={(id) => { setLanguageId(id); setPage(1); }}
           onCategoryChange={(id) => { setCategoryId(id); setPage(1); }}
+          onGenreChange={(slug) => { setGenreSlug(slug); setPage(1); }}
           onPeriodChange={(p) => { setPeriod(p); setPage(1); }}
           onSearchChange={setSearchDebounce}
         />
@@ -131,5 +168,13 @@ export default function FeedPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function FeedPage() {
+  return (
+    <Suspense>
+      <FeedPageInner />
+    </Suspense>
   );
 }

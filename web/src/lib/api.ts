@@ -1,4 +1,4 @@
-import type { Song, Category, Language, SongRequest, Notification } from "@/types";
+import type { Song, Genre, Category, Language, SongRequest, Notification } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -59,6 +59,8 @@ export async function getSongs(params?: {
   category?: number;
   q?: string;
   audio_hash?: string;
+  genre?: string;
+  lang_code?: string;
   page?: number;
   limit?: number;
 }): Promise<{ songs: Song[]; page: number; limit: number }> {
@@ -82,6 +84,8 @@ export async function updateSong(uuid: string, data: {
   ai_model?: string;
   cover_image_url?: string;
   language_id?: number;
+  category_id?: number;
+  genre_ids?: number[];
   remove_cover?: boolean;
 }): Promise<{ song: Song }> {
   return fetchApi(`/api/songs/${uuid}`, {
@@ -103,6 +107,7 @@ export async function createSong(data: {
   language_id?: number;
   category_id?: number;
   fulfills_request_id?: number;
+  genre_ids?: number[];
 }): Promise<Song> {
   return fetchApi("/api/songs", {
     method: "POST",
@@ -240,6 +245,29 @@ export async function removeBookmark(
   });
 }
 
+// ── Feed Preferences ──
+
+export async function getFeedPreferences(accountId: string): Promise<{
+  excluded_genres: number[];
+  excluded_languages: number[];
+  excluded_categories: number[];
+  hide_no_cover: boolean;
+}> {
+  return fetchApi(`/api/users/${accountId}/feed-preferences`);
+}
+
+export async function updateFeedPreferences(accountId: string, data: {
+  excluded_genres: number[];
+  excluded_languages: number[];
+  excluded_categories: number[];
+  hide_no_cover: boolean;
+}): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/feed-preferences`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
 // ── Notifications ──
 
 export async function getNotifications(): Promise<Notification[]> {
@@ -250,6 +278,17 @@ export async function markAllNotificationsRead(): Promise<void> {
   return fetchApi("/api/notifications/read-all", { method: "POST" });
 }
 
+// ── Stats ──
+
+export async function getStats(): Promise<{
+  total_songs: number;
+  total_plays: number;
+  total_tips_yocto: string;
+  total_bounties_yocto: string;
+}> {
+  return fetchApi("/api/stats");
+}
+
 // ── Categories & Languages ──
 
 export async function getCategories(): Promise<Category[]> {
@@ -258,6 +297,23 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function getLanguages(): Promise<Language[]> {
   return fetchApi("/api/languages");
+}
+
+// ── Genres ──
+
+export async function getGenres(): Promise<Genre[]> {
+  return fetchApi("/api/genres");
+}
+
+export async function createGenre(data: { name: string; slug: string; display_order?: number }): Promise<Genre> {
+  return fetchApi("/api/admin/genres", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteGenre(id: number): Promise<void> {
+  return fetchApi(`/api/admin/genres/${id}`, { method: "DELETE" });
 }
 
 // ── Admin ──
@@ -296,7 +352,7 @@ export async function moderateRequest(uuid: string, data: { is_hidden?: boolean;
   });
 }
 
-export async function moderateSong(uuid: string, data: { is_hidden?: boolean; category_id?: number }): Promise<void> {
+export async function moderateSong(uuid: string, data: { is_hidden?: boolean; category_id?: number; language_id?: number; genre_ids?: number[] }): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -381,12 +437,18 @@ export interface AdminSongScore {
   tips_near: number;
   tips_score: number;
   newbie_multiplier: number;
+  genre_multiplier: number;
+  language_multiplier: number;
+  lyrics_multiplier: number;
+  cover_multiplier: number;
   age_hours: number;
   age_divisor: number;
   base_score: number;
   is_hidden: boolean;
   is_deleted: boolean;
   created_at: string;
+  genre_ids: number[];
+  language_id: number | null;
 }
 
 export async function getAdminSongScores(): Promise<AdminSongScore[]> {

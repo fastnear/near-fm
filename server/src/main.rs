@@ -115,6 +115,29 @@ async fn main() -> anyhow::Result<()> {
         // Merge rate-limited routes
         .merge(strict_routes)
         .merge(moderate_routes)
+        // Public stats
+        .route(
+            "/api/stats",
+            get(|state: axum::extract::State<AppState>| async move {
+                let row: (i64, i64, String, String) = sqlx::query_as(
+                    r#"SELECT
+                        (SELECT COUNT(*) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_songs,
+                        (SELECT COALESCE(SUM(play_count), 0) FROM songs WHERE NOT is_deleted) AS total_plays,
+                        (SELECT COALESCE(SUM(CAST(total_tips_yocto AS NUMERIC)), 0)::TEXT FROM songs WHERE NOT is_deleted) AS total_tips_yocto,
+                        (SELECT COALESCE(SUM(CAST(bounty_amount_yocto AS NUMERIC)), 0)::TEXT FROM song_requests) AS total_bounties_yocto
+                    "#,
+                )
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                Ok::<_, (axum::http::StatusCode, String)>(axum::Json(serde_json::json!({
+                    "total_songs": row.0,
+                    "total_plays": row.1,
+                    "total_tips_yocto": row.2,
+                    "total_bounties_yocto": row.3,
+                })))
+            }),
+        )
         // Songs (GET + PUT not rate-limited)
         .route("/api/songs", get(routes::songs::list_songs))
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
@@ -135,6 +158,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/users/:account_id/bookmarks/:song_uuid",
             delete(routes::users::remove_bookmark),
+        )
+        .route(
+            "/api/users/:account_id/feed-preferences",
+            get(routes::users::get_feed_preferences).put(routes::users::update_feed_preferences),
         )
         // Notifications
         .route(
@@ -182,6 +209,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/users/:account_id/mute", patch(routes::comments::admin_toggle_mute))
         .route("/api/admin/users/:account_id/ban", patch(routes::admin::admin_toggle_ban))
         .route("/api/admin/config", get(routes::admin::get_config).patch(routes::admin::update_config))
+        .route("/api/genres", get(routes::admin::list_genres))
+        .route("/api/admin/genres", post(routes::admin::create_genre))
+        .route("/api/admin/genres/:id", delete(routes::admin::delete_genre))
         .route(
             "/api/categories",
             get(routes::admin::list_categories),

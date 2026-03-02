@@ -46,6 +46,8 @@ List songs with filtering and pagination.
 - `lang` — language ID filter
 - `category` — category ID filter
 - `q` — full-text search query
+- `genre` — genre slug filter (e.g. `rock`, `electronic`)
+- `lang_code` — language code filter (e.g. `en`, `es`)
 - `audio_hash` — check if audio already uploaded (returns 409 if exists)
 - `page` — page number (default 1)
 - `limit` — items per page (default 20, max 100)
@@ -78,7 +80,10 @@ List songs with filtering and pagination.
       "uploader_id": 1,
       "uploader_account_id": "artist.near",
       "uploader_display_name": "Artist",
-      "uploader_avatar_url": null
+      "uploader_avatar_url": null,
+      "genres": [{ "id": 1, "name": "Electronic", "slug": "electronic", "display_order": 1 }],
+      "language_code": "en",
+      "language_name": "English"
     }
   ],
   "page": 1,
@@ -106,6 +111,7 @@ Upload a new song. **Auth required.**
   "cover_image_url": "https://...",
   "language_id": 1,
   "category_id": 1,
+  "genre_ids": [1, 3],
   "fulfills_request_id": null
 }
 ```
@@ -113,7 +119,7 @@ Upload a new song. **Auth required.**
 ### PUT /api/songs/:uuid
 Update song metadata. **Auth required** (owner or admin).
 
-**Body:** `{ "title": "...", "description": "...", "lyrics": "...", "ai_model": "...", "cover_image_url": "...", "language_id": 1, "remove_cover": false }`
+**Body:** `{ "title": "...", "description": "...", "lyrics": "...", "ai_model": "...", "cover_image_url": "...", "language_id": 1, "genre_ids": [1, 3], "remove_cover": false }`
 
 ### POST /api/songs/:uuid/vote
 Vote on a song. **Auth required.** Banned users cannot vote.
@@ -230,51 +236,8 @@ List all categories.
 ### GET /api/languages
 List all languages.
 
-## Admin Endpoints
-
-All admin endpoints require JWT from an account listed in `ADMIN_ACCOUNTS`.
-
-### GET /api/admin/reports
-List pending reports.
-
-### PATCH /api/admin/reports/:id
-Review a report. **Body:** `{ "status": "reviewed", "action": "hide" }` or `{ "status": "dismissed" }`
-
-### PATCH /api/admin/songs/:uuid
-Moderate a song. **Body:** `{ "is_hidden": true, "category_id": 2 }`
-
-### DELETE /api/admin/songs/:uuid
-Soft-delete a song.
-
-### GET /api/admin/comments
-List comments (searchable). **Query:** `?search=text`
-
-### PATCH /api/admin/comments/:id
-Moderate a comment. **Body:** `{ "is_hidden": true }`
-
-### PATCH /api/admin/users/:account_id/mute
-Mute/unmute a user. **Body:** `{ "is_muted": true }`
-
-### PATCH /api/admin/users/:account_id/ban
-Ban/unban a user. Banning hides all songs/comments and deletes votes. **Body:** `{ "is_banned": true }`
-
-### POST /api/admin/categories
-Create category. **Body:** `{ "name": "Rock", "slug": "rock", "display_order": 5 }`
-
-### DELETE /api/admin/categories/:id
-Delete a category.
-
-### GET /api/admin/requests
-List all requests (admin view).
-
-### PATCH /api/admin/requests/:uuid
-Moderate a request. **Body:** `{ "is_hidden": true, "title": "edited", "description": "edited" }`
-
-### GET /api/admin/config
-Get platform config.
-
-### PATCH /api/admin/config
-Update platform config. **Body:** `{ "key": "commission_rate_bps", "value": "500" }`
+### GET /api/genres
+List all genres. Returns array of `{ id, name, slug, display_order, created_at }`.
 
 ## NEAR Smart Contract
 

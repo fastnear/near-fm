@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     auth::jwt::require_admin,
-    db::models::{Category, Report, PlatformConfig},
+    db::models::{Category, Genre, Report, PlatformConfig},
+    db::queries,
     AppState,
 };
 
@@ -175,7 +176,9 @@ pub async fn review_report(
 #[derive(Debug, Deserialize)]
 pub struct ModerateSongRequest {
     pub category_id: Option<i32>,
+    pub language_id: Option<i32>,
     pub is_hidden: Option<bool>,
+    pub genre_ids: Option<Vec<i32>>,
 }
 
 pub async fn moderate_song(
@@ -191,15 +194,32 @@ pub async fn moderate_song(
         r#"UPDATE songs SET
             category_id = COALESCE($1, category_id),
             is_hidden = COALESCE($2, is_hidden),
+            language_id = COALESCE($3, language_id),
             updated_at = NOW()
-           WHERE uuid = $3"#,
+           WHERE uuid = $4"#,
     )
     .bind(req.category_id)
     .bind(req.is_hidden)
+    .bind(req.language_id)
     .bind(&uuid)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Update genres if provided
+    if let Some(ref genre_ids) = req.genre_ids {
+        let song_id: Option<i32> = sqlx::query_scalar("SELECT id FROM songs WHERE uuid = $1")
+            .bind(&uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        if let Some(song_id) = song_id {
+            queries::set_song_genres(&state.db, song_id, genre_ids)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+    }
 
     Ok(StatusCode::OK)
 }
@@ -380,12 +400,18 @@ pub struct AdminSongScore {
     pub tips_near: f64,
     pub tips_score: f64,
     pub newbie_multiplier: f64,
+    pub genre_multiplier: f64,
+    pub language_multiplier: f64,
+    pub lyrics_multiplier: f64,
+    pub cover_multiplier: f64,
     pub age_hours: f64,
     pub age_divisor: f64,
     pub base_score: f64,
     pub is_hidden: bool,
     pub is_deleted: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub genre_ids: Vec<i32>,
+    pub language_id: Option<i32>,
 }
 
 pub async fn list_song_scores(
@@ -414,6 +440,10 @@ pub async fn list_song_scores(
                 WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
                 ELSE 1.0
             END)::FLOAT8 AS newbie_multiplier,
+            (CASE WHEN NOT EXISTS (SELECT 1 FROM song_genres sg WHERE sg.song_id = s.id) THEN 0.7 ELSE 1.0 END)::FLOAT8 AS genre_multiplier,
+            (CASE WHEN s.language_id IS NULL THEN 0.7 ELSE 1.0 END)::FLOAT8 AS language_multiplier,
+            (CASE WHEN s.lyrics IS NULL OR s.lyrics = '' THEN 0.7 WHEN LENGTH(s.lyrics) < 200 THEN 0.85 ELSE 1.0 END)::FLOAT8 AS lyrics_multiplier,
+            (CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END)::FLOAT8 AS cover_multiplier,
             (EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0)::FLOAT8 AS age_hours,
             POWER(GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 24, 0) + 2, 1.8)::FLOAT8 AS age_divisor,
             (
@@ -427,10 +457,16 @@ pub async fn list_song_scores(
                     WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
                     ELSE 1.0
                   END
+                * CASE WHEN NOT EXISTS (SELECT 1 FROM song_genres sg WHERE sg.song_id = s.id) THEN 0.7 ELSE 1.0 END
+                * CASE WHEN s.language_id IS NULL THEN 0.7 ELSE 1.0 END
+                * CASE WHEN s.lyrics IS NULL OR s.lyrics = '' THEN 0.7 WHEN LENGTH(s.lyrics) < 200 THEN 0.85 ELSE 1.0 END
+                * CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END
             )::FLOAT8 AS base_score,
             s.is_hidden,
             s.is_deleted,
-            s.created_at
+            s.created_at,
+            ARRAY(SELECT sg.genre_id FROM song_genres sg WHERE sg.song_id = s.id) AS genre_ids,
+            s.language_id
         FROM songs s
         JOIN users u ON u.id = s.uploader_id
         LEFT JOIN (
@@ -554,4 +590,62 @@ pub async fn admin_toggle_ban(
     }
 
     Ok(StatusCode::OK)
+}
+
+// ── Genres ──
+
+pub async fn list_genres(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Genre>>, (StatusCode, String)> {
+    let genres = queries::list_genres(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(genres))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateGenreRequest {
+    pub name: String,
+    pub slug: String,
+    pub display_order: Option<i32>,
+}
+
+pub async fn create_genre(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<CreateGenreRequest>,
+) -> Result<Json<Genre>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let genre = sqlx::query_as::<_, Genre>(
+        r#"INSERT INTO genres (name, slug, display_order)
+           VALUES ($1, $2, $3)
+           RETURNING *"#,
+    )
+    .bind(&req.name)
+    .bind(&req.slug)
+    .bind(req.display_order.unwrap_or(0))
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(genre))
+}
+
+pub async fn delete_genre(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    extensions: Extensions,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    sqlx::query("DELETE FROM genres WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

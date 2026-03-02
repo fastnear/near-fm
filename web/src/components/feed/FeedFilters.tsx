@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Category, Language, TimePeriod } from "@/types";
-import { getCategories, getLanguages } from "@/lib/api";
+import type { Category, Genre, Language, TimePeriod } from "@/types";
+import { getCategories, getGenres, getLanguages } from "@/lib/api";
 
 interface Props {
   languageId: number | undefined;
   categoryId: number | undefined;
+  genreSlug: string | undefined;
   period: TimePeriod | undefined;
   showPeriod: boolean;
   searchQuery: string;
   onLanguageChange: (id: number | undefined) => void;
   onCategoryChange: (id: number | undefined) => void;
+  onGenreChange: (slug: string | undefined) => void;
   onPeriodChange: (period: TimePeriod) => void;
   onSearchChange: (q: string) => void;
 }
@@ -19,19 +21,23 @@ interface Props {
 export function FeedFilters({
   languageId,
   categoryId,
+  genreSlug,
   period,
   showPeriod,
   searchQuery,
   onLanguageChange,
   onCategoryChange,
+  onGenreChange,
   onPeriodChange,
   onSearchChange,
 }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
+  const [genres, setGenres] = useState<Genre[]>([]);
   const [languages, setLanguages] = useState<Language[]>([]);
 
   useEffect(() => {
     getCategories().then(setCategories).catch(console.error);
+    getGenres().then(setGenres).catch(console.error);
     getLanguages().then(setLanguages).catch(console.error);
   }, []);
 
@@ -88,6 +94,22 @@ export function FeedFilters({
         {categories.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
+          </option>
+        ))}
+      </select>
+
+      {/* Genre */}
+      <select
+        value={genreSlug ?? ""}
+        onChange={(e) =>
+          onGenreChange(e.target.value || undefined)
+        }
+        className={selectClass}
+      >
+        <option value="">All genres</option>
+        {genres.map((g) => (
+          <option key={g.id} value={g.slug}>
+            {g.name}
           </option>
         ))}
       </select>

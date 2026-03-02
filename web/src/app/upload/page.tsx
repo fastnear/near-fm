@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { Language, Category, SongRequest } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { createSong, getSongs, getLanguages, getCategories, getRequest } from "@/lib/api";
+import { GenrePicker } from "@/components/song/GenrePicker";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
@@ -42,6 +43,7 @@ function UploadPage() {
   const [aiModel, setAiModel] = useState("");
   const [languageId, setLanguageId] = useState<number | undefined>();
   const [categoryId, setCategoryId] = useState<number | undefined>();
+  const [genreIds, setGenreIds] = useState<number[]>([]);
   const [languages, setLanguages] = useState<Language[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -207,6 +209,7 @@ function UploadPage() {
         language_id: languageId,
         category_id: categoryId,
         fulfills_request_id: fulfillsRequestId ? Number(fulfillsRequestId) : undefined,
+        genre_ids: genreIds.length > 0 ? genreIds : undefined,
       });
 
       // Redirect to song page on near.fm
@@ -396,6 +399,15 @@ function UploadPage() {
             </select>
           </div>
         )}
+
+        {/* Genres */}
+        <div>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Genres (up to 3)</label>
+          <GenrePicker selectedIds={genreIds} onChange={setGenreIds} />
+          <p className="text-xs text-slate-500 mt-2">
+            Songs with genres, language, cover image, and lyrics (200+ chars) get higher visibility in trending feed.
+          </p>
+        </div>
 
         {/* Error */}
         {error && (

@@ -96,10 +96,15 @@ pub async fn get_song_by_uuid(
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
-            c.slug AS category_slug
+            c.slug AS category_slug,
+            l.code AS language_code,
+            l.name AS language_name,
+            (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
+            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
            LEFT JOIN categories c ON s.category_id = c.id
+           LEFT JOIN languages l ON s.language_id = l.id
            WHERE s.uuid = $1 AND NOT s.is_deleted"#,
     )
     .bind(uuid)
@@ -114,80 +119,29 @@ pub async fn list_songs(
     category_id: Option<i32>,
     search_query: Option<&str>,
     period: Option<&str>,
+    genre_slug: Option<&str>,
+    lang_code: Option<&str>,
+    excluded_genre_ids: &[i32],
+    excluded_language_ids: &[i32],
+    excluded_category_ids: &[i32],
+    hide_no_cover: bool,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<SongWithUploader>, sqlx::Error> {
-    let mut sql = String::from(
-        r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
-            u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation,
-            c.name AS category_name,
-            c.slug AS category_slug
-           FROM songs s
-           JOIN users u ON s.uploader_id = u.id
-           LEFT JOIN categories c ON s.category_id = c.id
-           WHERE NOT s.is_deleted AND NOT s.is_hidden"#,
-    );
-
-    let mut param_idx = 1u32;
-    let mut binds: Vec<Box<dyn std::any::Any>> = Vec::new();
-
-    if language_id.is_some() {
-        param_idx += 1;
-        sql.push_str(&format!(" AND s.language_id = ${}", param_idx));
-    }
-    if category_id.is_some() {
-        param_idx += 1;
-        sql.push_str(&format!(" AND s.category_id = ${}", param_idx));
-    }
-    if search_query.is_some() {
-        param_idx += 1;
-        sql.push_str(&format!(
-            " AND s.search_vector @@ plainto_tsquery('simple', ${})",
-            param_idx
-        ));
-    }
-
-    // Period filter for "top" sort
-    if sort == "top" {
-        if let Some(p) = period {
-            let interval = match p {
-                "day" => "1 day",
-                "week" => "7 days",
-                "month" => "30 days",
-                _ => "100 years", // "all"
-            };
-            sql.push_str(&format!(
-                " AND s.created_at >= NOW() - INTERVAL '{}'",
-                interval
-            ));
-        }
-    }
-
-    // Sort
-    match sort {
-        "latest" => sql.push_str(" ORDER BY s.created_at DESC"),
-        "top" => sql.push_str(" ORDER BY (s.upvotes - s.downvotes) DESC, s.created_at DESC"),
-        _ => sql.push_str(" ORDER BY s.score DESC, s.created_at DESC"), // trending
-    }
-
-    sql.push_str(" LIMIT $1 OFFSET $2");
-
-    // For now, use a simpler approach with fixed parameter positions
-    // We'll build the query dynamically
-    drop(binds);
-
-    // Simplified approach: build with all parameters always present
     let final_sql = r#"SELECT s.*,
             u.account_id AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
-            c.slug AS category_slug
+            c.slug AS category_slug,
+            l.code AS language_code,
+            l.name AS language_name,
+            (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
+            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
            LEFT JOIN categories c ON s.category_id = c.id
+           LEFT JOIN languages l ON s.language_id = l.id
            WHERE NOT s.is_deleted AND NOT s.is_hidden AND s.is_validated
              AND ($3::INTEGER IS NULL OR s.language_id = $3)
              AND ($4::INTEGER IS NULL OR s.category_id = $4)
@@ -199,6 +153,18 @@ pub async fn list_songs(
                     WHEN 'month' THEN s.created_at >= NOW() - INTERVAL '30 days'
                     ELSE TRUE
                   END)
+             AND ($8::TEXT IS NULL OR EXISTS (
+                SELECT 1 FROM song_genres sg2 JOIN genres g2 ON g2.id = sg2.genre_id
+                WHERE sg2.song_id = s.id AND g2.slug = $8
+             ))
+             AND ($9::TEXT IS NULL OR l.code = $9)
+             AND (CARDINALITY($10::int[]) = 0 OR NOT EXISTS (
+                SELECT 1 FROM song_genres sg3
+                WHERE sg3.song_id = s.id AND sg3.genre_id = ANY($10)
+             ))
+             AND (CARDINALITY($11::int[]) = 0 OR s.language_id IS NULL OR s.language_id != ALL($11))
+             AND (CARDINALITY($12::int[]) = 0 OR s.category_id IS NULL OR s.category_id != ALL($12))
+             AND (NOT $13::BOOL OR s.cover_image_url IS NOT NULL)
            ORDER BY
              CASE WHEN $7 = 'latest' THEN EXTRACT(EPOCH FROM s.created_at) END DESC,
              CASE WHEN $7 = 'top' THEN (s.upvotes - s.downvotes)::FLOAT END DESC,
@@ -219,6 +185,12 @@ pub async fn list_songs(
         .bind(search_query)
         .bind(period_str)
         .bind(sort)
+        .bind(genre_slug)
+        .bind(lang_code)
+        .bind(excluded_genre_ids)
+        .bind(excluded_language_ids)
+        .bind(excluded_category_ids)
+        .bind(hide_no_cover)
         .fetch_all(pool)
         .await
 }
@@ -398,4 +370,35 @@ pub async fn list_languages(pool: &PgPool) -> Result<Vec<Language>, sqlx::Error>
     sqlx::query_as::<_, Language>("SELECT * FROM languages ORDER BY name")
         .fetch_all(pool)
         .await
+}
+
+// ── Genres ──
+
+pub async fn list_genres(pool: &PgPool) -> Result<Vec<Genre>, sqlx::Error> {
+    sqlx::query_as::<_, Genre>("SELECT * FROM genres ORDER BY display_order")
+        .fetch_all(pool)
+        .await
+}
+
+pub async fn set_song_genres(
+    pool: &PgPool,
+    song_id: i32,
+    genre_ids: &[i32],
+) -> Result<(), sqlx::Error> {
+    // Delete existing
+    sqlx::query("DELETE FROM song_genres WHERE song_id = $1")
+        .bind(song_id)
+        .execute(pool)
+        .await?;
+
+    // Insert new (max 3)
+    for &genre_id in genre_ids.iter().take(3) {
+        sqlx::query("INSERT INTO song_genres (song_id, genre_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(song_id)
+            .bind(genre_id)
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
 }

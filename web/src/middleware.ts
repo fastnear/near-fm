@@ -24,5 +24,37 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(`https://near.fm${pathname}`);
   }
 
+  // Rewrite /trending, /latest, /top to /?sort=...
+  const { pathname } = request.nextUrl;
+  const sortRoutes: Record<string, string> = {
+    "/trending": "trending",
+    "/latest": "latest",
+    "/top": "top",
+  };
+  if (sortRoutes[pathname]) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("sort", sortRoutes[pathname]);
+    return NextResponse.rewrite(url);
+  }
+
+  // Rewrite /genre/:slug to /?genre=slug
+  const genreMatch = pathname.match(/^\/genre\/([^/]+)$/);
+  if (genreMatch) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("genre", genreMatch[1]);
+    return NextResponse.rewrite(url);
+  }
+
+  // Rewrite /language/:code to /?lang_code=code
+  const langMatch = pathname.match(/^\/language\/([^/]+)$/);
+  if (langMatch) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("lang_code", langMatch[1]);
+    return NextResponse.rewrite(url);
+  }
+
   return NextResponse.next();
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { Category, Song } from "@/types";
+import type { Category, Genre, Language, Song } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import {
   getReports,
@@ -9,6 +9,9 @@ import {
   getCategories,
   createCategory,
   deleteCategory,
+  getGenres,
+  createGenre,
+  deleteGenre,
   getSongs,
   moderateSong,
   deleteSong,
@@ -19,11 +22,13 @@ import {
   toggleMuteUser,
   toggleBanUser,
   getAdminSongScores,
+  getLanguages,
 } from "@/lib/api";
 import type { AdminComment, AdminSongScore } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
+import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "categories" | "songs" | "requests" | "comments";
+type Tab = "reports" | "categories" | "genres" | "songs" | "requests" | "comments";
 
 interface Report {
   id: number;
@@ -388,6 +393,153 @@ function CategoriesPanel() {
   );
 }
 
+// ── Genres Tab ──
+
+function GenresPanel() {
+  const [genres, setGenres] = useState<Genre[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formSlug, setFormSlug] = useState("");
+  const [formOrder, setFormOrder] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<number | null>(null);
+
+  const fetchGenres = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getGenres();
+      setGenres(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load genres");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchGenres();
+  }, [fetchGenres]);
+
+  const handleNameChange = (name: string) => {
+    setFormName(name);
+    setFormSlug(slugify(name));
+  };
+
+  const handleCreate = async () => {
+    if (!formName.trim() || !formSlug.trim()) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await createGenre({
+        name: formName.trim(),
+        slug: formSlug.trim(),
+        display_order: formOrder,
+      });
+      setFormName("");
+      setFormSlug("");
+      setFormOrder(0);
+      await fetchGenres();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create genre");
+    }
+    setSubmitting(false);
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!window.confirm(`Delete genre "${name}"?`)) return;
+    setDeleteLoadingId(id);
+    try {
+      await deleteGenre(id);
+      await fetchGenres();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete genre");
+    }
+    setDeleteLoadingId(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Add Genre Form */}
+      <div className="glass-card rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">
+          Add Genre
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
+            <input
+              type="text"
+              value={formName}
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="e.g. Synthwave"
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Slug</label>
+            <input
+              type="text"
+              value={formSlug}
+              onChange={(e) => setFormSlug(e.target.value)}
+              placeholder="synthwave"
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Order</label>
+            <input
+              type="number"
+              value={formOrder}
+              onChange={(e) => setFormOrder(Number(e.target.value))}
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+        </div>
+        <button
+          onClick={handleCreate}
+          disabled={submitting || !formName.trim()}
+          className="mt-4 px-4 py-2 btn-primary rounded-lg text-sm disabled:opacity-50"
+        >
+          {submitting ? "Creating..." : "Create Genre"}
+        </button>
+        {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+      </div>
+
+      {/* Genre list */}
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-12 skeleton rounded-xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {genres.map((g) => (
+            <div
+              key={g.id}
+              className="glass-card rounded-xl px-4 py-3 flex items-center justify-between"
+            >
+              <div>
+                <span className="text-sm text-slate-200 font-medium">{g.name}</span>
+                <span className="text-xs text-slate-600 ml-2">/{g.slug}</span>
+                <span className="text-xs text-slate-700 ml-2">order: {g.display_order}</span>
+              </div>
+              <button
+                onClick={() => handleDelete(g.id, g.name)}
+                disabled={deleteLoadingId === g.id}
+                className="px-3 py-1 text-xs font-medium text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 rounded-lg border border-rose-500/20 transition"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Songs Tab ──
 
 function ScoreBar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -399,8 +551,13 @@ function ScoreBar({ value, max, color }: { value: number; max: number; color: st
   );
 }
 
-function SongScoreRow({ song, maxBase }: { song: AdminSongScore; maxBase: number }) {
+function SongScoreRow({ song, maxBase, languages, onGenresUpdated }: { song: AdminSongScore; maxBase: number; languages: Language[]; onGenresUpdated?: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [scoreGenreIds, setScoreGenreIds] = useState<number[]>(song.genre_ids || []);
+  const [genreSaving, setGenreSaving] = useState(false);
+  const [langId, setLangId] = useState<number | null>(song.language_id);
+  const [langSaving, setLangSaving] = useState(false);
+
   const ageStr = song.age_hours < 24
     ? `${song.age_hours.toFixed(1)}h`
     : `${(song.age_hours / 24).toFixed(1)}d`;
@@ -494,6 +651,55 @@ function SongScoreRow({ song, maxBase }: { song: AdminSongScore; maxBase: number
               <ScoreBar value={song.tips_score} max={maxBase} color="bg-amber-400" />
             </div>
 
+            {/* Genres & Language */}
+            <div className="sm:col-span-2">
+              <p className="text-slate-500 font-medium uppercase tracking-wider text-[10px] mb-1.5">Genres</p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <GenrePicker
+                    selectedIds={scoreGenreIds}
+                    onChange={async (ids) => {
+                      setScoreGenreIds(ids);
+                      setGenreSaving(true);
+                      try {
+                        await moderateSong(song.uuid, { genre_ids: ids });
+                        onGenresUpdated?.();
+                      } catch (e) {
+                        console.error("Failed to update genres:", e);
+                      }
+                      setGenreSaving(false);
+                    }}
+                  />
+                </div>
+                {genreSaving && <span className="text-[10px] text-slate-500">saving...</span>}
+              </div>
+              <p className="text-slate-500 font-medium uppercase tracking-wider text-[10px] mt-3 mb-1.5">Language</p>
+              <div className="flex items-center gap-2">
+                <select
+                  value={langId ?? ""}
+                  onChange={async (e) => {
+                    const val = e.target.value ? Number(e.target.value) : null;
+                    setLangId(val);
+                    setLangSaving(true);
+                    try {
+                      await moderateSong(song.uuid, { language_id: val ?? undefined });
+                      onGenresUpdated?.();
+                    } catch (e) {
+                      console.error("Failed to update language:", e);
+                    }
+                    setLangSaving(false);
+                  }}
+                  className="border border-white/[0.08] bg-white/[0.04] text-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-purple-500 transition"
+                >
+                  <option value="">No language</option>
+                  {languages.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                {langSaving && <span className="text-[10px] text-slate-500">saving...</span>}
+              </div>
+            </div>
+
             {/* Formula breakdown */}
             <div className="sm:col-span-2 glass rounded-lg p-3 space-y-1 font-mono text-[11px]">
               <div className="flex justify-between text-slate-400">
@@ -504,6 +710,30 @@ function SongScoreRow({ song, maxBase }: { song: AdminSongScore; maxBase: number
                 <div className="flex justify-between text-amber-400">
                   <span>newbie penalty</span>
                   <span>&times; {song.newbie_multiplier}</span>
+                </div>
+              )}
+              {song.genre_multiplier < 1 && (
+                <div className="flex justify-between text-cyan-400">
+                  <span>no genre penalty</span>
+                  <span>&times; {song.genre_multiplier}</span>
+                </div>
+              )}
+              {song.language_multiplier < 1 && (
+                <div className="flex justify-between text-cyan-400">
+                  <span>no language penalty</span>
+                  <span>&times; {song.language_multiplier}</span>
+                </div>
+              )}
+              {song.lyrics_multiplier < 1 && (
+                <div className="flex justify-between text-cyan-400">
+                  <span>{song.lyrics_multiplier === 0.7 ? "no lyrics" : "short lyrics"} penalty</span>
+                  <span>&times; {song.lyrics_multiplier}</span>
+                </div>
+              )}
+              {song.cover_multiplier < 1 && (
+                <div className="flex justify-between text-cyan-400">
+                  <span>no cover penalty</span>
+                  <span>&times; {song.cover_multiplier}</span>
                 </div>
               )}
               <div className="flex justify-between text-slate-400">
@@ -532,6 +762,12 @@ function SongsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [languages, setLanguages] = useState<Language[]>([]);
+
+  // Load languages
+  useEffect(() => {
+    getLanguages().then(setLanguages).catch(console.error);
+  }, []);
 
   // Load scores
   useEffect(() => {
@@ -646,7 +882,7 @@ function SongsPanel() {
                       {i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <SongScoreRow song={song} maxBase={maxBase} />
+                      <SongScoreRow song={song} maxBase={maxBase} languages={languages} />
                     </div>
                   </div>
                 ))}
@@ -658,6 +894,7 @@ function SongsPanel() {
                 <div className="font-mono text-xs text-slate-400 space-y-1.5">
                   <p><span className="text-slate-300">base</span> = weighted_upvotes - weighted_downvotes + log10(plays) &times; 2 + log10(tips_NEAR + 1) &times; 9</p>
                   <p><span className="text-amber-400">if</span> uploader has &lt; 3 uploads AND reputation &lt; 1.5: <span className="text-amber-400">base &times;= 0.5</span> (newbie penalty)</p>
+                  <p><span className="text-cyan-400">if</span> no genres: <span className="text-cyan-400">base &times;= 0.7</span> &middot; no lyrics: <span className="text-cyan-400">base &times;= 0.85</span></p>
                   <p><span className="text-cyan-400">effective_age</span> = max(age_hours - 24, 0) &mdash; no decay in first 24 hours</p>
                   <p><span className="text-purple-400">score</span> = base / (effective_age + 2) ^ 1.8</p>
                 </div>
@@ -725,6 +962,19 @@ function SongsPanel() {
                       {" "}&middot;{" "}
                       {formatDate(song.created_at)}
                     </p>
+                    <div className="mt-2">
+                      <GenrePicker
+                        selectedIds={song.genres?.map((g) => g.id) || []}
+                        onChange={async (ids) => {
+                          try {
+                            await moderateSong(song.uuid, { genre_ids: ids });
+                            await searchSongs();
+                          } catch (e) {
+                            console.error("Genre update failed:", e);
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
@@ -1197,6 +1447,7 @@ export default function AdminPage() {
     { key: "requests", label: "Requests" },
     { key: "comments", label: "Comments" },
     { key: "categories", label: "Categories" },
+    { key: "genres", label: "Genres" },
   ];
 
   return (
@@ -1244,6 +1495,7 @@ export default function AdminPage() {
         {activeTab === "requests" && <RequestsPanel />}
         {activeTab === "comments" && <CommentsPanel />}
         {activeTab === "categories" && <CategoriesPanel />}
+        {activeTab === "genres" && <GenresPanel />}
       </div>
     </div>
   );

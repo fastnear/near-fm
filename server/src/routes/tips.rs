@@ -121,8 +121,9 @@ pub async fn record_tip(
         "tip_received",
         &serde_json::json!({
             "song_uuid": req.song_uuid,
+            "song_title": song.title,
             "from_account": claims.sub,
-            "amount_yocto": req.amount_yocto,
+            "amount_yocto": amount_yocto,
         }),
     )
     .await

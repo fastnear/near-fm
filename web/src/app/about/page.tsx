@@ -1,7 +1,28 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
 import Link from "next/link";
+import { getStats } from "@/lib/api";
+
+function formatNear(yocto: string): string {
+  const near = Number(yocto) / 1e24;
+  const formatted = near.toFixed(2);
+  return formatted.replace(/\.00$/, "");
+}
 
 export default function AboutPage() {
+  const [stats, setStats] = useState<{
+    total_songs: number;
+    total_plays: number;
+    total_tips_yocto: string;
+    total_bounties_yocto: string;
+  } | null>(null);
+
+  useEffect(() => {
+    getStats().then(setStats).catch(console.error);
+  }, []);
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-16">
       {/* Hero */}
@@ -14,6 +35,30 @@ export default function AboutPage() {
           The first decentralized platform for AI-generated music, powered by NEAR Protocol.
         </p>
       </div>
+
+      {/* Stats */}
+      {stats && (
+        <section className="mb-12">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="glass-card rounded-2xl p-5 text-center">
+              <div className="text-2xl font-bold text-white">{stats.total_songs.toLocaleString()}</div>
+              <div className="text-xs text-slate-500 mt-1">Tracks</div>
+            </div>
+            <div className="glass-card rounded-2xl p-5 text-center">
+              <div className="text-2xl font-bold text-white">{stats.total_plays.toLocaleString()}</div>
+              <div className="text-xs text-slate-500 mt-1">Total Plays</div>
+            </div>
+            <div className="glass-card rounded-2xl p-5 text-center">
+              <div className="text-2xl font-bold text-purple-400">{formatNear(stats.total_tips_yocto)} N</div>
+              <div className="text-xs text-slate-500 mt-1">Tips Paid</div>
+            </div>
+            <div className="glass-card rounded-2xl p-5 text-center">
+              <div className="text-2xl font-bold text-[#00ec97]">{formatNear(stats.total_bounties_yocto)} N</div>
+              <div className="text-xs text-slate-500 mt-1">Bounties</div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* What is near.fm */}
       <section className="mb-12">
@@ -32,7 +77,7 @@ export default function AboutPage() {
           {[
             {
               title: "Listen & Discover",
-              desc: "Browse a curated feed of AI-generated tracks sorted by trending, latest, or top-rated. Filter by language and category.",
+              desc: "Browse a curated feed of AI-generated tracks sorted by trending, latest, or top-rated. Filter by genre, language, and category.",
               icon: (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
               ),

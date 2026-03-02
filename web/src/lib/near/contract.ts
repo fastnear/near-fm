@@ -100,7 +100,11 @@ export function withdrawBountyAction(requestUuid: string) {
  * View call helper — calls a view method on the contract via NEAR RPC.
  */
 async function rpcViewCall(method: string, args: Record<string, unknown> = {}): Promise<any> {
-  const rpcUrl = process.env.NEXT_PUBLIC_NEAR_RPC_URL || "https://rpc.testnet.near.org";
+  const rpcUrl = process.env.NEXT_PUBLIC_NEAR_RPC_URL || (
+    process.env.NEXT_PUBLIC_NEAR_NETWORK === "mainnet"
+      ? "https://rpc.mainnet.fastnear.com"
+      : "https://rpc.testnet.fastnear.com"
+  );
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

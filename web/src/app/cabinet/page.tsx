@@ -1,10 +1,13 @@
 "use client";
 
+import React from "react";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getUserProfile, getBookmarks, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
+import { FeedPreferences } from "@/components/cabinet/FeedPreferences";
 import type { Song, Notification } from "@/types";
 
 // ── Helpers ──
@@ -44,12 +47,13 @@ const ADMIN_ACCOUNTS = (process.env.NEXT_PUBLIC_ADMIN_ACCOUNTS || "").split(",")
 
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "bookmarks" | "notifications" | "reports";
+type TabKey = "balance" | "songs" | "bookmarks" | "feed" | "notifications" | "reports";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
   { key: "bookmarks", label: "Bookmarks" },
+  { key: "feed", label: "Feed Filters" },
   { key: "notifications", label: "Notifications" },
 ];
 
@@ -128,6 +132,7 @@ export default function CabinetPage() {
       {activeTab === "balance" && <BalanceTab />}
       {activeTab === "songs" && <MySongsTab />}
       {activeTab === "bookmarks" && <BookmarksTab />}
+      {activeTab === "feed" && <FeedPreferences />}
       {activeTab === "notifications" && <NotificationsTab />}
       {activeTab === "reports" && isAdmin && <ReportsTab />}
     </div>
@@ -489,7 +494,7 @@ function NotificationIcon({ type }: { type: string }) {
   }
 }
 
-function notificationText(notif: Notification): string {
+function notificationText(notif: Notification): React.ReactNode {
   const data = notif.data;
 
   switch (notif.type) {
@@ -497,7 +502,15 @@ function notificationText(notif: Notification): string {
       const amount = data.amount_yocto as string | undefined;
       const from = (data.from_account || data.from_account_id) as string | undefined;
       const nearAmount = amount ? yoctoToNear(amount) : "?";
-      return `You received a tip of ${nearAmount} NEAR${from ? ` from ${from}` : ""}`;
+      const songTitle = data.song_title as string | undefined;
+      const songUuid = data.song_uuid as string | undefined;
+      return (
+        <>
+          You received a tip of {nearAmount} NEAR
+          {from ? <> from <Link href={`/profile/${from}`} className="text-purple-400 hover:underline">{from}</Link></> : ""}
+          {songTitle && songUuid ? <> for <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link></> : ""}
+        </>
+      );
     }
     case "song_reported":
       return `Your song has been reported${data.reason ? `: ${data.reason}` : ""}`;

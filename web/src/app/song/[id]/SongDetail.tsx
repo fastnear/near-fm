@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Song } from "@/types";
-import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment } from "@/lib/api";
+import type { Song, Category, Language } from "@/types";
+import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
+import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { getBalanceRpc } from "@/lib/near/contract";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -22,8 +23,10 @@ export function SongDetail({ uuid }: { uuid: string }) {
   const [reportSent, setReportSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ title: "", description: "", lyrics: "", ai_model: "" });
+  const [editForm, setEditForm] = useState({ title: "", description: "", lyrics: "", ai_model: "", genre_ids: [] as number[], language_id: undefined as number | undefined, category_id: undefined as number | undefined });
   const [editSaving, setEditSaving] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -70,6 +73,11 @@ export function SongDetail({ uuid }: { uuid: string }) {
   }, [accountId]);
 
   useEffect(() => {
+    getCategories().then(setCategories).catch(console.error);
+    getLanguages().then(setLanguages).catch(console.error);
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated && accountId && song) {
       getBookmarks(accountId)
         .then((bookmarks) => {
@@ -114,6 +122,9 @@ export function SongDetail({ uuid }: { uuid: string }) {
       description: song.description || "",
       lyrics: song.lyrics || "",
       ai_model: song.ai_model || "",
+      genre_ids: song.genres?.map((g) => g.id) || [],
+      language_id: song.language_id ?? undefined,
+      category_id: song.category_id ?? undefined,
     });
     setEditing(true);
   };
@@ -126,6 +137,9 @@ export function SongDetail({ uuid }: { uuid: string }) {
         description: editForm.description.trim() || undefined,
         lyrics: editForm.lyrics.trim() || undefined,
         ai_model: editForm.ai_model.trim() || undefined,
+        genre_ids: editForm.genre_ids,
+        language_id: editForm.language_id,
+        category_id: editForm.category_id,
       });
       setSong(result.song);
       setEditing(false);
@@ -252,6 +266,41 @@ export function SongDetail({ uuid }: { uuid: string }) {
                   className="w-full rounded-xl px-4 py-2 border border-white/[0.08] bg-white/[0.04] text-slate-200 focus:border-purple-500 focus:outline-none"
                 />
               </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Genres (up to 3)</label>
+                <GenrePicker
+                  selectedIds={editForm.genre_ids}
+                  onChange={(ids) => setEditForm({ ...editForm, genre_ids: ids })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Language</label>
+                  <select
+                    value={editForm.language_id ?? ""}
+                    onChange={(e) => setEditForm({ ...editForm, language_id: e.target.value ? Number(e.target.value) : undefined })}
+                    className="w-full rounded-xl px-3 py-2 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 focus:border-purple-500 focus:outline-none appearance-none cursor-pointer"
+                  >
+                    <option value="">Not set</option>
+                    {languages.map((l) => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Category</label>
+                  <select
+                    value={editForm.category_id ?? ""}
+                    onChange={(e) => setEditForm({ ...editForm, category_id: e.target.value ? Number(e.target.value) : undefined })}
+                    className="w-full rounded-xl px-3 py-2 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 focus:border-purple-500 focus:outline-none appearance-none cursor-pointer"
+                  >
+                    <option value="">Not set</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={saveEdit}
@@ -291,14 +340,33 @@ export function SongDetail({ uuid }: { uuid: string }) {
                 {song.uploader_display_name || song.uploader_account_id}
               </Link>
 
-              {song.category_name && (
-                <Link
-                  href={`/?category=${song.category_id}`}
-                  className="inline-block mt-2 text-xs px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors"
-                >
-                  {song.category_name}
-                </Link>
-              )}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {song.category_name && (
+                  <Link
+                    href={`/?category=${song.category_id}`}
+                    className="inline-block text-xs px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors"
+                  >
+                    {song.category_name}
+                  </Link>
+                )}
+                {song.genres?.map((g) => (
+                  <Link
+                    key={g.id}
+                    href={`/genre/${g.slug}`}
+                    className="inline-block text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 hover:bg-cyan-500/20 transition-colors"
+                  >
+                    {g.name}
+                  </Link>
+                ))}
+                {song.language_name && (
+                  <Link
+                    href={`/language/${song.language_code}`}
+                    className="inline-block text-xs px-2.5 py-0.5 rounded-full bg-white/[0.04] text-slate-400 border border-white/[0.08] hover:bg-white/[0.08] transition-colors"
+                  >
+                    {song.language_name}
+                  </Link>
+                )}
+              </div>
 
               {song.ai_model && (
                 <p className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5">
@@ -625,7 +693,10 @@ export function SongDetail({ uuid }: { uuid: string }) {
                             href={`/profile/${comment.author_account_id}`}
                             className="text-sm text-slate-300 hover:text-purple-400 transition-colors font-medium"
                           >
-                            {comment.author_display_name || comment.author_account_id}
+                            {(() => {
+                              const name = comment.author_display_name || comment.author_account_id;
+                              return name.length > 25 ? `${name.slice(0, 12)}...${name.slice(-10)}` : name;
+                            })()}
                           </Link>
                           <span className="text-xs text-slate-600">
                             {new Date(comment.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}

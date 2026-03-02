@@ -10,7 +10,8 @@ import { useNearWallet } from "@/contexts/NearWalletContext";
 
 function formatNear(yocto: string): string {
   const near = Number(yocto) / 1e24;
-  return near % 1 === 0 ? near.toFixed(0) : near.toFixed(2);
+  const formatted = near.toFixed(2);
+  return formatted.replace(/\.00$/, "");
 }
 
 function formatDate(iso: string): string {
@@ -229,12 +230,6 @@ export default function RequestDetailPage() {
             <span className="text-slate-600">Created:</span>{" "}
             {formatDate(request.created_at)}
           </div>
-          {request.expires_at && (
-            <div>
-              <span className="text-slate-600">Expires:</span>{" "}
-              {formatDate(request.expires_at)}
-            </div>
-          )}
           {request.bounty_tx_hash && (
             <div>
               <span className="text-slate-600">Bounty TX:</span>{" "}
@@ -358,14 +353,14 @@ export default function RequestDetailPage() {
                 </h3>
                 {canWithdraw ? (
                   <p className="text-slate-400 text-sm mb-4">
-                    The request has expired. You can withdraw your bounty with a 5% penalty fee.
+                    The request has expired. You can withdraw your bounty with a 20% penalty fee.
                     The refund will be added to your virtual balance.
                   </p>
                 ) : (
                   <p className="text-slate-400 text-sm mb-4">
                     Withdrawal is available after the request expires
                     {request.expires_at ? ` on ${formatDate(request.expires_at)}` : ""}.
-                    A 5% penalty fee applies.
+                    A 20% penalty fee applies.
                   </p>
                 )}
                 {error && (

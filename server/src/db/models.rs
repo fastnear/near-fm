@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use sqlx::postgres::PgRow;
+use sqlx::Row;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
@@ -47,6 +49,15 @@ pub struct Song {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Genre {
+    pub id: i32,
+    pub name: String,
+    pub slug: String,
+    pub display_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongWithUploader {
     pub id: i32,
     pub uuid: String,
@@ -78,6 +89,56 @@ pub struct SongWithUploader {
     pub uploader_reputation: f64,
     pub category_name: Option<String>,
     pub category_slug: Option<String>,
+    pub comment_count: i64,
+    pub genres: Vec<Genre>,
+    pub language_code: Option<String>,
+    pub language_name: Option<String>,
+}
+
+impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        let genres_json: Option<String> = row.try_get("genres_json").unwrap_or(None);
+        let genres: Vec<Genre> = genres_json
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+
+        Ok(SongWithUploader {
+            id: row.try_get("id")?,
+            uuid: row.try_get("uuid")?,
+            uploader_id: row.try_get("uploader_id")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description")?,
+            lyrics: row.try_get("lyrics")?,
+            ai_model: row.try_get("ai_model")?,
+            audio_url: row.try_get("audio_url")?,
+            audio_hash: row.try_get("audio_hash")?,
+            audio_duration_seconds: row.try_get("audio_duration_seconds")?,
+            audio_mime_type: row.try_get("audio_mime_type")?,
+            cover_image_url: row.try_get("cover_image_url")?,
+            category_id: row.try_get("category_id")?,
+            language_id: row.try_get("language_id")?,
+            score: row.try_get("score")?,
+            upvotes: row.try_get("upvotes")?,
+            downvotes: row.try_get("downvotes")?,
+            play_count: row.try_get("play_count")?,
+            total_tips_yocto: row.try_get("total_tips_yocto")?,
+            is_validated: row.try_get("is_validated")?,
+            is_hidden: row.try_get("is_hidden")?,
+            is_deleted: row.try_get("is_deleted")?,
+            fulfills_request_id: row.try_get("fulfills_request_id")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+            uploader_account_id: row.try_get("uploader_account_id")?,
+            uploader_display_name: row.try_get("uploader_display_name")?,
+            uploader_reputation: row.try_get("uploader_reputation")?,
+            category_name: row.try_get("category_name")?,
+            category_slug: row.try_get("category_slug")?,
+            comment_count: row.try_get("comment_count")?,
+            genres,
+            language_code: row.try_get("language_code").unwrap_or(None),
+            language_name: row.try_get("language_name").unwrap_or(None),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

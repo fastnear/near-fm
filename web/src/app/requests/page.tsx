@@ -11,7 +11,8 @@ type SortOption = "newest" | "highest_bounty";
 
 function formatNear(yocto: string): string {
   const near = Number(yocto) / 1e24;
-  return near % 1 === 0 ? near.toFixed(0) : near.toFixed(2);
+  const formatted = near.toFixed(2);
+  return formatted.replace(/\.00$/, "");
 }
 
 function formatDate(iso: string): string {
@@ -196,9 +197,6 @@ export default function RequestsPage() {
                       </span>
                     )}
                     <span>{formatDate(req.created_at)}</span>
-                    {req.expires_at && (
-                      <span>Expires {formatDate(req.expires_at)}</span>
-                    )}
                   </div>
                 </div>
 
