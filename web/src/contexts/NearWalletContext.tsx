@@ -20,7 +20,7 @@ import { setupMyNearWallet } from "@near-wallet-selector/my-near-wallet";
 import { setupMeteorWallet } from "@near-wallet-selector/meteor-wallet";
 
 import { actionCreators } from "@near-js/transactions";
-import { verifyAuth } from "@/lib/api";
+import { verifyAuth, linkWallet as linkWalletApi } from "@/lib/api";
 
 import "@near-wallet-selector/modal-ui/styles.css";
 
@@ -29,26 +29,16 @@ const CONTRACT_ID =
 const NETWORK =
   (process.env.NEXT_PUBLIC_NEAR_NETWORK as "testnet" | "mainnet") || "testnet";
 
-function getCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? match[1] : null;
-}
-
-function clearCookie(name: string) {
-  document.cookie = `${name}=; Domain=.near.fm; Path=/; Max-Age=0`;
-  document.cookie = `${name}=; Path=/; Max-Age=0`;
-}
-
 interface NearWalletContextType {
   selector: WalletSelector | null;
   accountId: string | null;
   wallet: Wallet | null;
   loading: boolean;
-  isAuthenticated: boolean;
-  signIn: () => void;
+  connectWallet: () => void;
+  connectAndSignIn: () => void;
+  disconnectWallet: () => Promise<void>;
   completeSignIn: () => Promise<boolean>;
-  signOut: () => Promise<void>;
+  linkWallet: () => Promise<boolean>;
   callFunction: (params: {
     contractId: string;
     method: string;
@@ -68,10 +58,11 @@ const NearWalletContext = createContext<NearWalletContextType>({
   accountId: null,
   wallet: null,
   loading: true,
-  isAuthenticated: false,
-  signIn: () => {},
+  connectWallet: () => {},
+  connectAndSignIn: () => {},
+  disconnectWallet: async () => {},
   completeSignIn: async () => false,
-  signOut: async () => {},
+  linkWallet: async () => false,
   callFunction: async () => "",
   viewMethod: async () => null,
 });
@@ -82,42 +73,25 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const pendingAuthRef = useRef(false);
+  const pendingLinkRef = useRef(false);
 
-  useEffect(() => {
-    // Check session cookie
-    setIsAuthenticated(!!getCookie("nearfm_session"));
-    const onExpired = () => {
-      clearCookie("nearfm_session");
-      setIsAuthenticated(false);
-    };
-    window.addEventListener("nearfm_token_expired", onExpired);
-    return () => window.removeEventListener("nearfm_token_expired", onExpired);
-  }, []);
-
-  const doApiAuth = useCallback(async (w: Wallet, accId: string) => {
-    // Already have session cookie
-    if (getCookie("nearfm_session")) {
-      setIsAuthenticated(true);
-      return;
-    }
-
+  // Sign NEP-413 message and return the payload for API calls
+  const signNep413 = useCallback(async (w: Wallet, accId: string) => {
     if (!w.signMessage) {
       console.warn("Wallet does not support signMessage (NEP-413)");
-      return;
+      return null;
     }
 
     const nonce = new Uint8Array(32);
     crypto.getRandomValues(nonce);
 
-    const timestamp = Date.now();
     const message = JSON.stringify({
       action: "sign_in",
       domain: "near.fm",
       version: 1,
-      timestamp,
+      timestamp: Date.now(),
     });
 
     const signed = await w.signMessage({
@@ -126,19 +100,28 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       recipient: CONTRACT_ID,
     });
 
-    if (!signed) return;
+    if (!signed) return null;
 
-    // verifyAuth will set the session cookie via Set-Cookie header
-    await verifyAuth({
+    return {
       account_id: signed.accountId || accId,
       public_key: signed.publicKey,
       signature: signed.signature,
       message,
       nonce: Array.from(nonce),
       recipient: CONTRACT_ID,
-    });
+    };
+  }, []);
 
-    setIsAuthenticated(true);
+  const doApiAuth = useCallback(async (w: Wallet, accId: string) => {
+    const payload = await signNep413(w, accId);
+    if (!payload) return;
+    await verifyAuth(payload);
+    window.dispatchEvent(new Event("nearfm_session_changed"));
+  }, [signNep413]);
+
+  const doLinkWallet = useCallback(async (_w: Wallet, accId: string) => {
+    await linkWalletApi({ account_id: accId });
+    window.dispatchEvent(new Event("nearfm_session_changed"));
   }, []);
 
   useEffect(() => {
@@ -154,7 +137,10 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       const signMod = setupModal(sel, { contractId: CONTRACT_ID });
 
       signMod.on("onHide", ({ hideReason }) => {
-        if (hideReason === "user-triggered") pendingAuthRef.current = false;
+        if (hideReason === "user-triggered") {
+          pendingAuthRef.current = false;
+          pendingLinkRef.current = false;
+        }
       });
 
       setSelector(sel);
@@ -167,9 +153,6 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         setAccountId(acc.accountId);
         const w = await sel.wallet();
         setWallet(w);
-        if (getCookie("nearfm_session")) {
-          setIsAuthenticated(true);
-        }
       }
 
       setLoading(false);
@@ -182,32 +165,38 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
           try {
             const w = await sel.wallet();
             setWallet(w);
-            if (pendingAuthRef.current && !getCookie("nearfm_session")) {
+            if (pendingAuthRef.current) {
               pendingAuthRef.current = false;
               await doApiAuth(w, accId);
+            } else if (pendingLinkRef.current) {
+              pendingLinkRef.current = false;
+              await doLinkWallet(w, accId);
             }
           } catch (e) {
-            console.error("Auth error:", e);
+            console.error("Wallet auth error:", e);
           }
         } else {
           setAccountId(null);
           setWallet(null);
-          clearCookie("nearfm_session");
-          setIsAuthenticated(false);
         }
       });
     };
 
     init().catch(console.error);
-  }, [doApiAuth]);
+  }, [doApiAuth, doLinkWallet]);
 
-  // Sign in: wallet connect + signMessage for API auth
-  const signIn = useCallback(() => {
+  // Connect wallet without signing in (just wallet connection)
+  const connectWallet = useCallback(() => {
+    signInModal?.show();
+  }, [signInModal]);
+
+  // Connect wallet + sign message for API auth (NEAR sign-in flow)
+  const connectAndSignIn = useCallback(() => {
     pendingAuthRef.current = true;
     signInModal?.show();
   }, [signInModal]);
 
-  // Complete sign in: run signMessage with already-connected wallet
+  // Complete sign in with already-connected wallet
   const completeSignIn = useCallback(async (): Promise<boolean> => {
     if (!wallet || !accountId) return false;
     try {
@@ -219,18 +208,42 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     }
   }, [wallet, accountId, doApiAuth]);
 
-  // Sign out: clears wallet connection + session cookie
-  const signOut = useCallback(async () => {
+  // Link NEAR wallet to existing (Google) account
+  const linkWallet = useCallback(async (): Promise<boolean> => {
+    if (!wallet || !accountId) {
+      // Need to connect wallet first
+      pendingLinkRef.current = true;
+      signInModal?.show();
+      return false;
+    }
+    try {
+      await doLinkWallet(wallet, accountId);
+      return true;
+    } catch (e) {
+      console.error("Link wallet failed:", e);
+      return false;
+    }
+  }, [wallet, accountId, doLinkWallet, signInModal]);
+
+  // Disconnect wallet
+  const disconnectWallet = useCallback(async () => {
     if (wallet) {
       await wallet.signOut();
     }
     setAccountId(null);
     setWallet(null);
-    clearCookie("nearfm_session");
-    setIsAuthenticated(false);
   }, [wallet]);
 
-  // callFunction — tries the transaction directly, wallet handles access key prompts
+  // Auto-disconnect wallet when user signs out
+  useEffect(() => {
+    const onSignedOut = () => {
+      disconnectWallet().catch(() => {});
+    };
+    window.addEventListener("nearfm_signed_out", onSignedOut);
+    return () => window.removeEventListener("nearfm_signed_out", onSignedOut);
+  }, [disconnectWallet]);
+
+  // callFunction — tries the transaction directly
   const callFunction = useCallback(
     async (params: {
       contractId: string;
@@ -240,7 +253,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       deposit?: string;
     }) => {
       if (!wallet) {
-        const err = new Error("Please connect your wallet to perform transactions");
+        const err = new Error("Please connect your NEAR wallet to perform transactions");
         err.name = "WalletConnectionRequired";
         throw err;
       }
@@ -313,10 +326,11 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         accountId,
         wallet,
         loading,
-        isAuthenticated,
-        signIn,
+        connectWallet,
+        connectAndSignIn,
+        disconnectWallet,
         completeSignIn,
-        signOut,
+        linkWallet,
         callFunction,
         viewMethod,
       }}

@@ -3,6 +3,7 @@
 import { Suspense, useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Language, Category, SongRequest } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { createSong, getSongs, getLanguages, getCategories, getRequest } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
@@ -28,7 +29,8 @@ export default function UploadPageWrapper() {
 }
 
 function UploadPage() {
-  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
+  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction } = useNearWallet();
   const searchParams = useSearchParams();
   const fulfillsRequestId = searchParams.get("fulfills_request_id");
   const requestUuid = searchParams.get("request_uuid");
@@ -76,7 +78,8 @@ function UploadPage() {
       .catch(console.error);
   }, [requestUuid]);
 
-  if (!accountId) {
+  // Not logged in at all → sign in first
+  if (!isAuthenticated) {
     return (
       <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -87,13 +90,46 @@ function UploadPage() {
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
           <p className="text-slate-400 mb-8">
-            Connect your NEAR wallet to upload AI-generated music.
+            Sign in and connect a NEAR wallet to upload AI-generated music.
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={connectAndSignIn}
+              className="btn-primary px-8 py-3 rounded-xl text-sm"
+            >
+              Sign in with NEAR Wallet
+            </button>
+            <button
+              onClick={signInWithGoogle}
+              className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
+            >
+              Sign in with Google
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Logged in but no wallet connected → need to link/connect wallet
+  if (!accountId) {
+    return (
+      <div className="px-4 py-16 text-center">
+        <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 flex items-center justify-center">
+            <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-3">Connect NEAR Wallet</h1>
+          <p className="text-slate-400 mb-8">
+            A NEAR wallet is required to upload songs. Your files are stored on-chain via FastFS.
           </p>
           <button
-            onClick={signIn}
+            onClick={linkWallet}
             className="btn-primary px-8 py-3 rounded-xl text-sm"
           >
-            Connect Wallet
+            Connect NEAR Wallet
           </button>
         </div>
       </div>
@@ -114,7 +150,7 @@ function UploadPage() {
   };
 
   const handleUpload = async () => {
-    if (!accountId) { signIn(); return; }
+    if (!accountId) { linkWallet(); return; }
 
     if (!audioFile || !title.trim() || !lyrics.trim()) {
       setError("Title, lyrics, and audio file are required");

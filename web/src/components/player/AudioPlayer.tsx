@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { addBookmark, removeBookmark, getBookmarks } from "@/lib/api";
 import { VoteButtons } from "@/components/song/VoteButtons";
@@ -35,14 +36,16 @@ export function AudioPlayer() {
     queue,
   } = useAudioPlayer();
 
-  const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
+  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { accountId } = useNearWallet();
+  const userSlug = user?.slug;
   const [copied, setCopied] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
 
   // Load bookmark state when song changes
   useEffect(() => {
-    if (isAuthenticated && accountId && currentSong) {
-      getBookmarks(accountId)
+    if (isAuthenticated && userSlug && currentSong) {
+      getBookmarks(userSlug)
         .then((bookmarks) => {
           setBookmarked(bookmarks.some((b) => b.uuid === currentSong.uuid));
         })
@@ -50,7 +53,7 @@ export function AudioPlayer() {
     } else {
       setBookmarked(false);
     }
-  }, [isAuthenticated, accountId, currentSong?.uuid]);
+  }, [isAuthenticated, userSlug, currentSong?.uuid]);
 
   if (!currentSong) return null;
 
@@ -63,16 +66,16 @@ export function AudioPlayer() {
   };
 
   const handleBookmark = async () => {
-    if (!isAuthenticated || !accountId) {
-      if (accountId) { completeSignIn(); } else { signIn(); }
+    if (!isAuthenticated || !userSlug) {
+      signInWithGoogle();
       return;
     }
     try {
       if (bookmarked) {
-        await removeBookmark(accountId, currentSong.uuid);
+        await removeBookmark(userSlug, currentSong.uuid);
         setBookmarked(false);
       } else {
-        await addBookmark(accountId, currentSong.uuid);
+        await addBookmark(userSlug, currentSong.uuid);
         setBookmarked(true);
       }
     } catch (e) { console.error("Bookmark failed:", e); }

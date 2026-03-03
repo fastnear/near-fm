@@ -33,6 +33,18 @@ async function fetchApi<T>(
 
 // ── Auth ──
 
+export interface AuthUser {
+  id: number;
+  slug: string;
+  account_id: string; // slug for backward compat
+  near_account_id: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  is_admin: boolean;
+  auth_provider: string;
+  reputation_score: string;
+}
+
 export async function verifyAuth(payload: {
   account_id: string;
   public_key: string;
@@ -42,9 +54,25 @@ export async function verifyAuth(payload: {
   recipient: string;
 }): Promise<{
   token: string;
-  user: { id: number; account_id: string; display_name: string | null; is_admin: boolean; reputation_score: string };
+  user: AuthUser;
 }> {
   return fetchApi("/api/auth/verify", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getCurrentUser(): Promise<AuthUser> {
+  return fetchApi("/api/auth/me");
+}
+
+export async function linkWallet(payload: {
+  account_id: string;
+}): Promise<{
+  token: string;
+  user: AuthUser;
+}> {
+  return fetchApi("/api/auth/link-wallet", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -286,6 +314,20 @@ export async function updateUserProfile(accountId: string, data: {
   });
 }
 
+// ── User Blocks ──
+
+export async function blockUser(accountId: string): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/block`, { method: "POST" });
+}
+
+export async function unblockUser(accountId: string): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/block`, { method: "DELETE" });
+}
+
+export async function getBlockedUsers(accountId: string): Promise<{ account_id: string; display_name: string | null; avatar_url: string | null }[]> {
+  return fetchApi(`/api/users/${accountId}/blocked`);
+}
+
 // ── Feed Preferences ──
 
 export async function getFeedPreferences(accountId: string): Promise<{
@@ -323,6 +365,13 @@ export async function markAllNotificationsRead(): Promise<void> {
 
 export async function getRadioPlaylist(): Promise<Song[]> {
   return fetchApi("/api/radio");
+}
+
+export async function radioSkip(songUuid: string): Promise<void> {
+  return fetchApi("/api/radio/skip", {
+    method: "POST",
+    body: JSON.stringify({ song_uuid: songUuid }),
+  });
 }
 
 // ── Stats ──

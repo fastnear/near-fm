@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { Category, Genre, Language, Song } from "@/types";
-import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   getReports,
   reviewReport,
@@ -1579,7 +1579,7 @@ function yoctoToNear(yocto: string): string {
 }
 
 export default function AdminPage() {
-  const { accountId, signIn, loading } = useNearWallet();
+  const { user, isAuthenticated, loading, signInWithGoogle } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("reports");
   const [commission, setCommission] = useState<string | null>(null);
   const [commissionRate, setCommissionRate] = useState<number | null>(null);
@@ -1597,20 +1597,22 @@ export default function AdminPage() {
     );
   }
 
-  if (!accountId) {
+  if (!isAuthenticated || !user?.is_admin) {
     return (
       <div className="flex items-center justify-center min-h-screen px-4">
         <div className="glass-card rounded-3xl p-12 text-center">
           <h1 className="text-2xl font-bold mb-2">Admin Panel</h1>
           <p className="text-slate-400 mb-6">
-            Connect your NEAR wallet to access the admin panel
+            {!isAuthenticated ? "Sign in to access the admin panel" : "Admin access required"}
           </p>
-          <button
-            onClick={signIn}
-            className="px-6 py-3 btn-primary rounded-lg font-medium transition"
-          >
-            Connect Wallet
-          </button>
+          {!isAuthenticated && (
+            <button
+              onClick={signInWithGoogle}
+              className="px-6 py-3 btn-primary rounded-lg font-medium transition"
+            >
+              Sign in
+            </button>
+          )}
         </div>
       </div>
     );
@@ -1635,7 +1637,7 @@ export default function AdminPage() {
             <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
             <p className="text-sm text-slate-500 mt-1">
               Signed in as{" "}
-              <span className="text-slate-400 font-mono">{accountId}</span>
+              <span className="text-slate-400 font-mono">{user?.slug}</span>
             </p>
           </div>
           {commission !== null && (

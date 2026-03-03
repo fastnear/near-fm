@@ -8,7 +8,7 @@ import { SongCard } from "@/components/song/SongCard";
 import { FeedTabs } from "@/components/feed/FeedTabs";
 import { FeedFilters } from "@/components/feed/FeedFilters";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
-import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 function FeedPageInner() {
   const searchParams = useSearchParams();
@@ -23,8 +23,10 @@ function FeedPageInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const { setFeedSongs, playFromFeed, startRadio, isRadioActive, isPlaying, pause, resume } = useAudioPlayer();
-  const { accountId: currentUser } = useNearWallet();
+  const { user: authUser } = useAuth();
+  const currentUser = authUser?.slug;
   const [radioLoading, setRadioLoading] = useState(false);
+  const [exclusionsVersion, setExclusionsVersion] = useState(0);
 
   // Read initial params from URL
   // Middleware rewrites /genre/:slug → /?genre=slug etc. but Next.js 16
@@ -83,7 +85,7 @@ function FeedPageInner() {
       console.error("Failed to load songs:", e);
     }
     setLoading(false);
-  }, [sort, period, languageId, categoryId, genreSlug, langCode, searchQuery, page, setFeedSongs]);
+  }, [sort, period, languageId, categoryId, genreSlug, langCode, searchQuery, page, setFeedSongs, exclusionsVersion]);
 
   useEffect(() => {
     fetchSongs();
@@ -157,6 +159,7 @@ function FeedPageInner() {
           onGenreChange={(slug) => { setGenreSlug(slug); setPage(1); }}
           onPeriodChange={(p) => { setPeriod(p); setPage(1); }}
           onSearchChange={setSearchDebounce}
+          onExclusionsChange={() => setExclusionsVersion((v) => v + 1)}
         />
       </div>
 

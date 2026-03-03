@@ -10,7 +10,7 @@ import React, {
   type ReactNode,
 } from "react";
 import type { Song } from "@/types";
-import { incrementPlay } from "@/lib/api";
+import { incrementPlay, radioSkip } from "@/lib/api";
 
 type PlayMode = "radio" | "repeat" | "none";
 
@@ -221,6 +221,14 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const next = useCallback(() => {
+    // Detect skip: if in radio mode and listened less than 33%, report as skip
+    if (playModeRef.current === "radio" && currentSongRef.current && audioRef.current) {
+      const audio = audioRef.current;
+      if (audio.duration > 0 && audio.currentTime / audio.duration < 0.33) {
+        radioSkip(currentSongRef.current.uuid).catch(() => {});
+      }
+    }
+
     if (queue.length > 0) {
       const nextSong = queue[0];
       setQueue((q) => q.slice(1));

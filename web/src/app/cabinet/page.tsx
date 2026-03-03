@@ -3,11 +3,12 @@
 import React from "react";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getUserProfile, getBookmarks, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
-import { FeedPreferences } from "@/components/cabinet/FeedPreferences";
+import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
 import type { Song, Notification } from "@/types";
 
 // ── Helpers ──
@@ -43,8 +44,6 @@ function timeAgo(iso: string): string {
   return `${months}mo ago`;
 }
 
-const ADMIN_ACCOUNTS = (process.env.NEXT_PUBLIC_ADMIN_ACCOUNTS || "").split(",").map(s => s.trim()).filter(Boolean);
-
 // ── Tab types ──
 
 type TabKey = "balance" | "songs" | "bookmarks" | "feed" | "notifications" | "reports";
@@ -53,7 +52,7 @@ const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
   { key: "bookmarks", label: "Bookmarks" },
-  { key: "feed", label: "Feed Filters" },
+  { key: "feed", label: "Blocked Users" },
   { key: "notifications", label: "Notifications" },
 ];
 
@@ -64,21 +63,23 @@ const ADMIN_TABS: { key: TabKey; label: string }[] = [
 // ── Main component ──
 
 export default function CabinetPage() {
-  const { accountId, signIn, signOut, loading: walletLoading } = useNearWallet();
+  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut: authSignOut } = useAuth();
+  const { accountId, connectAndSignIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
-  const isAdmin = accountId && ADMIN_ACCOUNTS.includes(accountId);
+  const isAdmin = user?.is_admin;
   const TABS = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const userSlug = user?.slug;
 
-  if (walletLoading) {
+  if (authLoading || walletLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-20 text-center">
         <div className="inline-block w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-slate-500 mt-4">Loading wallet...</p>
+        <p className="text-slate-500 mt-4">Loading...</p>
       </div>
     );
   }
 
-  if (!accountId) {
+  if (!isAuthenticated) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -87,28 +88,49 @@ export default function CabinetPage() {
           <p className="text-slate-400 text-sm mb-6">
             Sign in to access your dashboard, manage your balance, and view your songs.
           </p>
-          <button
-            onClick={signIn}
-            className="btn-primary px-6 py-3 rounded-xl"
-          >
-            Sign in
-          </button>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={signInWithGoogle}
+              className="btn-primary px-6 py-3 rounded-xl flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
+                <path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              </svg>
+              Sign in with Google
+            </button>
+            <button
+              onClick={connectAndSignIn}
+              className="px-6 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
+            >
+              Sign in with NEAR Wallet
+            </button>
+          </div>
         </div>
       </div>
     );
   }
+
+  const handleSignOut = () => {
+    authSignOut();
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-white">My Cabinet</h1>
-        <button
-          onClick={signOut}
-          className="text-sm text-slate-500 hover:text-slate-300 transition-colors"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-3">
+          {(accountId || user?.near_account_id) && (
+            <span className="text-xs font-mono text-slate-500">{accountId || user?.near_account_id}</span>
+          )}
+          <button
+            onClick={handleSignOut}
+            className="text-sm text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -130,9 +152,9 @@ export default function CabinetPage() {
 
       {/* Tab content */}
       {activeTab === "balance" && <BalanceTab />}
-      {activeTab === "songs" && <MySongsTab />}
-      {activeTab === "bookmarks" && <BookmarksTab />}
-      {activeTab === "feed" && <FeedPreferences />}
+      {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
+      {activeTab === "bookmarks" && <BookmarksTab userSlug={userSlug} />}
+      {activeTab === "feed" && <BlockedUsers />}
       {activeTab === "notifications" && <NotificationsTab />}
       {activeTab === "reports" && isAdmin && <ReportsTab />}
     </div>
@@ -142,7 +164,8 @@ export default function CabinetPage() {
 // ── Balance Tab ──
 
 function BalanceTab() {
-  const { accountId, callFunction, viewMethod } = useNearWallet();
+  const { user } = useAuth();
+  const { accountId, connectWallet, linkWallet, callFunction, viewMethod } = useNearWallet();
   const [balance, setBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [depositAmount, setDepositAmount] = useState("1");
@@ -222,6 +245,21 @@ function BalanceTab() {
     }
     setActionLoading(false);
   };
+
+  // Wallet-selector not connected — show connect button
+  if (!accountId) {
+    return (
+      <div className="glass-card rounded-2xl p-8 text-center">
+        <p className="text-slate-400 text-sm mb-4">Connect a NEAR wallet to manage your balance, send tips, and upload songs.</p>
+        <button
+          onClick={() => user?.near_account_id ? connectWallet() : linkWallet()}
+          className="btn-primary px-6 py-3 rounded-xl font-medium"
+        >
+          Connect NEAR Wallet
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -317,17 +355,16 @@ function BalanceTab() {
 
 // ── My Songs Tab ──
 
-function MySongsTab() {
-  const { accountId } = useNearWallet();
+function MySongsTab({ userSlug }: { userSlug?: string }) {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!userSlug) return;
     const load = async () => {
       setLoading(true);
       try {
-        const data: any = await getUserProfile(accountId);
+        const data: any = await getUserProfile(userSlug);
         setSongs(data.songs ?? []);
       } catch (e) {
         console.error("Failed to load songs:", e);
@@ -335,7 +372,7 @@ function MySongsTab() {
       setLoading(false);
     };
     load();
-  }, [accountId]);
+  }, [userSlug]);
 
   if (loading) {
     return (
@@ -376,17 +413,16 @@ function MySongsTab() {
 
 // ── Bookmarks Tab ──
 
-function BookmarksTab() {
-  const { accountId } = useNearWallet();
+function BookmarksTab({ userSlug }: { userSlug?: string }) {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!userSlug) return;
     const load = async () => {
       setLoading(true);
       try {
-        const data = await getBookmarks(accountId);
+        const data = await getBookmarks(userSlug);
         setSongs(data);
       } catch (e) {
         console.error("Failed to load bookmarks:", e);
@@ -394,7 +430,7 @@ function BookmarksTab() {
       setLoading(false);
     };
     load();
-  }, [accountId]);
+  }, [userSlug]);
 
   if (loading) {
     return (
@@ -485,6 +521,12 @@ function NotificationIcon({ type }: { type: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
         </svg>
       );
+    case "new_follower":
+      return (
+        <svg className="w-5 h-5 text-pink-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
+        </svg>
+      );
     default:
       return (
         <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -545,6 +587,15 @@ function notificationText(notif: Notification): React.ReactNode {
           {songTitle && songUuid ? (
             <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link>
           ) : "your song"}
+        </>
+      );
+    }
+    case "new_follower": {
+      const followerSlug = data.follower_slug as string | undefined;
+      return (
+        <>
+          <Link href={`/profile/${followerSlug}`} className="text-purple-400 hover:underline">{followerSlug}</Link>
+          {" started following you"}
         </>
       );
     }

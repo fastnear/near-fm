@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { Song } from "@/types";
-import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { voteSong, getUserVote } from "@/lib/api";
 
 interface Props {
@@ -37,7 +37,7 @@ function ThumbDown({ filled, className }: { filled: boolean; className?: string 
 }
 
 export function VoteButtons({ song, compact }: Props) {
-  const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
+  const { isAuthenticated, signInWithGoogle } = useAuth();
   const [upvotes, setUpvotes] = useState(song.upvotes);
   const [downvotes, setDownvotes] = useState(song.downvotes);
   const [userVote, setUserVote] = useState<number | null>(null);
@@ -57,7 +57,7 @@ export function VoteButtons({ song, compact }: Props) {
 
   const handleVote = async (value: 1 | -1) => {
     if (!isAuthenticated) {
-      if (accountId) { completeSignIn(); } else { signIn(); }
+      signInWithGoogle();
       return;
     }
     if (loading) return;

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { Song } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { recordTip } from "@/lib/api";
 import { tipSongAction, tipFromBalanceArgs, getBalance } from "@/lib/near/contract";
@@ -24,7 +25,8 @@ function yoctoToNear(yocto: string): string {
 }
 
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
-  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction, viewMethod } = useNearWallet();
+  const { isAuthenticated, signInWithGoogle } = useAuth();
+  const { accountId, linkWallet, callFunction, viewMethod } = useNearWallet();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -43,10 +45,8 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
   }, [accountId, showModal, viewMethod]);
 
   const handleTip = async (amountNear: string) => {
-    if (!isAuthenticated) {
-      if (accountId) { completeSignIn(); } else { signIn(); }
-      return;
-    }
+    if (!isAuthenticated) { signInWithGoogle(); return; }
+    if (!accountId) { linkWallet(); return; }
 
     setLoading(true);
     try {
@@ -119,10 +119,8 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     <div className="relative">
       <button
         onClick={() => {
-          if (!isAuthenticated) {
-            if (accountId) { completeSignIn(); } else { signIn(); }
-            return;
-          }
+          if (!isAuthenticated) { signInWithGoogle(); return; }
+          if (!accountId) { linkWallet(); return; }
           setShowModal(!showModal);
         }}
         className={compact

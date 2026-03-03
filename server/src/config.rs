@@ -12,6 +12,10 @@ pub struct Config {
     pub near_rpc_url: String,
     pub admin_accounts: Vec<String>,
     pub cors_origins: Vec<String>,
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_redirect_uri: String,
+    pub frontend_url: String,
 }
 
 impl Config {
@@ -65,6 +69,10 @@ impl Config {
             near_rpc_url,
             admin_accounts,
             cors_origins,
+            google_client_id: env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
+            google_client_secret: env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default(),
+            google_redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_default(),
+            frontend_url: env::var("FRONTEND_URL").unwrap_or_else(|_| "https://near.fm".to_string()),
         }
     }
 

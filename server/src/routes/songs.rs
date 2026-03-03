@@ -57,8 +57,8 @@ pub async fn list_songs(
         }));
     }
 
-    // Load user feed exclusions if authenticated
-    let (excluded_genre_ids, excluded_language_ids, excluded_category_ids, hide_no_cover) =
+    // Load user feed exclusions and blocked users if authenticated
+    let (excluded_genre_ids, excluded_language_ids, excluded_category_ids, hide_no_cover, blocked_user_ids) =
         if let Some(claims) = extensions.get::<crate::auth::jwt::Claims>() {
             let rows: Vec<(String, i32)> = sqlx::query_as(
                 "SELECT exclusion_type, exclusion_id FROM user_feed_exclusions WHERE user_id = $1"
@@ -81,9 +81,19 @@ pub async fn list_songs(
                     _ => {}
                 }
             }
-            (eg, el, ec, no_cover)
+
+            let blocked: Vec<(i32,)> = sqlx::query_as(
+                "SELECT blocked_id FROM user_blocks WHERE blocker_id = $1"
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+            let blocked_ids: Vec<i32> = blocked.into_iter().map(|(id,)| id).collect();
+
+            (eg, el, ec, no_cover, blocked_ids)
         } else {
-            (vec![], vec![], vec![], false)
+            (vec![], vec![], vec![], false, vec![])
         };
 
     // For "following" sort, pass the user_id to filter by followed authors
@@ -109,6 +119,7 @@ pub async fn list_songs(
         limit,
         offset,
         follower_user_id,
+        &blocked_user_ids,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -315,13 +326,13 @@ pub async fn vote_song(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     } else {
         // Get voter's reputation for vote weight
-        let voter = queries::get_user_by_account(&state.db, &claims.sub)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
-
-        use std::str::FromStr;
-        let weight: f64 = f64::from_str(&voter.reputation_score.to_string()).unwrap_or(1.0);
+        let weight: f64 = sqlx::query_scalar::<_, f64>(
+            "SELECT reputation_score FROM users WHERE id = $1"
+        )
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(1.0);
 
         queries::upsert_vote(&state.db, song.id, claims.user_id, req.value, weight)
             .await
@@ -472,86 +483,239 @@ pub async fn get_radio(
         return Ok(Json(vec![]));
     }
 
-    // Get user preferences if authenticated
-    let prefs = if let Some(claims) = extensions.get::<Claims>() {
-        queries::get_user_vote_preferences(&state.db, claims.user_id)
+    // Get user preferences, blocked users, skips, and author sentiments if authenticated
+    let (prefs, blocked_user_ids, excluded_genre_ids, excluded_language_ids, excluded_category_ids, hide_no_cover, skipped_song_ids, author_sentiments) =
+        if let Some(claims) = extensions.get::<Claims>() {
+            let p = queries::get_user_vote_preferences(&state.db, claims.user_id)
+                .await
+                .ok();
+
+            let blocked: Vec<(i32,)> = sqlx::query_as(
+                "SELECT blocked_id FROM user_blocks WHERE blocker_id = $1"
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
             .await
-            .ok()
-    } else {
-        None
-    };
+            .unwrap_or_default();
+            let blocked_ids: Vec<i32> = blocked.into_iter().map(|(id,)| id).collect();
+
+            let excl_rows: Vec<(String, i32)> = sqlx::query_as(
+                "SELECT exclusion_type, exclusion_id FROM user_feed_exclusions WHERE user_id = $1"
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+            let mut eg = Vec::new();
+            let mut el = Vec::new();
+            let mut ec = Vec::new();
+            let mut no_cover = false;
+            for (t, id) in excl_rows {
+                match t.as_str() {
+                    "genre" => eg.push(id),
+                    "language" => el.push(id),
+                    "category" => ec.push(id),
+                    "no_cover" => no_cover = true,
+                    _ => {}
+                }
+            }
+
+            // Load skipped song IDs (last 30 days)
+            let skips: Vec<(i32,)> = sqlx::query_as(
+                "SELECT song_id FROM radio_skips WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days'"
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+            let skip_ids: Vec<i32> = skips.into_iter().map(|(id,)| id).collect();
+
+            // Load net sentiment per author: +1 liked, -1 disliked (aggregated from votes)
+            let sentiments: Vec<(i32, i64)> = sqlx::query_as(
+                r#"SELECT s.uploader_id, SUM(v.value::BIGINT) AS net
+                   FROM votes v
+                   JOIN songs s ON v.song_id = s.id
+                   WHERE v.user_id = $1
+                   GROUP BY s.uploader_id"#
+            )
+            .bind(claims.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+            (p, blocked_ids, eg, el, ec, no_cover, skip_ids, sentiments)
+        } else {
+            (None, vec![], vec![], vec![], vec![], false, vec![], vec![])
+        };
+
+    // Filter out blocked users and excluded content from radio pool
+    let top_songs: Vec<_> = top_songs.into_iter().filter(|s| {
+        if !blocked_user_ids.is_empty() && blocked_user_ids.contains(&s.uploader_id) {
+            return false;
+        }
+        if !excluded_genre_ids.is_empty() && s.genres.iter().any(|g| excluded_genre_ids.contains(&g.id)) {
+            return false;
+        }
+        if !excluded_language_ids.is_empty() {
+            if let Some(lid) = s.language_id {
+                if excluded_language_ids.contains(&lid) {
+                    return false;
+                }
+            }
+        }
+        if !excluded_category_ids.is_empty() {
+            if let Some(cid) = s.category_id {
+                if excluded_category_ids.contains(&cid) {
+                    return false;
+                }
+            }
+        }
+        if hide_no_cover && s.cover_image_url.is_none() {
+            return false;
+        }
+        true
+    }).collect();
+
+    if top_songs.is_empty() {
+        return Ok(Json(vec![]));
+    }
 
     // Do all randomization in a sync block so rng doesn't cross await
-    let result = select_radio_songs(top_songs, prefs);
+    let result = select_radio_songs(top_songs, prefs, &skipped_song_ids, &author_sentiments);
 
     Ok(Json(result))
 }
 
+/// Radio song selection with personalized weights.
+///
+/// Weight formula per song (for logged-in users):
+///   w = 1.0 (base)
+///     + 0.3  if song genre matches user's upvoted genres
+///     + 0.5  if song language matches user's upvoted languages
+///     + 0.6  if user has net positive votes on this author's songs
+///     - 0.6  if user has net negative votes on this author's songs
+///     - 0.45 if user skipped this song in radio (≈ 3/4 of a dislike, one skip per song)
+///   minimum weight: 0.1
+///
+/// For anonymous users: uniform random shuffle, pick 30.
 fn select_radio_songs(
     top_songs: Vec<crate::db::models::SongWithUploader>,
     prefs: Option<(Vec<i32>, Vec<i32>)>,
+    skipped_song_ids: &[i32],
+    author_sentiments: &[(i32, i64)],
 ) -> Vec<crate::db::models::SongWithUploader> {
     use rand::seq::SliceRandom;
     use rand::Rng;
 
     let mut rng = rand::thread_rng();
 
-    if let Some((pref_genres, pref_langs)) = prefs {
-        if pref_genres.is_empty() && pref_langs.is_empty() {
-            let mut songs = top_songs;
-            songs.shuffle(&mut rng);
-            songs.truncate(30);
-            return songs;
-        }
+    let has_signals = prefs.is_some() || !skipped_song_ids.is_empty() || !author_sentiments.is_empty();
 
-        // Weighted random selection
-        let weights: Vec<f64> = top_songs
-            .iter()
-            .map(|s| {
-                let mut w: f64 = 1.0;
-                for g in &s.genres {
-                    if pref_genres.contains(&g.id) {
-                        w += 0.5;
-                        break;
-                    }
-                }
-                if let Some(lid) = s.language_id {
-                    if pref_langs.contains(&lid) {
-                        w += 0.3;
-                    }
-                }
-                w
-            })
-            .collect();
-
-        let mut indices: Vec<usize> = (0..top_songs.len()).collect();
-        let mut selected = Vec::with_capacity(30);
-
-        for _ in 0..30.min(top_songs.len()) {
-            if indices.is_empty() {
-                break;
-            }
-            let total: f64 = indices.iter().map(|&i| weights[i]).sum();
-            let mut r = rng.gen::<f64>() * total;
-            let mut pick = 0;
-            for (pos, &idx) in indices.iter().enumerate() {
-                r -= weights[idx];
-                if r <= 0.0 {
-                    pick = pos;
-                    break;
-                }
-            }
-            let idx = indices.remove(pick);
-            selected.push(idx);
-        }
-
-        selected.into_iter().map(|i| top_songs[i].clone()).collect()
-    } else {
+    if !has_signals {
         let mut songs = top_songs;
         songs.shuffle(&mut rng);
         songs.truncate(30);
-        songs
+        return songs;
     }
+
+    let (pref_genres, pref_langs) = prefs.unwrap_or_default();
+
+    // Weighted random selection
+    let weights: Vec<f64> = top_songs
+        .iter()
+        .map(|s| {
+            let mut w: f64 = 1.0;
+
+            // Genre preference bonus
+            if !pref_genres.is_empty() {
+                for g in &s.genres {
+                    if pref_genres.contains(&g.id) {
+                        w += 0.3;
+                        break;
+                    }
+                }
+            }
+
+            // Language preference bonus
+            if !pref_langs.is_empty() {
+                if let Some(lid) = s.language_id {
+                    if pref_langs.contains(&lid) {
+                        w += 0.5;
+                    }
+                }
+            }
+
+            // Author sentiment: liked author → bonus, disliked → penalty
+            if let Some(&(_, net)) = author_sentiments.iter().find(|(uid, _)| *uid == s.uploader_id) {
+                if net > 0 {
+                    w += 0.6;
+                } else if net < 0 {
+                    w -= 0.6;
+                }
+            }
+
+            // Skip penalty (one skip per song, ≈ 3/4 dislike)
+            if skipped_song_ids.contains(&s.id) {
+                w -= 0.45;
+            }
+
+            w.max(0.1)
+        })
+        .collect();
+
+    let mut indices: Vec<usize> = (0..top_songs.len()).collect();
+    let mut selected = Vec::with_capacity(30);
+
+    for _ in 0..30.min(top_songs.len()) {
+        if indices.is_empty() {
+            break;
+        }
+        let total: f64 = indices.iter().map(|&i| weights[i]).sum();
+        let mut r = rng.gen::<f64>() * total;
+        let mut pick = 0;
+        for (pos, &idx) in indices.iter().enumerate() {
+            r -= weights[idx];
+            if r <= 0.0 {
+                pick = pos;
+                break;
+            }
+        }
+        let idx = indices.remove(pick);
+        selected.push(idx);
+    }
+
+    selected.into_iter().map(|i| top_songs[i].clone()).collect()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RadioSkipRequest {
+    pub song_uuid: String,
+}
+
+pub async fn radio_skip(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<RadioSkipRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let song = queries::get_song_by_uuid(&state.db, &req.song_uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    sqlx::query(
+        "INSERT INTO radio_skips (user_id, song_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+    )
+    .bind(claims.user_id)
+    .bind(song.id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::CREATED)
 }
 
 pub async fn report_song(

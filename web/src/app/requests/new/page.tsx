@@ -3,12 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { Language } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { createRequest, getLanguages } from "@/lib/api";
 import { createBountyAction } from "@/lib/near/contract";
 
 export default function NewRequestPage() {
-  const { accountId, isAuthenticated, signIn, completeSignIn, callFunction } = useNearWallet();
+  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction } = useNearWallet();
   const router = useRouter();
 
   const [title, setTitle] = useState("");
@@ -32,19 +34,48 @@ export default function NewRequestPage() {
       .catch(console.error);
   }, []);
 
+  // Not logged in
+  if (!isAuthenticated) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-20 text-center">
+        <div className="glass-card rounded-3xl p-12">
+          <h1 className="text-2xl font-bold mb-4">Create a Song Request</h1>
+          <p className="text-slate-400 mb-6">
+            Sign in and connect a NEAR wallet to create a song request with a bounty
+          </p>
+          <div className="flex flex-col gap-3 max-w-xs mx-auto">
+            <button
+              onClick={connectAndSignIn}
+              className="px-6 py-3 btn-primary rounded-xl font-medium transition"
+            >
+              Sign in with NEAR Wallet
+            </button>
+            <button
+              onClick={signInWithGoogle}
+              className="px-6 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
+            >
+              Sign in with Google
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Logged in but no wallet
   if (!accountId) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-20 text-center">
         <div className="glass-card rounded-3xl p-12">
           <h1 className="text-2xl font-bold mb-4">Create a Song Request</h1>
           <p className="text-slate-400 mb-6">
-            Sign in with your NEAR account to create a song request with a bounty
+            Connect your NEAR wallet to create a bounty. The bounty amount is locked on-chain.
           </p>
           <button
-            onClick={signIn}
+            onClick={linkWallet}
             className="px-6 py-3 btn-primary rounded-xl font-medium transition"
           >
-            Sign in
+            Connect NEAR Wallet
           </button>
         </div>
       </div>

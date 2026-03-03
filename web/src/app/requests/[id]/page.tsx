@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { SongRequest } from "@/types";
 import { getRequest, getRequestSubmissions, updateRequest } from "@/lib/api";
 import { awardBountyAction, withdrawBountyAction } from "@/lib/near/contract";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 
 function formatNear(yocto: string): string {
@@ -40,6 +41,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function RequestDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { user } = useAuth();
   const { accountId, callFunction } = useNearWallet();
 
   const [request, setRequest] = useState<SongRequest | null>(null);
@@ -159,7 +161,7 @@ export default function RequestDetailPage() {
     );
   }
 
-  const isRequester = accountId !== null && (request as any).requester_account_id === accountId;
+  const isRequester = user !== null && (request as any).requester_account_id === user?.slug;
   const isOpen = request.status === "open";
   const isExpired = request.expires_at ? new Date(request.expires_at) <= new Date() : false;
   const canWithdraw = isRequester && isOpen && isExpired;

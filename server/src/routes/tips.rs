@@ -24,11 +24,16 @@ pub async fn record_tip(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
+    // Require a linked NEAR wallet for tips
+    let near_account = claims.account_id.as_deref().ok_or_else(|| {
+        (StatusCode::FORBIDDEN, "Connect a NEAR wallet to send tips".to_string())
+    })?;
+
     // Verify transaction on-chain
     let verified = tx_verify::verify_near_tx(
         &state.config.near_rpc_url,
         &req.tx_hash,
-        &claims.sub,
+        near_account,
     )
     .await
     .map_err(|e| {

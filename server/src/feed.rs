@@ -10,11 +10,10 @@ use std::time::Duration;
 ///
 ///   Vote weights: voters with reputation <= 1.0 get weight * 0.5 (anti-spam)
 ///
-///   If uploader.total_uploads < 3 AND uploader.reputation_score < 1.5:
-///       base *= 0.5   (newbie penalty)
+///   Multipliers: newbie(×0.5), no-genre(×0.7), no-lyrics(×0.7/0.85), no-cover(×0.7)
 ///
-///   effective_age = max(hours_age - 24, 0)   (no decay in first 24h)
-///   score = base / (effective_age + 2)^1.8
+///   effective_age = max(hours_age - 168, 0)   (no decay in first 7 days)
+///   score = base × multipliers / (effective_age + 2)^1.8
 pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         r#"
@@ -35,7 +34,6 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                     ELSE 1.0
                   END
                 * CASE WHEN NOT EXISTS (SELECT 1 FROM song_genres sg WHERE sg.song_id = s.id) THEN 0.7 ELSE 1.0 END
-                * CASE WHEN s.language_id IS NULL THEN 0.7 ELSE 1.0 END
                 * CASE
                     WHEN s.lyrics IS NULL OR s.lyrics = '' THEN 0.7
                     WHEN LENGTH(s.lyrics) < 200 THEN 0.85
@@ -43,7 +41,7 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                   END
                 * CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END
                 / POWER(
-                    GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 24, 0) + 2,
+                    GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 168, 0) + 2,
                     1.8
                   )
                 AS new_score

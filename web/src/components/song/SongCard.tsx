@@ -1,11 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import type { Song } from "@/types";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
-import { useNearWallet } from "@/contexts/NearWalletContext";
-import { followUser, unfollowUser, getFollowStatus } from "@/lib/api";
 import { VoteButtons } from "./VoteButtons";
 
 const langFlags: Record<string, string> = {
@@ -15,10 +12,7 @@ const langFlags: Record<string, string> = {
 
 export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }) {
   const { currentSong, isPlaying, togglePlay, playFromFeed } = useAudioPlayer();
-  const { accountId } = useNearWallet();
   const isActive = currentSong?.uuid === song.uuid;
-  const [followState, setFollowState] = useState<"unknown" | "following" | "not_following">("unknown");
-  const [followLoading, setFollowLoading] = useState(false);
 
   return (
     <div
@@ -81,51 +75,14 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1 mt-0.5 min-w-0">
-          <Link
-            href={`/profile/${song.uploader_account_id}`}
-            className="text-xs text-slate-500 hover:text-slate-300 truncate transition-colors"
-          >
-            {song.uploader_display_name || song.uploader_account_id}
-          </Link>
-          {accountId && accountId !== song.uploader_account_id && (
-            <button
-              disabled={followLoading}
-              onClick={async () => {
-                setFollowLoading(true);
-                try {
-                  if (followState === "unknown") {
-                    const status = await getFollowStatus(song.uploader_account_id);
-                    if (status.is_following) {
-                      await unfollowUser(song.uploader_account_id);
-                      setFollowState("not_following");
-                    } else {
-                      await followUser(song.uploader_account_id);
-                      setFollowState("following");
-                    }
-                  } else if (followState === "following") {
-                    await unfollowUser(song.uploader_account_id);
-                    setFollowState("not_following");
-                  } else {
-                    await followUser(song.uploader_account_id);
-                    setFollowState("following");
-                  }
-                } catch {}
-                setFollowLoading(false);
-              }}
-              className={`shrink-0 text-[10px] transition-colors disabled:opacity-50 ${
-                followState === "following"
-                  ? "text-purple-400/60 hover:text-red-400"
-                  : "text-slate-600 hover:text-purple-400"
-              }`}
-              title={followState === "following" ? `Unfollow ${song.uploader_account_id}` : `Follow ${song.uploader_account_id}`}
-            >
-              {followState === "following" ? "Following" : "+Follow"}
-            </button>
-          )}
-        </div>
+        <Link
+          href={`/profile/${song.uploader_account_id}`}
+          className="text-xs text-slate-500 hover:text-slate-300 truncate transition-colors mt-0.5 block"
+        >
+          {song.uploader_display_name || song.uploader_account_id}
+        </Link>
 
-        <div className="flex gap-1 mt-1.5 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-1 mt-1.5 min-h-[22px] overflow-x-auto scrollbar-hide">
           {song.category_name && (
             <Link
               href={`/?category=${song.category_id}`}

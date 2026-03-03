@@ -6,9 +6,10 @@ import { followUser, unfollowUser, getFollowStatus } from "@/lib/api";
 interface Props {
   accountId: string;
   currentUser: string | null;
+  onFollowChange?: (isFollowing: boolean) => void;
 }
 
-export function FollowButton({ accountId, currentUser }: Props) {
+export function FollowButton({ accountId, currentUser, onFollowChange }: Props) {
   const [isFollowing, setIsFollowing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -19,6 +20,7 @@ export function FollowButton({ accountId, currentUser }: Props) {
       .then((data) => {
         setIsFollowing(data.is_following);
         setLoaded(true);
+        onFollowChange?.(data.is_following);
       })
       .catch(console.error);
   }, [accountId, currentUser]);
@@ -31,9 +33,11 @@ export function FollowButton({ accountId, currentUser }: Props) {
       if (isFollowing) {
         await unfollowUser(accountId);
         setIsFollowing(false);
+        onFollowChange?.(false);
       } else {
         await followUser(accountId);
         setIsFollowing(true);
+        onFollowChange?.(true);
       }
     } catch (e) {
       console.error("Follow action failed:", e);
@@ -45,13 +49,13 @@ export function FollowButton({ accountId, currentUser }: Props) {
     <button
       onClick={handleClick}
       disabled={loading}
-      className={`inline-block text-xs px-2.5 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+      className={`inline-block text-xs px-2.5 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
         isFollowing
-          ? "bg-white/[0.04] text-slate-400 border-white/[0.08] hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20"
-          : "bg-purple-500/10 text-purple-400 border-purple-500/15 hover:bg-purple-500/20"
+          ? "text-purple-400 bg-purple-500/10 border border-purple-500/15 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/15"
+          : "text-slate-400 bg-white/[0.04] border border-white/[0.06] hover:text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/15"
       }`}
     >
-      {isFollowing ? "Following" : "+ Follow"}
+      {loading ? "..." : isFollowing ? "Following" : "Follow"}
     </button>
   );
 }

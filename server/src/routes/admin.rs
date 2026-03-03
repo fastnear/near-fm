@@ -98,7 +98,7 @@ pub async fn list_reports(
     let reports = sqlx::query_as::<_, ReportWithContext>(
         r#"SELECT r.id, r.song_id, r.reporter_id, r.reason, r.status, r.reviewed_by, r.created_at,
                   s.uuid AS song_uuid, s.title AS song_title,
-                  u.account_id AS reporter_account_id
+                  u.slug AS reporter_account_id
            FROM reports r
            JOIN songs s ON s.id = r.song_id
            JOIN users u ON u.id = r.reporter_id
@@ -283,7 +283,7 @@ pub async fn list_requests(
 
     let requests = if let Some(status) = &params.status {
         sqlx::query_as::<_, AdminRequestRow>(
-            "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.status = $1 ORDER BY sr.created_at DESC LIMIT $2"
+            "SELECT sr.*, u.slug AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.status = $1 ORDER BY sr.created_at DESC LIMIT $2"
         )
         .bind(status)
         .bind(limit)
@@ -291,7 +291,7 @@ pub async fn list_requests(
         .await
     } else {
         sqlx::query_as::<_, AdminRequestRow>(
-            "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id ORDER BY sr.created_at DESC LIMIT $1"
+            "SELECT sr.*, u.slug AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id ORDER BY sr.created_at DESC LIMIT $1"
         )
         .bind(limit)
         .fetch_all(&state.db)
@@ -426,7 +426,7 @@ pub async fn list_song_scores(
         SELECT
             s.uuid,
             s.title,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             s.score,
             s.upvotes,
             s.downvotes,
@@ -514,7 +514,7 @@ pub async fn admin_toggle_ban(
 
     // Get the user id
     let user_id: Option<i32> = sqlx::query_scalar(
-        "SELECT id FROM users WHERE account_id = $1",
+        "SELECT id FROM users WHERE slug = $1",
     )
     .bind(&account_id)
     .fetch_optional(&state.db)

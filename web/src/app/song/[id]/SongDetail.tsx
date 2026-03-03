@@ -6,14 +6,12 @@ import type { Song, Category, Language } from "@/types";
 import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
-import { getBalanceRpc } from "@/lib/near/contract";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
-
-const ADMIN_ACCOUNTS = (process.env.NEXT_PUBLIC_ADMIN_ACCOUNTS || "").split(",").map(s => s.trim()).filter(Boolean);
 
 export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [activeUuid, setActiveUuid] = useState(initialUuid);
@@ -33,9 +31,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [commentText, setCommentText] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState("");
-  const [hasBalance, setHasBalance] = useState<boolean | null>(null);
   const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
-  const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
+  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { accountId } = useNearWallet();
 
   // Track whether the user navigated here manually (should not auto-follow currentSong)
   // vs. the song changed automatically via radio/queue (should follow)
@@ -105,32 +103,21 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
     }
   }, [activeUuid]);
 
-  // Check virtual balance for commenting
-  useEffect(() => {
-    if (accountId) {
-      getBalanceRpc(accountId)
-        .then((bal) => {
-          const ONE_NEAR = BigInt("1000000000000000000000000");
-          setHasBalance(BigInt(bal) >= ONE_NEAR);
-        })
-        .catch(() => setHasBalance(null));
-    }
-  }, [accountId]);
-
   useEffect(() => {
     getCategories().then(setCategories).catch(console.error);
     getLanguages().then(setLanguages).catch(console.error);
   }, []);
 
+  const userSlug = user?.slug;
   useEffect(() => {
-    if (isAuthenticated && accountId && song) {
-      getBookmarks(accountId)
+    if (isAuthenticated && userSlug && song) {
+      getBookmarks(userSlug)
         .then((bookmarks) => {
           setBookmarked(bookmarks.some((b) => b.uuid === song.uuid));
         })
         .catch(() => {});
     }
-  }, [isAuthenticated, accountId, song]);
+  }, [isAuthenticated, userSlug, song]);
 
   if (loading) {
     return (
@@ -158,8 +145,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   }
 
   const isActive = currentSong?.uuid === song.uuid;
-  const isAdmin = accountId && ADMIN_ACCOUNTS.includes(accountId);
-  const canEdit = accountId && (accountId === song.uploader_account_id || isAdmin);
+  const isAdmin = user?.is_admin;
+  const canEdit = userSlug && (userSlug === song.uploader_account_id || isAdmin);
 
   const startEditing = () => {
     setEditForm({
@@ -385,8 +372,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 >
                   {song.uploader_display_name || song.uploader_account_id}
                 </Link>
-                {accountId && accountId !== song.uploader_account_id && (
-                  <FollowButton accountId={song.uploader_account_id} currentUser={accountId} />
+                {userSlug && userSlug !== song.uploader_account_id && (
+                  <FollowButton accountId={song.uploader_account_id} currentUser={userSlug} />
                 )}
               </div>
 
@@ -481,16 +468,16 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 {/* Bookmark */}
                 <button
                   onClick={async () => {
-                    if (!isAuthenticated || !accountId) {
-                      if (accountId) { completeSignIn(); } else { signIn(); }
+                    if (!isAuthenticated || !userSlug) {
+                      signInWithGoogle();
                       return;
                     }
                     try {
                       if (bookmarked) {
-                        await removeBookmark(accountId, song.uuid);
+                        await removeBookmark(userSlug, song.uuid);
                         setBookmarked(false);
                       } else {
-                        await addBookmark(accountId, song.uuid);
+                        await addBookmark(userSlug, song.uuid);
                         setBookmarked(true);
                       }
                     } catch (e) { console.error("Bookmark failed:", e); }
@@ -510,8 +497,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 {/* Report */}
                 <button
                   onClick={() => {
-                    if (!isAuthenticated || !accountId) {
-                      if (accountId) { completeSignIn(); } else { signIn(); }
+                    if (!isAuthenticated) {
+                      signInWithGoogle();
                       return;
                     }
                     setShowReportForm(!showReportForm);
@@ -646,19 +633,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 </h2>
 
                 {/* Comment input */}
-                {accountId ? (
-                  hasBalance === false ? (
-                    <div className="mb-4 flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl px-4 py-3 text-sm">
-                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                      </svg>
-                      <span>
-                        You need at least 1 NEAR in your{" "}
-                        <Link href="/cabinet" className="text-amber-200 underline hover:text-white transition-colors">virtual balance</Link>
-                        {" "}to leave comments.
-                      </span>
-                    </div>
-                  ) : (
+                {isAuthenticated ? (
                     <div className="mb-4">
                       <div className="flex gap-2">
                         <textarea
@@ -675,10 +650,6 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                         <button
                           onClick={async () => {
                             if (!commentText.trim()) return;
-                            if (!isAuthenticated) {
-                              completeSignIn();
-                              return;
-                            }
                             setCommentSubmitting(true);
                             setCommentError("");
                             try {
@@ -698,13 +669,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                       </div>
                       {commentError && (
                         <p className="mt-1.5 text-xs text-rose-400">
-                          {commentError.includes("1 NEAR") ? (
-                            <>
-                              You need at least 1 NEAR in your{" "}
-                              <Link href="/cabinet" className="underline hover:text-rose-300 transition-colors">virtual balance</Link>
-                              {" "}to leave comments.
-                            </>
-                          ) : commentError.includes("banned") ? (
+                          {commentError.includes("banned") ? (
                             "Your account has been banned."
                           ) : commentError.includes("muted") ? (
                             "Your account has been muted."
@@ -714,10 +679,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                         </p>
                       )}
                     </div>
-                  )
                 ) : (
                   <p className="text-sm text-slate-500 mb-4">
-                    <button onClick={signIn} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.
+                    <button onClick={signInWithGoogle} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.
                   </p>
                 )}
 

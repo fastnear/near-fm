@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Debug, Serialize)]
 pub struct UserProfileResponse {
-    pub account_id: String,
+    pub account_id: String, // slug (backward compat field name)
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub reputation_score: String,
@@ -33,14 +33,14 @@ pub async fn get_profile(
     State(state): State<AppState>,
     Path(account_id): Path<String>,
 ) -> Result<Json<UserProfileResponse>, (StatusCode, String)> {
-    let user = queries::get_user_by_account(&state.db, &account_id)
+    let user = queries::get_user_by_slug(&state.db, &account_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
     let songs = sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
@@ -88,7 +88,7 @@ pub async fn get_profile(
     .unwrap_or(0);
 
     Ok(Json(UserProfileResponse {
-        account_id: user.account_id,
+        account_id: user.slug.clone(),
         display_name: user.display_name,
         avatar_url: user.avatar_url,
         reputation_score: user.reputation_score.to_string(),
@@ -173,7 +173,7 @@ pub async fn list_bookmarks(
 
     let songs = sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
@@ -214,7 +214,7 @@ pub async fn follow_user(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    let target = queries::get_user_by_account(&state.db, &account_id)
+    let target = queries::get_user_by_slug(&state.db, &account_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
@@ -223,7 +223,7 @@ pub async fn follow_user(
         return Err((StatusCode::BAD_REQUEST, "Cannot follow yourself".to_string()));
     }
 
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
     )
     .bind(claims.user_id)
@@ -231,6 +231,20 @@ pub async fn follow_user(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Notify the followed user (only if it was a new follow, not a duplicate)
+    if result.rows_affected() > 0 {
+        queries::create_notification(
+            &state.db,
+            target.id,
+            "new_follower",
+            &serde_json::json!({
+                "follower_slug": claims.sub,
+            }),
+        )
+        .await
+        .ok();
+    }
 
     Ok(StatusCode::CREATED)
 }
@@ -243,7 +257,7 @@ pub async fn unfollow_user(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    let target = queries::get_user_by_account(&state.db, &account_id)
+    let target = queries::get_user_by_slug(&state.db, &account_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
@@ -263,7 +277,7 @@ pub async fn get_follow_status(
     Path(account_id): Path<String>,
     extensions: Extensions,
 ) -> Result<Json<FollowStatusResponse>, (StatusCode, String)> {
-    let target = queries::get_user_by_account(&state.db, &account_id)
+    let target = queries::get_user_by_slug(&state.db, &account_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
@@ -299,13 +313,13 @@ pub async fn list_followers(
     State(state): State<AppState>,
     Path(account_id): Path<String>,
 ) -> Result<Json<Vec<FollowerEntry>>, (StatusCode, String)> {
-    let target = queries::get_user_by_account(&state.db, &account_id)
+    let target = queries::get_user_by_slug(&state.db, &account_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
     let followers: Vec<FollowerEntry> = sqlx::query_as(
-        r#"SELECT u.account_id, u.display_name, u.avatar_url, uf.created_at
+        r#"SELECT u.slug AS account_id, u.display_name, u.avatar_url, uf.created_at
            FROM user_follows uf
            JOIN users u ON uf.follower_id = u.id
            WHERE uf.followed_id = $1
@@ -365,7 +379,7 @@ pub async fn update_profile(
                bio = $2,
                twitter_handle = $3,
                updated_at = NOW()
-           WHERE account_id = $4"#,
+           WHERE slug = $4"#,
     )
     .bind(&req.avatar_url)
     .bind(&bio)
@@ -486,4 +500,101 @@ pub async fn update_feed_preferences(
     }
 
     Ok(StatusCode::OK)
+}
+
+// ── User Blocks ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct BlockedUserEntry {
+    pub account_id: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+pub async fn block_user(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    extensions: Extensions,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    if claims.sub == account_id {
+        return Err((StatusCode::BAD_REQUEST, "Cannot block yourself".to_string()));
+    }
+
+    let target = queries::get_user_by_slug(&state.db, &account_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    // Insert block
+    sqlx::query(
+        "INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+    )
+    .bind(claims.user_id)
+    .bind(target.id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Auto-unfollow in both directions
+    sqlx::query("DELETE FROM user_follows WHERE (follower_id = $1 AND followed_id = $2) OR (follower_id = $2 AND followed_id = $1)")
+        .bind(claims.user_id)
+        .bind(target.id)
+        .execute(&state.db)
+        .await
+        .ok();
+
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn unblock_user(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    extensions: Extensions,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let target = queries::get_user_by_slug(&state.db, &account_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    sqlx::query("DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2")
+        .bind(claims.user_id)
+        .bind(target.id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_blocked_users(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    extensions: Extensions,
+) -> Result<Json<Vec<BlockedUserEntry>>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    if claims.sub != account_id {
+        return Err((StatusCode::FORBIDDEN, "Cannot view another user's blocked list".to_string()));
+    }
+
+    let blocked: Vec<BlockedUserEntry> = sqlx::query_as(
+        r#"SELECT u.slug AS account_id, u.display_name, u.avatar_url
+           FROM user_blocks ub
+           JOIN users u ON ub.blocked_id = u.id
+           WHERE ub.blocker_id = $1
+           ORDER BY ub.created_at DESC"#,
+    )
+    .bind(claims.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(blocked))
 }

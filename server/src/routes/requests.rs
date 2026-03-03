@@ -55,7 +55,10 @@ pub async fn list_requests(
     };
 
     let sql = format!(
-        "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.status = $1 AND NOT sr.is_hidden ORDER BY {} LIMIT $2 OFFSET $3",
+        "SELECT sr.*, u.slug AS requester_account_id, \
+         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND s.status = 'visible') AS submission_count \
+         FROM song_requests sr JOIN users u ON u.id = sr.requester_id \
+         WHERE sr.status = $1 AND NOT sr.is_hidden ORDER BY {} LIMIT $2 OFFSET $3",
         order
     );
 
@@ -141,6 +144,7 @@ pub struct SongRequestWithRequester {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub requester_account_id: String,
+    pub submission_count: Option<i64>,
 }
 
 pub async fn get_request(
@@ -148,7 +152,9 @@ pub async fn get_request(
     Path(uuid): Path<String>,
 ) -> Result<Json<SongRequestWithRequester>, (StatusCode, String)> {
     let request = sqlx::query_as::<_, SongRequestWithRequester>(
-        "SELECT sr.*, u.account_id AS requester_account_id FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.uuid = $1",
+        "SELECT sr.*, u.slug AS requester_account_id, \
+         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND s.status = 'visible') AS submission_count \
+         FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.uuid = $1",
     )
     .bind(&uuid)
     .fetch_optional(&state.db)
@@ -190,13 +196,18 @@ pub async fn update_request(
         return Err((StatusCode::FORBIDDEN, "Not the request owner".to_string()));
     }
 
+    // Require a linked NEAR wallet for bounty operations
+    let near_account = claims.account_id.as_deref().ok_or_else(|| {
+        (StatusCode::FORBIDDEN, "Connect a NEAR wallet to manage bounties".to_string())
+    })?;
+
     // Verify on-chain transactions
     if req.status == "awarded" {
         if let Some(ref tx_hash) = req.award_tx_hash {
             let verified = tx_verify::verify_near_tx(
                 &state.config.near_rpc_url,
                 tx_hash,
-                &claims.sub,
+                near_account,
             )
             .await
             .map_err(|e| {
@@ -218,7 +229,7 @@ pub async fn update_request(
             let verified = tx_verify::verify_near_tx(
                 &state.config.near_rpc_url,
                 tx_hash,
-                &claims.sub,
+                near_account,
             )
             .await
             .map_err(|e| {
@@ -405,7 +416,7 @@ pub async fn list_submissions(
     let submissions = sqlx::query_as::<_, SubmissionWithSong>(
         r#"SELECT rs.id, rs.request_id, rs.song_id, rs.submitter_id, rs.created_at,
                   s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
-                  u.account_id AS submitter_account_id
+                  u.slug AS submitter_account_id
            FROM request_submissions rs
            JOIN songs s ON s.id = rs.song_id
            JOIN users u ON u.id = rs.submitter_id

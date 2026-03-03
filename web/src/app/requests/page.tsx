@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import type { SongRequest } from "@/types";
 import { getRequests } from "@/lib/api";
-import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 type Tab = "open" | "awarded" | "all";
 type SortOption = "newest" | "highest_bounty";
@@ -39,7 +39,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function RequestsPage() {
-  const { accountId } = useNearWallet();
+  const { user } = useAuth();
+  const accountId = user?.slug;
   const [requests, setRequests] = useState<SongRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("open");
@@ -197,6 +198,14 @@ export default function RequestsPage() {
                       </span>
                     )}
                     <span>{formatDate(req.created_at)}</span>
+                    {(req as any).submission_count > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
+                        {(req as any).submission_count} {(req as any).submission_count === 1 ? "submission" : "submissions"}
+                      </span>
+                    )}
                   </div>
                 </div>
 

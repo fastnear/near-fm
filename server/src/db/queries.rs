@@ -21,9 +21,9 @@ pub async fn get_or_create_user(
         return Ok(user);
     }
 
-    // Create new user
+    // Create new user (slug = account_id for NEAR users)
     sqlx::query_as::<_, User>(
-        "INSERT INTO users (account_id, is_admin) VALUES ($1, $2) RETURNING *",
+        "INSERT INTO users (account_id, slug, is_admin, auth_provider) VALUES ($1, $1, $2, 'near') RETURNING *",
     )
     .bind(account_id)
     .bind(is_admin)
@@ -39,6 +39,62 @@ pub async fn get_user_by_account(
         .bind(account_id)
         .fetch_optional(pool)
         .await
+}
+
+pub async fn get_user_by_slug(
+    pool: &PgPool,
+    slug: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT * FROM users WHERE slug = $1")
+        .bind(slug)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn get_user_by_google_id(
+    pool: &PgPool,
+    google_id: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT * FROM users WHERE google_id = $1")
+        .bind(google_id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn create_google_user(
+    pool: &PgPool,
+    google_id: &str,
+    email: &str,
+    display_name: &str,
+    avatar_url: Option<&str>,
+    slug: &str,
+) -> Result<User, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        r#"INSERT INTO users (google_id, email, display_name, avatar_url, slug, auth_provider)
+           VALUES ($1, $2, $3, $4, $5, 'google')
+           RETURNING *"#,
+    )
+    .bind(google_id)
+    .bind(email)
+    .bind(display_name)
+    .bind(avatar_url)
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn link_near_wallet(
+    pool: &PgPool,
+    user_id: i32,
+    account_id: &str,
+) -> Result<User, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        "UPDATE users SET account_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
+    )
+    .bind(account_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
 }
 
 // ── Songs ──
@@ -92,7 +148,7 @@ pub async fn get_song_by_uuid(
 ) -> Result<Option<SongWithUploader>, sqlx::Error> {
     sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
@@ -128,9 +184,10 @@ pub async fn list_songs(
     limit: i64,
     offset: i64,
     follower_user_id: Option<i32>,
+    blocked_user_ids: &[i32],
 ) -> Result<Vec<SongWithUploader>, sqlx::Error> {
     let final_sql = r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,
@@ -167,6 +224,7 @@ pub async fn list_songs(
              AND (CARDINALITY($12::int[]) = 0 OR s.category_id IS NULL OR s.category_id != ALL($12))
              AND (NOT $13::BOOL OR s.cover_image_url IS NOT NULL)
              AND ($14::INTEGER IS NULL OR s.uploader_id IN (SELECT followed_id FROM user_follows WHERE follower_id = $14))
+             AND (CARDINALITY($15::int[]) = 0 OR s.uploader_id != ALL($15))
            ORDER BY
              CASE WHEN $7 = 'latest' THEN EXTRACT(EPOCH FROM s.created_at) END DESC,
              CASE WHEN $7 = 'top' THEN (s.upvotes - s.downvotes)::FLOAT END DESC,
@@ -194,6 +252,7 @@ pub async fn list_songs(
         .bind(excluded_category_ids)
         .bind(hide_no_cover)
         .bind(follower_user_id)
+        .bind(blocked_user_ids)
         .fetch_all(pool)
         .await
 }
@@ -431,7 +490,7 @@ pub async fn get_top_trending_songs(
 ) -> Result<Vec<SongWithUploader>, sqlx::Error> {
     sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
-            u.account_id AS uploader_account_id,
+            u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             c.name AS category_name,

@@ -7,7 +7,11 @@ use sqlx::Row;
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
     pub id: i32,
-    pub account_id: String,
+    pub account_id: Option<String>,
+    pub slug: String,
+    pub google_id: Option<String>,
+    pub email: Option<String>,
+    pub auth_provider: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub reputation_score: f64,

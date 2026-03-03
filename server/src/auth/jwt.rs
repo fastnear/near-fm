@@ -11,17 +11,20 @@ use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,       // account_id
+    pub sub: String,       // slug (universal identifier)
     pub user_id: i32,
     pub is_admin: bool,
     pub exp: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,  // NEAR wallet account, if linked
 }
 
 pub fn create_token(
     secret: &str,
-    account_id: &str,
+    slug: &str,
     user_id: i32,
     is_admin: bool,
+    account_id: Option<&str>,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(7))
@@ -29,10 +32,11 @@ pub fn create_token(
         .timestamp() as usize;
 
     let claims = Claims {
-        sub: account_id.to_string(),
+        sub: slug.to_string(),
         user_id,
         is_admin,
         exp: expiration,
+        account_id: account_id.map(|s| s.to_string()),
     };
 
     encode(

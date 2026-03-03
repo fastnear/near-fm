@@ -100,6 +100,8 @@ async fn main() -> anyhow::Result<()> {
     // Moderate rate-limited routes (30 req/min per IP) — auth / writes
     let moderate_routes = Router::new()
         .route("/api/auth/verify", post(routes::auth::verify))
+        .route("/api/auth/link-wallet", post(routes::auth::link_wallet))
+        .route("/api/auth/logout", post(routes::auth::logout))
         .route("/api/songs", post(routes::songs::create_song))
         .route("/api/requests", post(routes::requests::create_request))
         .route("/api/songs/:uuid/vote", post(routes::songs::vote_song))
@@ -138,12 +140,17 @@ async fn main() -> anyhow::Result<()> {
                 })))
             }),
         )
+        // Google OAuth
+        .route("/api/auth/google", get(routes::auth::google_redirect))
+        .route("/api/auth/google/callback", get(routes::auth::google_callback))
+        .route("/api/auth/me", get(routes::auth::get_me))
         // Songs (GET + PUT not rate-limited)
         .route("/api/songs", get(routes::songs::list_songs))
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
         .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
         .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
         .route("/api/radio", get(routes::songs::get_radio))
+        .route("/api/radio/skip", post(routes::songs::radio_skip))
         // Requests (GET not rate-limited)
         .route("/api/requests", get(routes::requests::list_requests))
         .route("/api/requests/:uuid", get(routes::requests::get_request))
@@ -176,6 +183,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/users/:account_id/feed-preferences",
             get(routes::users::get_feed_preferences).put(routes::users::update_feed_preferences),
+        )
+        .route(
+            "/api/users/:account_id/block",
+            post(routes::users::block_user).delete(routes::users::unblock_user),
+        )
+        .route(
+            "/api/users/:account_id/blocked",
+            get(routes::users::list_blocked_users),
         )
         // Notifications
         .route(

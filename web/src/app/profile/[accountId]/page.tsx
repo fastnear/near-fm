@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
-import { getUserProfile, getFollowers, updateUserProfile } from "@/lib/api";
+import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers } from "@/lib/api";
 import type { FollowerEntry } from "@/lib/api";
 import Link from "next/link";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { SongCard } from "@/components/song/SongCard";
 import { FollowButton } from "@/components/song/FollowButton";
@@ -35,14 +36,21 @@ function formatDate(iso: string): string {
 export default function ProfilePage() {
   const params = useParams<{ accountId: string }>();
   const accountId = params.accountId;
-  const { accountId: currentUser, signOut, callFunction } = useNearWallet();
+  const { user: authUser, signOut: authSignOut } = useAuth();
+  const { accountId: walletAccountId, callFunction, linkWallet } = useNearWallet();
+  const currentUser = authUser?.slug ?? null;
   const isOwnProfile = currentUser === accountId;
 
-  const [user, setUser] = useState<Record<string, unknown> | null>(null);
+  const [profileData, setProfileData] = useState<Record<string, unknown> | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followers, setFollowers] = useState<FollowerEntry[]>([]);
+
+  // Block & follow state
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockLoading, setBlockLoading] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
 
   // Edit profile state
   const [editing, setEditing] = useState(false);
@@ -63,7 +71,7 @@ export default function ProfilePage() {
       try {
         const data: any = await getUserProfile(accountId);
         const { songs: userSongs, ...userData } = data;
-        setUser(userData);
+        setProfileData(userData);
         setSongs(userSongs ?? []);
       } catch (e) {
         console.error("Failed to load profile:", e);
@@ -82,9 +90,36 @@ export default function ProfilePage() {
     }
   }, [accountId]);
 
+  // Check block status
+  useEffect(() => {
+    if (!currentUser || !accountId || isOwnProfile) return;
+    getBlockedUsers(currentUser)
+      .then((blocked) => {
+        setIsBlocked(blocked.some((u) => u.account_id === accountId));
+      })
+      .catch(console.error);
+  }, [currentUser, accountId, isOwnProfile]);
+
+  const handleBlock = async () => {
+    if (!currentUser || !accountId) return;
+    setBlockLoading(true);
+    try {
+      if (isBlocked) {
+        await unblockUser(accountId);
+        setIsBlocked(false);
+      } else {
+        await blockUser(accountId);
+        setIsBlocked(true);
+      }
+    } catch (e) {
+      console.error("Block/unblock failed:", e);
+    }
+    setBlockLoading(false);
+  };
+
   const startEditing = () => {
-    setEditBio((user?.bio as string) || "");
-    setEditTwitter((user?.twitter_handle as string) || "");
+    setEditBio((profileData?.bio as string) || "");
+    setEditTwitter((profileData?.twitter_handle as string) || "");
     setEditAvatarPreview(null);
     setAvatarFile(null);
     setEditing(true);
@@ -104,7 +139,7 @@ export default function ProfilePage() {
   };
 
   const saveProfile = async () => {
-    if (!currentUser) return;
+    if (!currentUser || !accountId) return;
     setSaving(true);
     try {
       let avatarUrl: string | undefined;
@@ -124,11 +159,11 @@ export default function ProfilePage() {
           (done, total) => setUploadProgress(`Uploading avatar ${done}/${total}...`)
         );
 
-        avatarUrl = getFastFSUrl(currentUser, relPath);
+        avatarUrl = getFastFSUrl(walletAccountId!, relPath);
       }
 
       setUploadProgress("Saving profile...");
-      await updateUserProfile(currentUser, {
+      await updateUserProfile(accountId, {
         avatar_url: avatarUrl,
         bio: editBio.trim(),
         twitter_handle: editTwitter.trim(),
@@ -137,7 +172,7 @@ export default function ProfilePage() {
       // Refresh profile data
       const data: any = await getUserProfile(accountId);
       const { songs: userSongs, ...userData } = data;
-      setUser(userData);
+      setProfileData(userData);
       setSongs(userSongs ?? []);
       setEditing(false);
     } catch (e) {
@@ -182,7 +217,7 @@ export default function ProfilePage() {
     );
   }
 
-  if (error || !user) {
+  if (error || !profileData) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-20 text-center">
         <div className="text-5xl mb-4 opacity-30">&#128100;</div>
@@ -191,17 +226,17 @@ export default function ProfilePage() {
     );
   }
 
-  const displayName = user.display_name as string | null;
-  const avatarUrl = user.avatar_url as string | null;
-  const bio = user.bio as string | null;
-  const twitterHandle = user.twitter_handle as string | null;
-  const reputationRaw = parseFloat(user.reputation_score as string);
+  const displayName = profileData.display_name as string | null;
+  const avatarUrl = profileData.avatar_url as string | null;
+  const bio = profileData.bio as string | null;
+  const twitterHandle = profileData.twitter_handle as string | null;
+  const reputationRaw = parseFloat(profileData.reputation_score as string);
   const reputationScore = Number.isFinite(reputationRaw) ? Math.round(reputationRaw * 100) / 100 : 0;
-  const totalTipsYocto = user.total_tips_received_yocto as string;
-  const totalLikesGiven = (user.total_likes_given as number) ?? 0;
-  const totalDislikesGiven = (user.total_dislikes_given as number) ?? 0;
-  const followersCount = (user.followers_count as number) ?? 0;
-  const memberSince = user.created_at as string;
+  const totalTipsYocto = profileData.total_tips_received_yocto as string;
+  const totalLikesGiven = (profileData.total_likes_given as number) ?? 0;
+  const totalDislikesGiven = (profileData.total_dislikes_given as number) ?? 0;
+  const followersCount = (profileData.followers_count as number) ?? 0;
+  const memberSince = profileData.created_at as string;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-10">
@@ -255,10 +290,33 @@ export default function ProfilePage() {
 
           <div className="flex items-center gap-3 shrink-0">
             {!isOwnProfile && (
-              <FollowButton accountId={accountId} currentUser={currentUser} />
+              <>
+                <FollowButton accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
+                {currentUser && !isFollowing && (
+                  <button
+                    onClick={handleBlock}
+                    disabled={blockLoading}
+                    className={`px-4 py-2 text-sm rounded-xl transition-all disabled:opacity-50 ${
+                      isBlocked
+                        ? "text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20"
+                        : "text-slate-400 bg-white/[0.04] border border-white/[0.06] hover:text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/20"
+                    }`}
+                  >
+                    {blockLoading ? "..." : isBlocked ? "Unblock" : "Block"}
+                  </button>
+                )}
+              </>
             )}
             {isOwnProfile && (
               <>
+                {authUser && !authUser.near_account_id && (
+                  <button
+                    onClick={() => linkWallet()}
+                    className="px-4 py-2 text-sm text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/30 rounded-xl transition-all"
+                  >
+                    Connect NEAR Wallet
+                  </button>
+                )}
                 <button
                   onClick={startEditing}
                   className="px-4 py-2 text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] rounded-xl transition-all"
@@ -266,7 +324,7 @@ export default function ProfilePage() {
                   Edit Profile
                 </button>
                 <button
-                  onClick={signOut}
+                  onClick={() => authSignOut()}
                   className="px-4 py-2 text-sm text-slate-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] rounded-xl transition-all"
                 >
                   Sign out
@@ -376,16 +434,16 @@ export default function ProfilePage() {
             <p className="text-xs text-slate-400 mt-1">Songs</p>
           </div>
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
-            <p className="text-2xl font-bold text-white">{formatNear(totalTipsYocto)}</p>
-            <p className="text-xs text-slate-400 mt-1">NEAR Received</p>
+            <p className="text-2xl font-bold text-white">{formatNear(totalTipsYocto)} <span className="text-lg text-slate-400 font-normal">NEAR</span></p>
+            <p className="text-xs text-slate-400 mt-1">Tips Received</p>
           </div>
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
-            <p className="text-2xl font-bold text-[#00ec97]">{totalLikesGiven}</p>
+            <p className="text-2xl font-bold text-white">
+              <span className="text-[#00ec97]">{totalLikesGiven}</span>
+              <span className="text-slate-600 mx-1">/</span>
+              <span className="text-rose-400">{totalDislikesGiven}</span>
+            </p>
             <p className="text-xs text-slate-400 mt-1">Likes Given</p>
-          </div>
-          <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
-            <p className="text-2xl font-bold text-rose-400">{totalDislikesGiven}</p>
-            <p className="text-xs text-slate-400 mt-1">Dislikes Given</p>
           </div>
           {followersCount > 0 && (
             <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
