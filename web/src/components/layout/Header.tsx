@@ -7,16 +7,6 @@ import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getNotifications } from "@/lib/api";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
 
-function NavLink({ href, children, className = "" }: { href: string; children: React.ReactNode; className?: string }) {
-  return (
-    <Link
-      href={href}
-      className={`relative text-sm text-slate-300 hover:text-white transition-colors duration-200 after:absolute after:bottom-0 after:left-0 after:w-0 after:h-[2px] after:bg-gradient-to-r after:from-purple-500 after:to-cyan-500 after:transition-all after:duration-300 hover:after:w-full ${className}`}
-    >
-      {children}
-    </Link>
-  );
-}
 
 export function Header() {
   const { accountId, signIn, signOut, isAuthenticated, loading } = useNearWallet();
@@ -24,7 +14,6 @@ export function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const showBack = pathname !== "/" && pathname !== "/trending" && pathname !== "/latest" && pathname !== "/top";
-  const base = "";
 
   useEffect(() => {
     if (!accountId || !isAuthenticated) {
@@ -56,28 +45,28 @@ export function Header() {
               </svg>
             </button>
           )}
-          <a href={`${base}/`} className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <AnimatedLogo className="w-10 h-10" variant="header" />
             <span className="text-xl font-bold text-gradient">
               near.fm
             </span>
-          </a>
+          </Link>
         </div>
 
         {/* Nav */}
         <nav className="hidden md:flex items-center gap-8">
-          <a href={`${base}/`} className={navLinkClass}>Feed</a>
-          <a href={`${base}/requests`} className={navLinkClass}>Requests</a>
-          <a href={`${base}/upload`} className={navLinkClass}>Upload</a>
-          <a href={`${base}/about`} className={navLinkClass}>About</a>
-          <a href={`${base}/cabinet`} className={navLinkClass}>
+          <Link href="/" className={navLinkClass}>Feed</Link>
+          <Link href="/requests" className={navLinkClass}>Requests</Link>
+          <Link href="/upload" className={navLinkClass}>Upload</Link>
+          <Link href="/about" className={navLinkClass}>About</Link>
+          <Link href="/cabinet" className={navLinkClass}>
             Cabinet
             {unreadCount > 0 && (
               <span className="absolute -top-2.5 -right-5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-lg shadow-purple-500/30 animate-pulse">
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
             )}
-          </a>
+          </Link>
         </nav>
 
         {/* Wallet */}
@@ -104,26 +93,26 @@ export function Header() {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-2.5 text-xs">
-        <a href={`${base}/`} className="text-slate-400 hover:text-white transition-colors py-1">
+        <Link href="/" className="text-slate-400 hover:text-white transition-colors py-1">
           Feed
-        </a>
-        <a href={`${base}/requests`} className="text-slate-400 hover:text-white transition-colors py-1">
+        </Link>
+        <Link href="/requests" className="text-slate-400 hover:text-white transition-colors py-1">
           Requests
-        </a>
-        <a href={`${base}/upload`} className="text-slate-400 hover:text-white transition-colors py-1">
+        </Link>
+        <Link href="/upload" className="text-slate-400 hover:text-white transition-colors py-1">
           Upload
-        </a>
-        <a href={`${base}/about`} className="text-slate-400 hover:text-white transition-colors py-1">
+        </Link>
+        <Link href="/about" className="text-slate-400 hover:text-white transition-colors py-1">
           About
-        </a>
-        <a href={`${base}/cabinet`} className="relative text-slate-400 hover:text-white transition-colors py-1">
+        </Link>
+        <Link href="/cabinet" className="relative text-slate-400 hover:text-white transition-colors py-1">
           Cabinet
           {unreadCount > 0 && (
             <span className="absolute -top-2 -right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 shadow-lg shadow-purple-500/30">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
-        </a>
+        </Link>
       </nav>
     </header>
   );

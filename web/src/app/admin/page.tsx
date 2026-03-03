@@ -23,12 +23,14 @@ import {
   toggleBanUser,
   getAdminSongScores,
   getLanguages,
+  createLanguage,
+  deleteLanguage,
 } from "@/lib/api";
 import type { AdminComment, AdminSongScore } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "categories" | "genres" | "songs" | "requests" | "comments";
+type Tab = "reports" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments";
 
 interface Report {
   id: number;
@@ -752,8 +754,156 @@ function SongScoreRow({ song, maxBase, languages, onGenresUpdated }: { song: Adm
   );
 }
 
+// ── Languages Tab ──
+
+function LanguagesPanel() {
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formCode, setFormCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState<number | null>(null);
+
+  const fetchLanguages = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getLanguages();
+      setLanguages(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load languages");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchLanguages();
+  }, [fetchLanguages]);
+
+  const handleCreate = async () => {
+    if (!formName.trim() || !formCode.trim()) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await createLanguage({
+        name: formName.trim(),
+        code: formCode.trim().toLowerCase(),
+      });
+      setFormName("");
+      setFormCode("");
+      await fetchLanguages();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create language");
+    }
+    setSubmitting(false);
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!window.confirm(`Delete language "${name}"? Songs using it will lose their language.`)) {
+      return;
+    }
+    setDeleteLoading(id);
+    try {
+      await deleteLanguage(id);
+      await fetchLanguages();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete language");
+    }
+    setDeleteLoading(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Add Language Form */}
+      <div className="glass-card rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">
+          Add Language
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Name
+            </label>
+            <input
+              type="text"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="e.g. Korean"
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Code (ISO 639-1)
+            </label>
+            <input
+              type="text"
+              value={formCode}
+              onChange={(e) => setFormCode(e.target.value)}
+              placeholder="e.g. ko"
+              maxLength={10}
+              className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleCreate}
+              disabled={submitting || !formName.trim() || !formCode.trim()}
+              className="w-full px-4 py-2 btn-primary rounded-xl text-sm font-medium disabled:opacity-50 transition"
+            >
+              {submitting ? "Adding..." : "Add Language"}
+            </button>
+          </div>
+        </div>
+        {error && (
+          <p className="text-red-400 text-sm mt-3">{error}</p>
+        )}
+      </div>
+
+      {/* Languages List */}
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="glass-card rounded-xl p-3 animate-pulse">
+              <div className="h-4 skeleton rounded w-1/4" />
+            </div>
+          ))}
+        </div>
+      ) : languages.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-slate-500">No languages yet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {languages.map((lang) => (
+            <div
+              key={lang.id}
+              className="glass-card rounded-xl px-4 py-3 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 font-mono w-6">#{lang.id}</span>
+                <span className="text-sm text-slate-200 font-medium">{lang.name}</span>
+                <span className="text-xs text-slate-500 font-mono bg-white/[0.04] px-2 py-0.5 rounded">{lang.code}</span>
+              </div>
+              <button
+                onClick={() => handleDelete(lang.id, lang.name)}
+                disabled={deleteLoading === lang.id}
+                className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 transition"
+              >
+                {deleteLoading === lang.id ? "..." : "Delete"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SongsPanel() {
   const [mode, setMode] = useState<"scores" | "search">("scores");
+  const [scoreSort, setScoreSort] = useState<"score" | "latest" | "top">("score");
   const [scores, setScores] = useState<AdminSongScore[]>([]);
   const [scoresLoading, setScoresLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -828,6 +978,11 @@ function SongsPanel() {
     setActionLoading(null);
   };
 
+  const sortedScores = [...scores].sort((a, b) => {
+    if (scoreSort === "latest") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    if (scoreSort === "top") return (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes);
+    return b.score - a.score;
+  });
   const maxBase = scores.length > 0 ? Math.max(...scores.map((s) => Math.abs(s.base_score)), 1) : 1;
 
   return (
@@ -835,14 +990,34 @@ function SongsPanel() {
       {/* Mode toggle */}
       <div className="flex gap-2">
         <button
-          onClick={() => setMode("scores")}
+          onClick={() => { setMode("scores"); setScoreSort("score"); }}
           className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
-            mode === "scores"
+            mode === "scores" && scoreSort === "score"
               ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
               : "bg-white/[0.04] text-slate-500 border-white/[0.08] hover:text-slate-300"
           }`}
         >
-          All Songs (by score)
+          By Score
+        </button>
+        <button
+          onClick={() => { setMode("scores"); setScoreSort("latest"); }}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+            mode === "scores" && scoreSort === "latest"
+              ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+              : "bg-white/[0.04] text-slate-500 border-white/[0.08] hover:text-slate-300"
+          }`}
+        >
+          Latest
+        </button>
+        <button
+          onClick={() => { setMode("scores"); setScoreSort("top"); }}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${
+            mode === "scores" && scoreSort === "top"
+              ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+              : "bg-white/[0.04] text-slate-500 border-white/[0.08] hover:text-slate-300"
+          }`}
+        >
+          Top
         </button>
         <button
           onClick={() => setMode("search")}
@@ -869,14 +1044,14 @@ function SongsPanel() {
                 </div>
               ))}
             </div>
-          ) : scores.length === 0 ? (
+          ) : sortedScores.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-slate-500">No songs found</p>
             </div>
           ) : (
             <>
               <div className="space-y-2">
-                {scores.map((song, i) => (
+                {sortedScores.map((song, i) => (
                   <div key={song.uuid} className="flex items-start gap-2">
                     <span className="text-xs text-slate-600 font-mono w-6 text-right pt-3.5 shrink-0">
                       {i + 1}
@@ -1448,6 +1623,7 @@ export default function AdminPage() {
     { key: "comments", label: "Comments" },
     { key: "categories", label: "Categories" },
     { key: "genres", label: "Genres" },
+    { key: "languages", label: "Languages" },
   ];
 
   return (
@@ -1496,6 +1672,7 @@ export default function AdminPage() {
         {activeTab === "comments" && <CommentsPanel />}
         {activeTab === "categories" && <CategoriesPanel />}
         {activeTab === "genres" && <GenresPanel />}
+        {activeTab === "languages" && <LanguagesPanel />}
       </div>
     </div>
   );

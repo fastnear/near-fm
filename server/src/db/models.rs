@@ -15,6 +15,8 @@ pub struct User {
     pub total_tips_received_yocto: String,
     pub is_admin: bool,
     pub is_banned: bool,
+    pub bio: Option<String>,
+    pub twitter_handle: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

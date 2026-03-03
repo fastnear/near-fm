@@ -245,6 +245,47 @@ export async function removeBookmark(
   });
 }
 
+// ── Follows ──
+
+export async function followUser(accountId: string): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/follow`, { method: "POST" });
+}
+
+export async function unfollowUser(accountId: string): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/follow`, { method: "DELETE" });
+}
+
+export async function getFollowStatus(accountId: string): Promise<{
+  is_following: boolean;
+  followers_count: number;
+}> {
+  return fetchApi(`/api/users/${accountId}/follow-status`);
+}
+
+export interface FollowerEntry {
+  account_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export async function getFollowers(accountId: string): Promise<FollowerEntry[]> {
+  return fetchApi(`/api/users/${accountId}/followers`);
+}
+
+// ── Profile Update ──
+
+export async function updateUserProfile(accountId: string, data: {
+  avatar_url?: string;
+  bio?: string;
+  twitter_handle?: string;
+}): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/profile`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 // ── Feed Preferences ──
 
 export async function getFeedPreferences(accountId: string): Promise<{
@@ -278,6 +319,12 @@ export async function markAllNotificationsRead(): Promise<void> {
   return fetchApi("/api/notifications/read-all", { method: "POST" });
 }
 
+// ── Radio ──
+
+export async function getRadioPlaylist(): Promise<Song[]> {
+  return fetchApi("/api/radio");
+}
+
 // ── Stats ──
 
 export async function getStats(): Promise<{
@@ -297,6 +344,17 @@ export async function getCategories(): Promise<Category[]> {
 
 export async function getLanguages(): Promise<Language[]> {
   return fetchApi("/api/languages");
+}
+
+export async function createLanguage(data: { name: string; code: string }): Promise<Language> {
+  return fetchApi("/api/admin/languages", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLanguage(id: number): Promise<void> {
+  return fetchApi(`/api/admin/languages/${id}`, { method: "DELETE" });
 }
 
 // ── Genres ──

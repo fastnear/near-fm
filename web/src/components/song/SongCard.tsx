@@ -1,13 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import type { Song } from "@/types";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
+import { useNearWallet } from "@/contexts/NearWalletContext";
+import { followUser, unfollowUser, getFollowStatus } from "@/lib/api";
 import { VoteButtons } from "./VoteButtons";
+
+const langFlags: Record<string, string> = {
+  ru: "🇷🇺", es: "🇪🇸", zh: "🇨🇳", ko: "🇰🇷", ja: "🇯🇵",
+  pt: "🇧🇷", fr: "🇫🇷", de: "🇩🇪", tr: "🇹🇷", vi: "🇻🇳", uk: "🇺🇦",
+};
 
 export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }) {
   const { currentSong, isPlaying, togglePlay, playFromFeed } = useAudioPlayer();
+  const { accountId } = useNearWallet();
   const isActive = currentSong?.uuid === song.uuid;
+  const [followState, setFollowState] = useState<"unknown" | "following" | "not_following">("unknown");
+  const [followLoading, setFollowLoading] = useState(false);
 
   return (
     <div
@@ -58,32 +69,76 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
 
       {/* Info */}
       <div className="p-3">
-        <Link href={`/song/${song.uuid}`}>
-          <h3 className="font-medium text-sm text-slate-200 truncate hover:text-purple-400 transition-colors">
-            {song.title}
-          </h3>
-        </Link>
-        <Link
-          href={`/profile/${song.uploader_account_id}`}
-          className="text-xs text-slate-500 hover:text-slate-300 truncate block mt-0.5 transition-colors"
-        >
-          {song.uploader_display_name || song.uploader_account_id}
-        </Link>
+        <div className="flex items-center gap-1 min-w-0">
+          <Link href={`/song/${song.uuid}`} className="truncate">
+            <h3 className="font-medium text-sm text-slate-200 truncate hover:text-purple-400 transition-colors">
+              {song.title}
+            </h3>
+          </Link>
+          {song.language_code && song.language_code !== "en" && langFlags[song.language_code] && (
+            <span className="shrink-0 text-xs opacity-[0.65]" title={song.language_name || song.language_code}>
+              {langFlags[song.language_code]}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 mt-0.5 min-w-0">
+          <Link
+            href={`/profile/${song.uploader_account_id}`}
+            className="text-xs text-slate-500 hover:text-slate-300 truncate transition-colors"
+          >
+            {song.uploader_display_name || song.uploader_account_id}
+          </Link>
+          {accountId && accountId !== song.uploader_account_id && (
+            <button
+              disabled={followLoading}
+              onClick={async () => {
+                setFollowLoading(true);
+                try {
+                  if (followState === "unknown") {
+                    const status = await getFollowStatus(song.uploader_account_id);
+                    if (status.is_following) {
+                      await unfollowUser(song.uploader_account_id);
+                      setFollowState("not_following");
+                    } else {
+                      await followUser(song.uploader_account_id);
+                      setFollowState("following");
+                    }
+                  } else if (followState === "following") {
+                    await unfollowUser(song.uploader_account_id);
+                    setFollowState("not_following");
+                  } else {
+                    await followUser(song.uploader_account_id);
+                    setFollowState("following");
+                  }
+                } catch {}
+                setFollowLoading(false);
+              }}
+              className={`shrink-0 text-[10px] transition-colors disabled:opacity-50 ${
+                followState === "following"
+                  ? "text-purple-400/60 hover:text-red-400"
+                  : "text-slate-600 hover:text-purple-400"
+              }`}
+              title={followState === "following" ? `Unfollow ${song.uploader_account_id}` : `Follow ${song.uploader_account_id}`}
+            >
+              {followState === "following" ? "Following" : "+Follow"}
+            </button>
+          )}
+        </div>
 
-        <div className="flex flex-wrap gap-1 mt-1.5">
+        <div className="flex gap-1 mt-1.5 overflow-x-auto scrollbar-hide">
           {song.category_name && (
             <Link
               href={`/?category=${song.category_id}`}
-              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors truncate"
+              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/15 hover:bg-purple-500/20 transition-colors whitespace-nowrap shrink-0"
             >
               {song.category_name}
             </Link>
           )}
-          {song.genres?.slice(0, 2).map((g) => (
+          {song.genres?.map((g) => (
             <Link
               key={g.id}
               href={`/genre/${g.slug}`}
-              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 hover:bg-cyan-500/20 transition-colors truncate"
+              className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/15 hover:bg-cyan-500/20 transition-colors whitespace-nowrap shrink-0"
             >
               {g.name}
             </Link>

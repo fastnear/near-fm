@@ -86,6 +86,13 @@ pub async fn list_songs(
             (vec![], vec![], vec![], false)
         };
 
+    // For "following" sort, pass the user_id to filter by followed authors
+    let follower_user_id = if sort == "following" {
+        extensions.get::<crate::auth::jwt::Claims>().map(|c| c.user_id)
+    } else {
+        None
+    };
+
     let songs = queries::list_songs(
         &state.db,
         sort,
@@ -101,6 +108,7 @@ pub async fn list_songs(
         hide_no_cover,
         limit,
         offset,
+        follower_user_id,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -449,6 +457,101 @@ pub async fn update_song(
         .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Song not found after update".to_string()))?;
 
     Ok(Json(SongDetailResponse { song: updated }))
+}
+
+pub async fn get_radio(
+    State(state): State<AppState>,
+    extensions: Extensions,
+) -> Result<Json<Vec<crate::db::models::SongWithUploader>>, (StatusCode, String)> {
+    // Get top 100 trending songs
+    let top_songs = queries::get_top_trending_songs(&state.db, 100)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if top_songs.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    // Get user preferences if authenticated
+    let prefs = if let Some(claims) = extensions.get::<Claims>() {
+        queries::get_user_vote_preferences(&state.db, claims.user_id)
+            .await
+            .ok()
+    } else {
+        None
+    };
+
+    // Do all randomization in a sync block so rng doesn't cross await
+    let result = select_radio_songs(top_songs, prefs);
+
+    Ok(Json(result))
+}
+
+fn select_radio_songs(
+    top_songs: Vec<crate::db::models::SongWithUploader>,
+    prefs: Option<(Vec<i32>, Vec<i32>)>,
+) -> Vec<crate::db::models::SongWithUploader> {
+    use rand::seq::SliceRandom;
+    use rand::Rng;
+
+    let mut rng = rand::thread_rng();
+
+    if let Some((pref_genres, pref_langs)) = prefs {
+        if pref_genres.is_empty() && pref_langs.is_empty() {
+            let mut songs = top_songs;
+            songs.shuffle(&mut rng);
+            songs.truncate(30);
+            return songs;
+        }
+
+        // Weighted random selection
+        let weights: Vec<f64> = top_songs
+            .iter()
+            .map(|s| {
+                let mut w: f64 = 1.0;
+                for g in &s.genres {
+                    if pref_genres.contains(&g.id) {
+                        w += 0.5;
+                        break;
+                    }
+                }
+                if let Some(lid) = s.language_id {
+                    if pref_langs.contains(&lid) {
+                        w += 0.3;
+                    }
+                }
+                w
+            })
+            .collect();
+
+        let mut indices: Vec<usize> = (0..top_songs.len()).collect();
+        let mut selected = Vec::with_capacity(30);
+
+        for _ in 0..30.min(top_songs.len()) {
+            if indices.is_empty() {
+                break;
+            }
+            let total: f64 = indices.iter().map(|&i| weights[i]).sum();
+            let mut r = rng.gen::<f64>() * total;
+            let mut pick = 0;
+            for (pos, &idx) in indices.iter().enumerate() {
+                r -= weights[idx];
+                if r <= 0.0 {
+                    pick = pos;
+                    break;
+                }
+            }
+            let idx = indices.remove(pick);
+            selected.push(idx);
+        }
+
+        selected.into_iter().map(|i| top_songs[i].clone()).collect()
+    } else {
+        let mut songs = top_songs;
+        songs.shuffle(&mut rng);
+        songs.truncate(30);
+        songs
+    }
 }
 
 pub async fn report_song(

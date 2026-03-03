@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { Song, Category, Language } from "@/types";
 import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
@@ -11,10 +11,12 @@ import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
+import { FollowButton } from "@/components/song/FollowButton";
 
 const ADMIN_ACCOUNTS = (process.env.NEXT_PUBLIC_ADMIN_ACCOUNTS || "").split(",").map(s => s.trim()).filter(Boolean);
 
-export function SongDetail({ uuid }: { uuid: string }) {
+export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
+  const [activeUuid, setActiveUuid] = useState(initialUuid);
   const [song, setSong] = useState<Song | null>(null);
   const [loading, setLoading] = useState(true);
   const [bookmarked, setBookmarked] = useState(false);
@@ -35,30 +37,73 @@ export function SongDetail({ uuid }: { uuid: string }) {
   const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
   const { accountId, isAuthenticated, signIn, completeSignIn } = useNearWallet();
 
+  // Track whether the user navigated here manually (should not auto-follow currentSong)
+  // vs. the song changed automatically via radio/queue (should follow)
+  const isFollowingPlayer = useRef(false);
+
+  // When the component mounts or initialUuid changes (user navigated), stop auto-following
   useEffect(() => {
-    getSong(uuid)
+    isFollowingPlayer.current = false;
+    setActiveUuid(initialUuid);
+  }, [initialUuid]);
+
+  // Start auto-following once the user plays the song that's on this page
+  useEffect(() => {
+    if (currentSong && currentSong.uuid === activeUuid) {
+      isFollowingPlayer.current = true;
+    }
+  }, [currentSong, activeUuid]);
+
+  // Follow the currently playing song: update page content + URL without reload
+  // Only when we were already following (i.e. song auto-advanced from radio/queue)
+  useEffect(() => {
+    if (
+      isFollowingPlayer.current &&
+      currentSong &&
+      currentSong.uuid !== activeUuid
+    ) {
+      setActiveUuid(currentSong.uuid);
+      window.history.replaceState(null, "", `/song/${currentSong.uuid}`);
+      document.title = `${currentSong.title} — near.fm`;
+    }
+  }, [currentSong, activeUuid]);
+
+  useEffect(() => {
+    setLoading(true);
+    // Reset per-song state
+    setBookmarked(false);
+    setShowReportForm(false);
+    setReportSent(false);
+    setReportReason("");
+    setEditing(false);
+    setCommentText("");
+    setCommentError("");
+    setComments([]);
+    setCopied(false);
+
+    getSong(activeUuid)
       .then((data) => setSong(data.song))
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [uuid]);
+  }, [activeUuid]);
 
   // Poll for validation status updates
   useEffect(() => {
     if (!song || song.is_validated || song.is_hidden) return;
     const interval = setInterval(() => {
-      getSong(uuid)
+      getSong(activeUuid)
         .then((data) => setSong(data.song))
         .catch(() => {});
     }, 10000);
     return () => clearInterval(interval);
-  }, [uuid, song?.is_validated, song?.is_hidden]);
+  }, [activeUuid, song?.is_validated, song?.is_hidden]);
 
   // Load comments
   useEffect(() => {
-    if (uuid) {
-      getComments(uuid).then(setComments).catch(console.error);
+    if (activeUuid) {
+      getComments(activeUuid).then(setComments).catch(console.error);
     }
-  }, [uuid]);
+  }, [activeUuid]);
 
   // Check virtual balance for commenting
   useEffect(() => {
@@ -333,14 +378,19 @@ export function SongDetail({ uuid }: { uuid: string }) {
                   </button>
                 )}
               </div>
-              <Link
-                href={`/profile/${song.uploader_account_id}`}
-                className="text-slate-400 hover:text-purple-400 transition-colors"
-              >
-                {song.uploader_display_name || song.uploader_account_id}
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/profile/${song.uploader_account_id}`}
+                  className="text-slate-400 hover:text-purple-400 transition-colors"
+                >
+                  {song.uploader_display_name || song.uploader_account_id}
+                </Link>
+                {accountId && accountId !== song.uploader_account_id && (
+                  <FollowButton accountId={song.uploader_account_id} currentUser={accountId} />
+                )}
+              </div>
 
-              <div className="flex flex-wrap gap-1.5 mt-2">
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 {song.category_name && (
                   <Link
                     href={`/?category=${song.category_id}`}
@@ -384,7 +434,9 @@ export function SongDetail({ uuid }: { uuid: string }) {
             <>
               <div className="flex flex-wrap items-center gap-2.5 mt-6">
                 <VoteButtons song={song} />
-                <TipButton song={song} />
+                <TipButton song={song} onTipSuccess={() => {
+                  getSong(activeUuid).then((data) => setSong(data.song)).catch(() => {});
+                }} />
 
                 {/* Share */}
                 <button
@@ -630,7 +682,7 @@ export function SongDetail({ uuid }: { uuid: string }) {
                             setCommentSubmitting(true);
                             setCommentError("");
                             try {
-                              const newComment = await createComment(uuid, commentText.trim());
+                              const newComment = await createComment(activeUuid, commentText.trim());
                               setComments((prev) => [...prev, newComment]);
                               setCommentText("");
                             } catch (e: any) {

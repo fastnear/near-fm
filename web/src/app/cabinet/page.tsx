@@ -534,6 +534,20 @@ function notificationText(notif: Notification): React.ReactNode {
     }
     case "audio_validation_failed":
       return `Audio validation failed${data.reason ? `: ${data.reason}` : ""}`;
+    case "comment": {
+      const songTitle = data.song_title as string | undefined;
+      const songUuid = data.song_uuid as string | undefined;
+      const commenter = data.commenter_account_id as string | undefined;
+      return (
+        <>
+          {commenter ? <Link href={`/profile/${commenter}`} className="text-purple-400 hover:underline">{commenter}</Link> : "Someone"}
+          {" commented on "}
+          {songTitle && songUuid ? (
+            <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link>
+          ) : "your song"}
+        </>
+      );
+    }
     default:
       return `You have a new notification (${notif.type})`;
   }

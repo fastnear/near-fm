@@ -106,5 +106,5 @@ export interface FeedPreferences {
   excluded_categories: number[];
 }
 
-export type SortMode = "trending" | "latest" | "top";
+export type SortMode = "trending" | "latest" | "top" | "following";
 export type TimePeriod = "day" | "week" | "month" | "all";

@@ -27,6 +27,16 @@ body::before {
   pointer-events: none;
 }
 
+/* ── Scrollbar hide ─────────────────────────── */
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Glassmorphism utilities ─────────────────── */
 
 .glass {

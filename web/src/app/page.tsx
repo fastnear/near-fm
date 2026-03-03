@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
-import { getSongs } from "@/lib/api";
+import { getSongs, getRadioPlaylist } from "@/lib/api";
 import { SongCard } from "@/components/song/SongCard";
 import { FeedTabs } from "@/components/feed/FeedTabs";
 import { FeedFilters } from "@/components/feed/FeedFilters";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
+import { useNearWallet } from "@/contexts/NearWalletContext";
 
 function FeedPageInner() {
   const searchParams = useSearchParams();
@@ -21,7 +22,9 @@ function FeedPageInner() {
   const [langCode, setLangCode] = useState<string | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
-  const { setFeedSongs, playFromFeed } = useAudioPlayer();
+  const { setFeedSongs, playFromFeed, startRadio, isRadioActive, isPlaying, pause, resume } = useAudioPlayer();
+  const { accountId: currentUser } = useNearWallet();
+  const [radioLoading, setRadioLoading] = useState(false);
 
   // Read initial params from URL
   // Middleware rewrites /genre/:slug → /?genre=slug etc. but Next.js 16
@@ -43,6 +46,7 @@ function FeedPageInner() {
       "/trending": "trending",
       "/latest": "latest",
       "/top": "top",
+      "/following": "following",
     };
     if (sortRoutes[pathname]) setSort(sortRoutes[pathname]);
 
@@ -50,7 +54,7 @@ function FeedPageInner() {
     const cat = searchParams.get("category");
     if (cat) setCategoryId(Number(cat));
     const sortParam = searchParams.get("sort");
-    if (sortParam && ["trending", "latest", "top"].includes(sortParam)) {
+    if (sortParam && ["trending", "latest", "top", "following"].includes(sortParam)) {
       setSort(sortParam as SortMode);
     }
     const genreParam = searchParams.get("genre");
@@ -96,7 +100,51 @@ function FeedPageInner() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); }} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              if (isRadioActive && isPlaying) {
+                pause();
+                return;
+              }
+              if (isRadioActive && !isPlaying) {
+                resume();
+                return;
+              }
+              setRadioLoading(true);
+              try {
+                const songs = await getRadioPlaylist();
+                if (songs.length > 0) startRadio(songs);
+              } catch (e) {
+                console.error("Failed to load radio:", e);
+              }
+              setRadioLoading(false);
+            }}
+            disabled={radioLoading}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xl border transition-all disabled:opacity-50 ${
+              isRadioActive
+                ? "bg-gradient-to-r from-purple-600/30 to-pink-600/30 text-white border-purple-500/30 shadow-lg shadow-purple-500/10"
+                : "bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-white border-purple-500/20 hover:from-purple-600/30 hover:to-pink-600/30"
+            }`}
+          >
+            {radioLoading ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : isRadioActive && isPlaying ? (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            )}
+            <span className="hidden sm:inline">AI Radio</span>
+          </button>
+          <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); }} isAuthenticated={!!currentUser} />
+        </div>
         <FeedFilters
           languageId={languageId}
           categoryId={categoryId}

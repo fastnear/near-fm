@@ -116,8 +116,8 @@ function UploadPage() {
   const handleUpload = async () => {
     if (!accountId) { signIn(); return; }
 
-    if (!audioFile || !title.trim()) {
-      setError("Title and audio file are required");
+    if (!audioFile || !title.trim() || !lyrics.trim()) {
+      setError("Title, lyrics, and audio file are required");
       return;
     }
 
@@ -338,7 +338,7 @@ function UploadPage() {
 
         {/* Lyrics */}
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-2">Lyrics</label>
+          <label className="block text-sm font-medium text-slate-400 mb-2">Lyrics <span className="text-rose-400">*</span></label>
           <textarea
             value={lyrics}
             onChange={(e) => setLyrics(e.target.value)}
@@ -405,7 +405,7 @@ function UploadPage() {
           <label className="block text-sm font-medium text-slate-400 mb-2">Genres (up to 3)</label>
           <GenrePicker selectedIds={genreIds} onChange={setGenreIds} />
           <p className="text-xs text-slate-500 mt-2">
-            Songs with genres, language, cover image, and lyrics (200+ chars) get higher visibility in trending feed.
+            Songs with genres, correct language, and cover image get higher visibility in trending feed.
           </p>
         </div>
 
@@ -444,7 +444,7 @@ function UploadPage() {
         ) : (
           <button
             onClick={handleUpload}
-            disabled={uploading || !audioFile || !title.trim()}
+            disabled={uploading || !audioFile || !title.trim() || !lyrics.trim()}
             className="w-full py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
           >
             {uploading ? "Uploading..." : "Upload Song"}

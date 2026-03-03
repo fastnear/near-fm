@@ -127,6 +127,7 @@ pub async fn list_songs(
     hide_no_cover: bool,
     limit: i64,
     offset: i64,
+    follower_user_id: Option<i32>,
 ) -> Result<Vec<SongWithUploader>, sqlx::Error> {
     let final_sql = r#"SELECT s.*,
             u.account_id AS uploader_account_id,
@@ -165,6 +166,7 @@ pub async fn list_songs(
              AND (CARDINALITY($11::int[]) = 0 OR s.language_id IS NULL OR s.language_id != ALL($11))
              AND (CARDINALITY($12::int[]) = 0 OR s.category_id IS NULL OR s.category_id != ALL($12))
              AND (NOT $13::BOOL OR s.cover_image_url IS NOT NULL)
+             AND ($14::INTEGER IS NULL OR s.uploader_id IN (SELECT followed_id FROM user_follows WHERE follower_id = $14))
            ORDER BY
              CASE WHEN $7 = 'latest' THEN EXTRACT(EPOCH FROM s.created_at) END DESC,
              CASE WHEN $7 = 'top' THEN (s.upvotes - s.downvotes)::FLOAT END DESC,
@@ -191,6 +193,7 @@ pub async fn list_songs(
         .bind(excluded_language_ids)
         .bind(excluded_category_ids)
         .bind(hide_no_cover)
+        .bind(follower_user_id)
         .fetch_all(pool)
         .await
 }
@@ -378,6 +381,76 @@ pub async fn list_genres(pool: &PgPool) -> Result<Vec<Genre>, sqlx::Error> {
     sqlx::query_as::<_, Genre>("SELECT * FROM genres ORDER BY display_order")
         .fetch_all(pool)
         .await
+}
+
+pub async fn get_user_vote_preferences(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<(Vec<i32>, Vec<i32>), sqlx::Error> {
+    // Get genre_ids and language_ids from songs the user has upvoted (last 50)
+    let rows: Vec<(Option<i32>, Option<serde_json::Value>)> = sqlx::query_as(
+        r#"SELECT s.language_id,
+                  (SELECT json_agg(sg.genre_id) FROM song_genres sg WHERE sg.song_id = s.id)
+           FROM votes v
+           JOIN songs s ON v.song_id = s.id
+           WHERE v.user_id = $1 AND v.value = 1
+           ORDER BY v.created_at DESC
+           LIMIT 50"#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut genre_ids = Vec::new();
+    let mut language_ids = Vec::new();
+
+    for (lang_id, genres_json) in &rows {
+        if let Some(lid) = lang_id {
+            if !language_ids.contains(lid) {
+                language_ids.push(*lid);
+            }
+        }
+        if let Some(serde_json::Value::Array(arr)) = genres_json {
+            for v in arr {
+                if let Some(gid) = v.as_i64() {
+                    let gid = gid as i32;
+                    if !genre_ids.contains(&gid) {
+                        genre_ids.push(gid);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((genre_ids, language_ids))
+}
+
+pub async fn get_top_trending_songs(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<SongWithUploader>, sqlx::Error> {
+    sqlx::query_as::<_, SongWithUploader>(
+        r#"SELECT s.*,
+            u.account_id AS uploader_account_id,
+            u.display_name AS uploader_display_name,
+            u.reputation_score AS uploader_reputation,
+            c.name AS category_name,
+            c.slug AS category_slug,
+            l.code AS language_code,
+            l.name AS language_name,
+            (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
+            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
+           FROM songs s
+           JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
+           LEFT JOIN languages l ON s.language_id = l.id
+           WHERE NOT s.is_deleted AND NOT s.is_hidden AND s.is_validated
+           ORDER BY s.score DESC
+           LIMIT $1"#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
 }
 
 pub async fn set_song_genres(

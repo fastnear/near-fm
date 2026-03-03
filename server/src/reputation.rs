@@ -8,6 +8,7 @@ use std::time::Duration;
 ///       + LEAST(total_uploads, 10) * 0.1            (max contribution 1.0)
 ///       + LEAST(unique_tipped_songs, 10) * 0.2       (max contribution 2.0)
 ///       + log10(total_tips_near + 1) * 0.5
+///       + log10(follower_weighted_sum + 1) * 0.1     (followers weighted by their reputation)
 ///
 ///   Clamped to [0.1, 5.0].
 ///   If user is_banned, reputation = 0.1.
@@ -29,6 +30,7 @@ pub async fn recalculate_reputation(pool: &PgPool) -> Result<(), sqlx::Error> {
                         + LOG(
                             CAST(u.total_tips_received_yocto AS NUMERIC) / 1e24 + 1
                           ) * 0.5
+                        + LOG(COALESCE(fol.weighted_followers, 0) + 1) * 0.1
                     ))
                 END AS new_reputation
             FROM users u
@@ -40,6 +42,14 @@ pub async fn recalculate_reputation(pool: &PgPool) -> Result<(), sqlx::Error> {
                 WHERE CAST(s.total_tips_yocto AS NUMERIC) > 0
                 GROUP BY s.uploader_id
             ) tipped ON tipped.uploader_id = u.id
+            LEFT JOIN (
+                SELECT
+                    uf.followed_id,
+                    SUM(LEAST(fu.reputation_score, 3.0)) AS weighted_followers
+                FROM user_follows uf
+                JOIN users fu ON fu.id = uf.follower_id
+                GROUP BY uf.followed_id
+            ) fol ON fol.followed_id = u.id
         ) sub
         WHERE users.id = sub.id
         "#,

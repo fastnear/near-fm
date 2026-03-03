@@ -23,7 +23,7 @@ function yoctoToNear(yocto: string): string {
   return `${whole}.${frac}`;
 }
 
-export function TipButton({ song, compact }: { song: Song; compact?: boolean }) {
+export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
   const { accountId, isAuthenticated, signIn, completeSignIn, callFunction, viewMethod } = useNearWallet();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,6 +100,7 @@ export function TipButton({ song, compact }: { song: Song; compact?: boolean }) 
       }
 
       setSuccess(true);
+      onTipSuccess?.();
       setTimeout(() => {
         setSuccess(false);
         setShowModal(false);

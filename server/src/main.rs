@@ -143,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
         .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
         .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
+        .route("/api/radio", get(routes::songs::get_radio))
         // Requests (GET not rate-limited)
         .route("/api/requests", get(routes::requests::list_requests))
         .route("/api/requests/:uuid", get(routes::requests::get_request))
@@ -151,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
+        .route("/api/users/:account_id/profile", patch(routes::users::update_profile))
         .route(
             "/api/users/:account_id/bookmarks",
             get(routes::users::list_bookmarks).post(routes::users::add_bookmark),
@@ -158,6 +160,18 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/users/:account_id/bookmarks/:song_uuid",
             delete(routes::users::remove_bookmark),
+        )
+        .route(
+            "/api/users/:account_id/follow",
+            post(routes::users::follow_user).delete(routes::users::unfollow_user),
+        )
+        .route(
+            "/api/users/:account_id/follow-status",
+            get(routes::users::get_follow_status),
+        )
+        .route(
+            "/api/users/:account_id/followers",
+            get(routes::users::list_followers),
         )
         .route(
             "/api/users/:account_id/feed-preferences",
@@ -216,13 +230,9 @@ async fn main() -> anyhow::Result<()> {
             "/api/categories",
             get(routes::admin::list_categories),
         )
-        .route(
-            "/api/languages",
-            get(|state: axum::extract::State<AppState>| async move {
-                let langs = db::queries::list_languages(&state.db).await.unwrap_or_default();
-                axum::Json(langs)
-            }),
-        )
+        .route("/api/languages", get(routes::admin::list_languages))
+        .route("/api/admin/languages", post(routes::admin::create_language))
+        .route("/api/admin/languages/:id", delete(routes::admin::delete_language))
         // Global middleware
         .layer(middleware::from_fn_with_state(
             state.clone(),

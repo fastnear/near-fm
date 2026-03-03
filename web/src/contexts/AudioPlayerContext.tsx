@@ -36,6 +36,8 @@ interface AudioPlayerContextType {
   addToQueue: (song: Song) => void;
   setPlayMode: (mode: PlayMode) => void;
   setFeedSongs: (songs: Song[]) => void;
+  startRadio: (songs: Song[]) => void;
+  isRadioActive: boolean;
 }
 
 const AudioPlayerContext = createContext<AudioPlayerContextType>({
@@ -60,6 +62,8 @@ const AudioPlayerContext = createContext<AudioPlayerContextType>({
   addToQueue: () => {},
   setPlayMode: () => {},
   setFeedSongs: () => {},
+  startRadio: () => {},
+  isRadioActive: false,
 });
 
 export function AudioPlayerProvider({ children }: { children: ReactNode }) {
@@ -74,6 +78,27 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const [playMode, setPlayMode] = useState<PlayMode>("radio");
   const [history, setHistory] = useState<Song[]>([]);
   const feedSongsRef = useRef<Song[]>([]);
+  const [isRadioActive, setIsRadioActive] = useState(false);
+
+  // Cross-tab sync: pause other tabs when this one starts playing
+  const channelRef = useRef<BroadcastChannel | null>(null);
+  const tabIdRef = useRef<string>("");
+  const ignoreBroadcastRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    tabIdRef.current = Math.random().toString(36).slice(2);
+    const ch = new BroadcastChannel("nearfm_audio");
+    channelRef.current = ch;
+    ch.onmessage = (e) => {
+      if (e.data?.type === "playing" && e.data.tabId !== tabIdRef.current) {
+        // Another tab started playing — pause this one
+        audioRef.current?.pause();
+        setIsPlaying(false);
+      }
+    };
+    return () => ch.close();
+  }, []);
 
   // Refs for latest values (used in event handlers)
   const queueRef = useRef(queue);
@@ -97,6 +122,9 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       audio.play().catch(console.error);
       setCurrentSong(song);
       setIsPlaying(true);
+
+      // Notify other tabs to pause
+      channelRef.current?.postMessage({ type: "playing", tabId: tabIdRef.current });
 
       // Track play count
       incrementPlay(song.uuid).catch(() => {});
@@ -163,6 +191,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   const resume = useCallback(() => {
     audioRef.current?.play().catch(console.error);
     setIsPlaying(true);
+    channelRef.current?.postMessage({ type: "playing", tabId: tabIdRef.current });
   }, []);
 
   const togglePlay = useCallback(
@@ -185,6 +214,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       const idx = allSongs.findIndex((s) => s.uuid === song.uuid);
       const remaining = idx >= 0 ? allSongs.slice(idx + 1) : allSongs;
       setQueue(remaining);
+      setIsRadioActive(false);
       playSong(song);
     },
     [playSong]
@@ -236,6 +266,21 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
     feedSongsRef.current = songs;
   }, []);
 
+  const startRadio = useCallback((songs: Song[]) => {
+    if (songs.length === 0) return;
+    // Fisher-Yates shuffle
+    const shuffled = [...songs];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    feedSongsRef.current = shuffled;
+    setQueue(shuffled.slice(1));
+    setPlayMode("radio");
+    setIsRadioActive(true);
+    playSong(shuffled[0]);
+  }, [playSong]);
+
   return (
     <AudioPlayerContext.Provider
       value={{
@@ -260,6 +305,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         addToQueue,
         setPlayMode,
         setFeedSongs,
+        startRadio,
+        isRadioActive,
       }}
     >
       {children}

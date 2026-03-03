@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     auth::jwt::require_admin,
-    db::models::{Category, Genre, Report, PlatformConfig},
+    db::models::{Category, Genre, Language, Report, PlatformConfig},
     db::queries,
     AppState,
 };
@@ -642,6 +642,62 @@ pub async fn delete_genre(
         .map_err(|s| (s, "Admin required".to_string()))?;
 
     sqlx::query("DELETE FROM genres WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Languages ──
+
+pub async fn list_languages(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Language>>, (StatusCode, String)> {
+    let languages = queries::list_languages(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(languages))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateLanguageRequest {
+    pub name: String,
+    pub code: String,
+}
+
+pub async fn create_language(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<CreateLanguageRequest>,
+) -> Result<Json<Language>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let lang = sqlx::query_as::<_, Language>(
+        r#"INSERT INTO languages (name, code)
+           VALUES ($1, $2)
+           RETURNING *"#,
+    )
+    .bind(&req.name)
+    .bind(&req.code)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(lang))
+}
+
+pub async fn delete_language(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    extensions: Extensions,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    sqlx::query("DELETE FROM languages WHERE id = $1")
         .bind(id)
         .execute(&state.db)
         .await
