@@ -56,7 +56,7 @@ pub async fn list_requests(
 
     let sql = format!(
         "SELECT sr.*, u.slug AS requester_account_id, \
-         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND s.status = 'visible') AS submission_count \
+         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND NOT s.is_hidden AND NOT s.is_deleted) AS submission_count \
          FROM song_requests sr JOIN users u ON u.id = sr.requester_id \
          WHERE sr.status = $1 AND NOT sr.is_hidden ORDER BY {} LIMIT $2 OFFSET $3",
         order
@@ -153,7 +153,7 @@ pub async fn get_request(
 ) -> Result<Json<SongRequestWithRequester>, (StatusCode, String)> {
     let request = sqlx::query_as::<_, SongRequestWithRequester>(
         "SELECT sr.*, u.slug AS requester_account_id, \
-         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND s.status = 'visible') AS submission_count \
+         (SELECT COUNT(*) FROM songs s WHERE s.fulfills_request_id = sr.id AND NOT s.is_hidden AND NOT s.is_deleted) AS submission_count \
          FROM song_requests sr JOIN users u ON u.id = sr.requester_id WHERE sr.uuid = $1",
     )
     .bind(&uuid)
