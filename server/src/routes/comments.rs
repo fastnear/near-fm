@@ -166,7 +166,9 @@ pub async fn create_comment(
         let data = serde_json::json!({
             "message": message,
             "song_uuid": uuid,
+            "song_title": song_title,
             "comment_id": comment.id,
+            "commenter_account_id": claims.sub,
         });
         let _ = sqlx::query(
             r#"INSERT INTO notifications (user_id, type, data)

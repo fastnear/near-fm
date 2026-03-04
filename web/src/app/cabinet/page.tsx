@@ -580,6 +580,7 @@ function notificationText(notif: Notification): React.ReactNode {
       const songTitle = data.song_title as string | undefined;
       const songUuid = data.song_uuid as string | undefined;
       const commenter = data.commenter_account_id as string | undefined;
+      if (!commenter && data.message) return String(data.message);
       return (
         <>
           {commenter ? <Link href={`/profile/${commenter}`} className="text-purple-400 hover:underline">{commenter}</Link> : "Someone"}

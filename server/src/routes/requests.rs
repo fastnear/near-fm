@@ -197,9 +197,14 @@ pub async fn update_request(
     }
 
     // Require a linked NEAR wallet for bounty operations
-    let near_account = claims.account_id.as_deref().ok_or_else(|| {
-        (StatusCode::FORBIDDEN, "Connect a NEAR wallet to manage bounties".to_string())
-    })?;
+    // Fallback: for NEAR-only users with old JWTs, sub == account_id
+    let near_account = claims.account_id.as_deref()
+        .or_else(|| {
+            if claims.sub.contains('.') { Some(claims.sub.as_str()) } else { None }
+        })
+        .ok_or_else(|| {
+            (StatusCode::FORBIDDEN, "Connect a NEAR wallet to manage bounties".to_string())
+        })?;
 
     // Verify on-chain transactions
     if req.status == "awarded" {

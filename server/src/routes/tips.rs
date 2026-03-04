@@ -25,15 +25,22 @@ pub async fn record_tip(
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
     // Require a linked NEAR wallet for tips
-    let near_account = claims.account_id.as_deref().ok_or_else(|| {
-        (StatusCode::FORBIDDEN, "Connect a NEAR wallet to send tips".to_string())
-    })?;
+    // Fallback: for NEAR-only users with old JWTs, sub == account_id
+    let near_account = claims.account_id.as_deref()
+        .or_else(|| {
+            // Old JWTs don't have account_id field; for NEAR users slug == account_id
+            if claims.sub.contains('.') { Some(claims.sub.as_str()) } else { None }
+        })
+        .ok_or_else(|| {
+            (StatusCode::FORBIDDEN, "Connect a NEAR wallet to send tips".to_string())
+        })?
+        .to_string();
 
     // Verify transaction on-chain
     let verified = tx_verify::verify_near_tx(
         &state.config.near_rpc_url,
         &req.tx_hash,
-        near_account,
+        &near_account,
     )
     .await
     .map_err(|e| {
