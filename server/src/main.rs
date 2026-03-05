@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     // Start background jobs
     tokio::spawn(feed::start_feed_scoring_loop(db.clone()));
     tokio::spawn(reputation::start_reputation_loop(db.clone()));
+    tokio::spawn(validation::revalidate_pending(db.clone()));
 
     let state = AppState {
         db,

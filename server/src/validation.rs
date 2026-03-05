@@ -181,6 +181,32 @@ async fn mark_invalid(pool: &PgPool, song_id: i32, reason: &str) {
     }
 }
 
+/// Re-validate songs created in the last 10 minutes that are still unvalidated.
+/// This handles the case where the server restarted before in-flight validation tasks completed.
+pub async fn revalidate_pending(pool: PgPool) {
+    let rows: Vec<(i32, String, Option<String>)> = match sqlx::query_as(
+        "SELECT id, audio_url, cover_image_url FROM songs WHERE NOT is_validated AND NOT is_hidden AND NOT is_deleted AND created_at > NOW() - INTERVAL '10 minutes'"
+    )
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Failed to query pending validations: {}", e);
+            return;
+        }
+    };
+
+    if rows.is_empty() {
+        return;
+    }
+
+    tracing::info!("Re-validating {} songs from before restart", rows.len());
+    for (song_id, audio_url, cover_url) in rows {
+        spawn_validation(pool.clone(), song_id, audio_url, cover_url);
+    }
+}
+
 /// Spawn background tasks to validate a song's audio file and cover image.
 ///
 /// This is intended to be called from the `create_song` route handler

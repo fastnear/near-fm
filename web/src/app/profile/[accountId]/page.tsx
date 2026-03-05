@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers } from "@/lib/api";
+import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser } from "@/lib/api";
 import type { FollowerEntry } from "@/lib/api";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
@@ -271,6 +271,9 @@ export default function ProfilePage() {
   const totalLikesGiven = (profileData.total_likes_given as number) ?? 0;
   const totalDislikesGiven = (profileData.total_dislikes_given as number) ?? 0;
   const followersCount = (profileData.followers_count as number) ?? 0;
+  const activeBountiesCount = (profileData.active_bounties_count as number) ?? 0;
+  const activeBountiesTotalYocto = profileData.active_bounties_total_yocto as string || "0";
+  const activeBountiesTotalNear = (Number(activeBountiesTotalYocto) / 1e24).toFixed(1).replace(/\.0$/, "");
   const memberSince = profileData.created_at as string;
 
   return (
@@ -544,6 +547,16 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+
+      {/* Bounty follow prompt */}
+      {!isOwnProfile && !isFollowing && activeBountiesCount > 0 && currentUser && (
+        <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
+          <p className="text-sm text-slate-200">
+            <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalNear} NEAR</span>.{" "}
+            <button onClick={async () => { try { await followUser(accountId); setIsFollowing(true); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
+          </p>
+        </div>
+      )}
 
       {/* Songs section */}
       <h2 className="text-lg font-semibold text-white mb-4">Songs</h2>

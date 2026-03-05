@@ -598,6 +598,10 @@ function SongScoreRow({ song, maxBase, languages, onGenresUpdated }: { song: Adm
           </div>
           <p className="text-xs text-slate-500 truncate">
             {song.uploader_account_id} &middot; {ageStr} ago
+            {" "}&middot;{" "}
+            <span className={song.audio_duration_seconds && song.audio_duration_seconds < 30 ? "text-rose-400 font-medium" : ""}>
+              {song.audio_duration_seconds ? `${song.audio_duration_seconds}s` : "?"}
+            </span>
           </p>
         </div>
 
@@ -902,6 +906,8 @@ function LanguagesPanel() {
   );
 }
 
+// NOTE: Moderation actions (hide/unhide, delete, genre picker) should be available
+// in ALL admin song views (By Score, Search & Moderate), not just search.
 function SongsPanel() {
   const [mode, setMode] = useState<"scores" | "search">("scores");
   const [scoreSort, setScoreSort] = useState<"score" | "latest" | "top">("score");
@@ -1137,6 +1143,10 @@ function SongsPanel() {
                       </span>
                       {" "}&middot;{" "}
                       {formatDate(song.created_at)}
+                      {" "}&middot;{" "}
+                      <span className={song.audio_duration_seconds && song.audio_duration_seconds < 30 ? "text-rose-400 font-medium" : ""}>
+                        {song.audio_duration_seconds ? `${song.audio_duration_seconds}s` : "?"}
+                      </span>
                     </p>
                     <div className="mt-2">
                       <GenrePicker

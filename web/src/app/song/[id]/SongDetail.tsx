@@ -13,6 +13,7 @@ import { getRadioPlaylist } from "@/lib/api";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
+import { renderWithMentions } from "@/lib/mentions";
 
 export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [activeUuid, setActiveUuid] = useState(initialUuid);
@@ -640,7 +641,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                     Description
                   </h2>
                   <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">
-                    {song.description}
+                    {renderWithMentions(song.description)}
                   </p>
                 </div>
               )}
@@ -772,7 +773,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                             </button>
                           )}
                         </div>
-                        <p className="text-sm text-slate-300 whitespace-pre-wrap">{comment.body}</p>
+                        <p className="text-sm text-slate-300 whitespace-pre-wrap">{renderWithMentions(comment.body)}</p>
                       </div>
                     ))}
                   </div>

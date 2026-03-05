@@ -11,7 +11,7 @@ import { AnimatedLogo } from "@/components/AnimatedLogo";
 
 export function Header() {
   const { user, isAuthenticated, loading: authLoading, signInWithGoogle } = useAuth();
-  const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, loading: walletLoading } = useNearWallet();
+  const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, reconnectWallet, lowAllowance, loading: walletLoading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showLoginMenu, setShowLoginMenu] = useState(false);
   const loginMenuRef = useRef<HTMLDivElement>(null);
@@ -177,6 +177,17 @@ export function Header() {
       {user?.is_banned && (
         <div className="bg-red-900/40 border-b border-red-500/20 px-4 py-2 text-center text-sm text-red-300">
           Your account has been suspended. You cannot upload, comment, vote, or tip.
+        </div>
+      )}
+
+      {/* Low allowance warning */}
+      {lowAllowance && isAuthenticated && (
+        <div className="bg-amber-900/40 border-b border-amber-500/20 px-4 py-2 text-center text-sm text-amber-300">
+          Your session key is running low on gas.{" "}
+          <button onClick={reconnectWallet} className="underline underline-offset-2 font-medium hover:text-amber-200 transition">
+            Reconnect wallet
+          </button>
+          {" "}to continue uploading and tipping.
         </div>
       )}
 

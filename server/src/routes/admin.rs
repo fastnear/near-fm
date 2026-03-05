@@ -456,6 +456,7 @@ pub struct AdminSongScore {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub genre_ids: Vec<i32>,
     pub language_id: Option<i32>,
+    pub audio_duration_seconds: Option<i32>,
 }
 
 pub async fn list_song_scores(
@@ -510,7 +511,8 @@ pub async fn list_song_scores(
             s.is_deleted,
             s.created_at,
             ARRAY(SELECT sg.genre_id FROM song_genres sg WHERE sg.song_id = s.id) AS genre_ids,
-            s.language_id
+            s.language_id,
+            s.audio_duration_seconds
         FROM songs s
         JOIN users u ON u.id = s.uploader_id
         LEFT JOIN (

@@ -582,6 +582,7 @@ export interface AdminSongScore {
   created_at: string;
   genre_ids: number[];
   language_id: number | null;
+  audio_duration_seconds: number | null;
 }
 
 export async function getAdminSongScores(): Promise<AdminSongScore[]> {

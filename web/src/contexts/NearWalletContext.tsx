@@ -35,9 +35,11 @@ interface NearWalletContextType {
   wallet: Wallet | null;
   loading: boolean;
   signInPending: boolean;
+  lowAllowance: boolean;
   connectWallet: () => void;
   connectAndSignIn: () => void;
   disconnectWallet: () => Promise<void>;
+  reconnectWallet: () => Promise<void>;
   completeSignIn: () => Promise<boolean>;
   linkWallet: () => Promise<boolean>;
   callFunction: (params: {
@@ -54,15 +56,24 @@ interface NearWalletContextType {
   }) => Promise<unknown>;
 }
 
+const RPC_URL = NETWORK === "mainnet"
+  ? "https://rpc.mainnet.fastnear.com"
+  : "https://rpc.testnet.fastnear.com";
+
+// Minimum allowance before warning (0.05 NEAR)
+const MIN_ALLOWANCE = BigInt("50000000000000000000000");
+
 const NearWalletContext = createContext<NearWalletContextType>({
   selector: null,
   accountId: null,
   wallet: null,
   loading: true,
   signInPending: false,
+  lowAllowance: false,
   connectWallet: () => {},
   connectAndSignIn: () => {},
   disconnectWallet: async () => {},
+  reconnectWallet: async () => {},
   completeSignIn: async () => false,
   linkWallet: async () => false,
   callFunction: async () => "",
@@ -76,6 +87,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
   const [signInPending, setSignInPending] = useState(false);
+  const [lowAllowance, setLowAllowance] = useState(false);
 
   const pendingAuthRef = useRef(false);
   const pendingLinkRef = useRef(false);
@@ -133,6 +145,43 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, []);
 
+  // Check if the function call access key has enough allowance
+  const checkAllowance = useCallback(async (accId: string) => {
+    try {
+      const res = await fetch(RPC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "allowance",
+          method: "query",
+          params: {
+            request_type: "view_access_key_list",
+            finality: "final",
+            account_id: accId,
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!json.result?.keys) return;
+
+      for (const key of json.result.keys) {
+        const perm = key.access_key.permission;
+        if (perm !== "FullAccess" && perm.FunctionCall?.receiver_id === CONTRACT_ID) {
+          const allowance = BigInt(perm.FunctionCall.allowance);
+          if (allowance < MIN_ALLOWANCE) {
+            setLowAllowance(true);
+          } else {
+            setLowAllowance(false);
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check key allowance:", e);
+    }
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       const sel = await setupWalletSelector({
@@ -163,6 +212,9 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         setAccountId(acc.accountId);
         const w = await sel.wallet();
         setWallet(w);
+
+        // Check key allowance
+        checkAllowance(acc.accountId);
 
         // If we returned from MNW redirect with pending auth, try to complete it
         if (sessionStorage.getItem("nearfm_pending_auth") === "1") {
@@ -263,8 +315,17 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     setAccountId(null);
     setWallet(null);
     setSignInPending(false);
+    setLowAllowance(false);
     sessionStorage.removeItem("nearfm_pending_auth");
   }, [wallet]);
+
+  // Reconnect wallet (disconnect + show modal for fresh key)
+  const reconnectWallet = useCallback(async () => {
+    await disconnectWallet();
+    pendingAuthRef.current = true;
+    sessionStorage.setItem("nearfm_pending_auth", "1");
+    signInModal?.show();
+  }, [disconnectWallet, signInModal]);
 
   // Auto-disconnect wallet when user signs out
   useEffect(() => {
@@ -290,23 +351,34 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         throw err;
       }
 
-      const result = await wallet.signAndSendTransaction({
-        receiverId: params.contractId,
-        actions: [
-          actionCreators.functionCall(
-            params.method,
-            params.args instanceof Uint8Array
-              ? params.args
-              : params.args,
-            BigInt(params.gas || "30000000000000"),
-            BigInt(params.deposit || "0"),
-          ),
-        ],
-      });
+      try {
+        const result = await wallet.signAndSendTransaction({
+          receiverId: params.contractId,
+          actions: [
+            actionCreators.functionCall(
+              params.method,
+              params.args instanceof Uint8Array
+                ? params.args
+                : params.args,
+              BigInt(params.gas || "30000000000000"),
+              BigInt(params.deposit || "0"),
+            ),
+          ],
+        });
 
-      const txHash =
-        (result as { transaction?: { hash?: string } })?.transaction?.hash || "";
-      return txHash;
+        const txHash =
+          (result as { transaction?: { hash?: string } })?.transaction?.hash || "";
+        return txHash;
+      } catch (e: any) {
+        const msg = e?.message || e?.toString() || "";
+        if (msg.includes("NotEnoughAllowance") || msg.includes("does not have enough balance")) {
+          setLowAllowance(true);
+          const err = new Error("Your session key has run out of gas allowance. Please reconnect your wallet.");
+          err.name = "NotEnoughAllowance";
+          throw err;
+        }
+        throw e;
+      }
     },
     [wallet]
   );
@@ -359,9 +431,11 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         wallet,
         loading,
         signInPending,
+        lowAllowance,
         connectWallet,
         connectAndSignIn,
         disconnectWallet,
+        reconnectWallet,
         completeSignIn,
         linkWallet,
         callFunction,

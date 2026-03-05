@@ -27,6 +27,8 @@ pub struct UserProfileResponse {
     pub total_dislikes_given: i64,
     pub followers_count: i64,
     pub following_count: i64,
+    pub active_bounties_count: i64,
+    pub active_bounties_total_yocto: String,
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
     pub created_at: String,
@@ -100,6 +102,14 @@ pub async fn get_profile(
     .await
     .unwrap_or_else(|_| "0".to_string());
 
+    let (active_bounties_count, active_bounties_total_yocto): (i64, String) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(CAST(bounty_amount_yocto AS NUMERIC)), 0)::TEXT FROM song_requests WHERE requester_id = $1 AND status = 'open'"
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or((0, "0".to_string()));
+
     Ok(Json(UserProfileResponse {
         account_id: user.slug.clone(),
         near_account_id: user.account_id,
@@ -113,6 +123,8 @@ pub async fn get_profile(
         total_dislikes_given,
         followers_count,
         following_count,
+        active_bounties_count,
+        active_bounties_total_yocto,
         bio: user.bio,
         twitter_handle: user.twitter_handle,
         created_at: user.created_at.to_rfc3339(),

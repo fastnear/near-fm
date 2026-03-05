@@ -52,23 +52,26 @@ export function AudioPlayer() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 glass-strong">
-      {/* Audio visualizer — desktop only */}
-      {isPlaying && <AudioVisualizer />}
-
-      {/* Progress bar (clickable) */}
+      {/* Seekable area: visualizer + progress bar */}
       <div
-        className="h-1 bg-white/[0.06] cursor-pointer group relative"
+        className="cursor-pointer py-1 sm:py-0 group"
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const percent = ((e.clientX - rect.left) / rect.width) * 100;
           seek(percent);
         }}
       >
-        <div
-          className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all relative"
-          style={{ width: `${progress}%` }}
-        >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 shadow-lg shadow-purple-500/30 transition-opacity" />
+        {/* Audio visualizer — desktop only */}
+        {isPlaying && <AudioVisualizer />}
+
+        {/* Progress bar */}
+        <div className="h-1 bg-white/[0.06] relative">
+          <div
+            className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all relative"
+            style={{ width: `${progress}%` }}
+          >
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 shadow-lg shadow-purple-500/30 transition-opacity" />
+          </div>
         </div>
       </div>
 

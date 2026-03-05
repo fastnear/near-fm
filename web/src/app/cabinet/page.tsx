@@ -426,6 +426,18 @@ function NotificationIcon({ type }: { type: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
       );
+    case "new_bounty":
+      return (
+        <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+    case "mention":
+      return (
+        <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16 12a4 4 0 11-8 0 4 4 0 018 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+        </svg>
+      );
     case "song_hidden":
       return (
         <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -529,6 +541,36 @@ function notificationText(notif: Notification): React.ReactNode {
           {songTitle && songUuid ? (
             <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link>
           ) : "your song"}
+        </>
+      );
+    }
+    case "new_bounty": {
+      const requesterSlug = data.requester_slug as string | undefined;
+      const reqTitle = data.request_title as string | undefined;
+      const reqUuid = data.request_uuid as string | undefined;
+      const bountyNear = data.bounty_near as string | undefined;
+      return (
+        <>
+          {requesterSlug ? <Link href={`/profile/${requesterSlug}`} className="text-purple-400 hover:underline">{requesterSlug}</Link> : "Someone"}
+          {" created a bounty "}
+          {reqTitle && reqUuid ? (
+            <Link href={`/requests/${reqUuid}`} className="text-purple-400 hover:underline">&quot;{reqTitle}&quot;</Link>
+          ) : reqTitle ? `"${reqTitle}"` : ""}
+          {bountyNear ? ` (${bountyNear} NEAR)` : ""}
+        </>
+      );
+    }
+    case "mention": {
+      const mentioner = data.mentioner as string | undefined;
+      const mSongTitle = data.song_title as string | undefined;
+      const mSongUuid = data.song_uuid as string | undefined;
+      return (
+        <>
+          {mentioner ? <Link href={`/profile/${mentioner}`} className="text-cyan-400 hover:underline">{mentioner}</Link> : "Someone"}
+          {" mentioned you in a comment on "}
+          {mSongTitle && mSongUuid ? (
+            <Link href={`/song/${mSongUuid}`} className="text-cyan-400 hover:underline">&quot;{mSongTitle}&quot;</Link>
+          ) : "a song"}
         </>
       );
     }

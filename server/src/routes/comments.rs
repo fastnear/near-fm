@@ -8,6 +8,7 @@ use sqlx::FromRow;
 
 use crate::{
     auth::jwt::{require_admin, require_auth},
+    db::queries,
     AppState,
 };
 
@@ -180,7 +181,79 @@ pub async fn create_comment(
         .await;
     }
 
+    // Notify @mentioned users
+    let mut notified_ids = std::collections::HashSet::new();
+    notified_ids.insert(claims.user_id); // don't notify the commenter
+    notified_ids.insert(uploader_id);    // uploader already gets a comment notification
+    for mention in extract_mentions(&body) {
+        // Try slug first, then account_id
+        let mentioned_user = queries::get_user_by_slug(&state.db, &mention)
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| {
+                // Can't await in or_else, so skip account_id lookup for sync
+                None
+            });
+        // Fallback: try account_id
+        let mentioned_user = match mentioned_user {
+            Some(u) => Some(u),
+            None => queries::get_user_by_account(&state.db, &mention)
+                .await
+                .ok()
+                .flatten(),
+        };
+        if let Some(mu) = mentioned_user {
+            if notified_ids.insert(mu.id) {
+                let data = serde_json::json!({
+                    "message": format!("{} mentioned you in a comment on \"{}\"", claims.sub, song_title),
+                    "song_uuid": uuid,
+                    "song_title": song_title,
+                    "comment_id": comment.id,
+                    "mentioner": claims.sub,
+                });
+                let _ = sqlx::query(
+                    r#"INSERT INTO notifications (user_id, type, data) VALUES ($1, 'mention', $2)"#,
+                )
+                .bind(mu.id)
+                .bind(&data)
+                .execute(&state.db)
+                .await;
+            }
+        }
+    }
+
     Ok(Json(comment))
+}
+
+/// Extract @mentions from text. Returns unique lowercase usernames.
+fn extract_mentions(text: &str) -> Vec<String> {
+    let mut mentions = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        if chars[i] == '@' && (i == 0 || !chars[i - 1].is_alphanumeric()) {
+            i += 1;
+            let start = i;
+            while i < len && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '-' || chars[i] == '.') {
+                i += 1;
+            }
+            if i > start {
+                let mention: String = chars[start..i].iter().collect();
+                let lower = mention.to_lowercase();
+                if seen.insert(lower.clone()) {
+                    mentions.push(lower);
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    mentions
 }
 
 // ── Admin endpoints ──

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { SongRequest } from "@/types";
-import { getRequest, getRequestSubmissions, updateRequest } from "@/lib/api";
+import { getRequest, getRequestSubmissions, updateRequest, getUserProfile, followUser } from "@/lib/api";
 import { awardBountyAction, withdrawBountyAction } from "@/lib/near/contract";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
@@ -50,6 +50,8 @@ export default function RequestDetailPage() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [awarding, setAwarding] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [requesterBounties, setRequesterBounties] = useState<{ count: number; totalNear: string } | null>(null);
+  const [isFollowingRequester, setIsFollowingRequester] = useState(false);
 
   const uuid = params.id as string;
 
@@ -69,6 +71,18 @@ export default function RequestDetailPage() {
   useEffect(() => {
     refreshData().finally(() => setLoading(false));
   }, [uuid]);
+
+  useEffect(() => {
+    if (!request || !(request as any).requester_account_id) return;
+    getUserProfile((request as any).requester_account_id)
+      .then((p: any) => {
+        if (p.active_bounties_count > 0) {
+          const near = (Number(p.active_bounties_total_yocto) / 1e24).toFixed(1).replace(/\.0$/, "");
+          setRequesterBounties({ count: p.active_bounties_count, totalNear: near });
+        }
+      })
+      .catch(() => {});
+  }, [request]);
 
   const handleWithdraw = async () => {
     if (!request) return;
@@ -252,6 +266,16 @@ export default function RequestDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Follow requester */}
+        {user && !isFollowingRequester && requesterBounties && (request as any).requester_account_id && user.slug !== (request as any).requester_account_id && (
+          <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
+            <p className="text-sm text-slate-200">
+              <Link href={`/profile/${(request as any).requester_account_id}`} className="text-purple-400 hover:text-purple-300 font-medium">{(request as any).requester_account_id}</Link> has <span className="font-bold text-purple-400">{requesterBounties.count} active {requesterBounties.count === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{requesterBounties.totalNear} NEAR</span>.{" "}
+              <button onClick={async () => { try { await followUser((request as any).requester_account_id); setIsFollowingRequester(true); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
+            </p>
+          </div>
+        )}
 
         {/* Submissions */}
         {submissions.length > 0 && (

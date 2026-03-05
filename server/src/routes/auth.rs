@@ -19,12 +19,12 @@ pub fn build_session_cookie(token: &str, frontend_url: &str) -> String {
     let is_prod = frontend_url.contains("near.fm");
     if is_prod {
         format!(
-            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; Max-Age=604800",
+            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; Max-Age=31536000",
             token
         )
     } else {
         format!(
-            "nearfm_session={}; Path=/; SameSite=Lax; Max-Age=604800",
+            "nearfm_session={}; Path=/; SameSite=Lax; Max-Age=31536000",
             token
         )
     }

@@ -121,6 +121,38 @@ pub async fn create_request(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Notify followers about the new bounty
+    let followers: Vec<(i32,)> = sqlx::query_as(
+        "SELECT follower_id FROM user_follows WHERE followed_id = $1"
+    )
+    .bind(claims.user_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let near_amount = {
+        let yocto: f64 = req.bounty_amount_yocto.parse().unwrap_or(0.0);
+        let near = yocto / 1e24;
+        if near % 1.0 == 0.0 { format!("{:.0}", near) } else { format!("{:.2}", near) }
+    };
+
+    for (follower_id,) in followers {
+        let data = serde_json::json!({
+            "message": format!("{} created a bounty: \"{}\" ({} NEAR)", claims.sub, req.title, near_amount),
+            "request_uuid": uuid,
+            "request_title": req.title,
+            "requester_slug": claims.sub,
+            "bounty_near": near_amount,
+        });
+        let _ = sqlx::query(
+            r#"INSERT INTO notifications (user_id, type, data) VALUES ($1, 'new_bounty', $2)"#,
+        )
+        .bind(follower_id)
+        .bind(&data)
+        .execute(&state.db)
+        .await;
+    }
+
     Ok(Json(request))
 }
 

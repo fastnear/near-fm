@@ -37,6 +37,7 @@ function UploadPage() {
 
   const [bountyRequest, setBountyRequest] = useState<SongRequest | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -240,6 +241,7 @@ function UploadPage() {
         ai_model: aiModel.trim() || undefined,
         audio_url: audioUrl,
         audio_hash: audioHash,
+        audio_duration_seconds: audioDuration ?? undefined,
         audio_mime_type: audioFile.type || "audio/mpeg",
         cover_image_url: coverUrl,
         language_id: languageId,
@@ -293,7 +295,20 @@ function UploadPage() {
             ref={audioInputRef}
             type="file"
             accept="audio/*"
-            onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              setAudioFile(f);
+              if (f) {
+                const audio = new Audio();
+                audio.src = URL.createObjectURL(f);
+                audio.addEventListener("loadedmetadata", () => {
+                  setAudioDuration(Math.round(audio.duration));
+                  URL.revokeObjectURL(audio.src);
+                });
+              } else {
+                setAudioDuration(null);
+              }
+            }}
             className="hidden"
           />
           <button
