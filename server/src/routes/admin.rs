@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{Extensions, StatusCode},
     Json,
 };
@@ -156,6 +156,27 @@ pub async fn review_report(
                     .execute(&state.db)
                     .await
                     .ok();
+
+                // Notify the uploader
+                if let Ok(Some(song)) = sqlx::query_as::<_, (i32, String, String)>(
+                    "SELECT uploader_id, title, uuid FROM songs WHERE id = $1"
+                )
+                .bind(report.song_id)
+                .fetch_optional(&state.db)
+                .await
+                {
+                    queries::create_notification(
+                        &state.db,
+                        song.0,
+                        "song_hidden",
+                        &serde_json::json!({
+                            "song_title": song.1,
+                            "song_uuid": song.2,
+                        }),
+                    )
+                    .await
+                    .ok();
+                }
             }
             Some("delete") => {
                 sqlx::query("UPDATE songs SET is_deleted = TRUE WHERE id = $1")
@@ -205,6 +226,29 @@ pub async fn moderate_song(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Notify uploader when song is hidden
+    if req.is_hidden == Some(true) {
+        if let Ok(Some(song)) = sqlx::query_as::<_, (i32, String)>(
+            "SELECT uploader_id, title FROM songs WHERE uuid = $1"
+        )
+        .bind(&uuid)
+        .fetch_optional(&state.db)
+        .await
+        {
+            queries::create_notification(
+                &state.db,
+                song.0,
+                "song_hidden",
+                &serde_json::json!({
+                    "song_title": song.1,
+                    "song_uuid": uuid,
+                }),
+            )
+            .await
+            .ok();
+        }
+    }
 
     // Update genres if provided
     if let Some(ref genre_ids) = req.genre_ids {
@@ -494,6 +538,79 @@ pub async fn list_song_scores(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(songs))
+}
+
+// ── Users list ──
+
+#[derive(Debug, Deserialize)]
+pub struct AdminUsersQuery {
+    pub q: Option<String>,
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AdminUserRow {
+    pub id: i32,
+    pub slug: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub auth_provider: String,
+    pub account_id: Option<String>,
+    pub is_banned: bool,
+    pub is_muted: bool,
+    pub reputation_score: f64,
+    pub total_uploads: i32,
+    pub total_tips_received_yocto: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+pub async fn admin_list_users(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Query(params): Query<AdminUsersQuery>,
+) -> Result<Json<Vec<AdminUserRow>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let limit = params.limit.unwrap_or(50).min(200);
+    let offset = (params.page.unwrap_or(1) - 1).max(0) * limit;
+
+    let users = if let Some(ref q) = params.q {
+        let pattern = format!("%{}%", q.to_lowercase());
+        sqlx::query_as::<_, AdminUserRow>(
+            r#"SELECT id, slug, display_name, avatar_url, auth_provider, account_id,
+                      is_banned, is_muted, reputation_score, total_uploads,
+                      total_tips_received_yocto, created_at
+               FROM users
+               WHERE LOWER(slug) LIKE $1
+                  OR LOWER(COALESCE(display_name, '')) LIKE $1
+                  OR LOWER(COALESCE(account_id, '')) LIKE $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3"#,
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+    } else {
+        sqlx::query_as::<_, AdminUserRow>(
+            r#"SELECT id, slug, display_name, avatar_url, auth_provider, account_id,
+                      is_banned, is_muted, reputation_score, total_uploads,
+                      total_tips_received_yocto, created_at
+               FROM users
+               ORDER BY created_at DESC
+               LIMIT $1 OFFSET $2"#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+    }
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(users))
 }
 
 // ── Ban user ──

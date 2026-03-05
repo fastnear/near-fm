@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getBookmarks, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
@@ -46,12 +46,11 @@ function timeAgo(iso: string): string {
 
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "bookmarks" | "feed" | "notifications" | "reports";
+type TabKey = "balance" | "songs" | "feed" | "notifications" | "reports";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
-  { key: "bookmarks", label: "Bookmarks" },
   { key: "feed", label: "Blocked Users" },
   { key: "notifications", label: "Notifications" },
 ];
@@ -153,7 +152,7 @@ export default function CabinetPage() {
       {/* Tab content */}
       {activeTab === "balance" && <BalanceTab />}
       {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
-      {activeTab === "bookmarks" && <BookmarksTab userSlug={userSlug} />}
+
       {activeTab === "feed" && <BlockedUsers />}
       {activeTab === "notifications" && <NotificationsTab />}
       {activeTab === "reports" && isAdmin && <ReportsTab />}
@@ -397,64 +396,6 @@ function MySongsTab({ userSlug }: { userSlug?: string }) {
         <p className="text-slate-400 text-lg">You haven&apos;t uploaded any songs yet</p>
         <p className="text-slate-500 text-sm mt-2">
           Upload your first AI-generated song to get started!
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-      {songs.map((song) => (
-        <SongCard key={song.uuid} song={song} />
-      ))}
-    </div>
-  );
-}
-
-// ── Bookmarks Tab ──
-
-function BookmarksTab({ userSlug }: { userSlug?: string }) {
-  const [songs, setSongs] = useState<Song[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!userSlug) return;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await getBookmarks(userSlug);
-        setSongs(data);
-      } catch (e) {
-        console.error("Failed to load bookmarks:", e);
-      }
-      setLoading(false);
-    };
-    load();
-  }, [userSlug]);
-
-  if (loading) {
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="glass-card rounded-xl">
-            <div className="aspect-square skeleton rounded-t-xl" />
-            <div className="p-3 space-y-2">
-              <div className="h-4 skeleton rounded w-3/4" />
-              <div className="h-3 skeleton rounded w-1/2" />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (songs.length === 0) {
-    return (
-      <div className="text-center py-16">
-        <div className="text-5xl mb-4 text-slate-700">&#128278;</div>
-        <p className="text-slate-400 text-lg">No bookmarks yet</p>
-        <p className="text-slate-500 text-sm mt-2">
-          Songs you bookmark will appear here.
         </p>
       </div>
     );

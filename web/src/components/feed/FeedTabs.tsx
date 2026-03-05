@@ -27,6 +27,7 @@ export function FeedTabs({ activeSort, onSortChange, isAuthenticated }: Props) {
           onClick={(e) => {
             e.preventDefault();
             window.history.replaceState(null, "", tab.href);
+            try { localStorage.setItem("nearfm_feed_sort", tab.value); } catch {}
             onSortChange(tab.value);
           }}
           className={`flex items-center gap-2 px-2.5 sm:px-4 py-2 text-sm font-medium rounded-xl transition-all duration-200 ${

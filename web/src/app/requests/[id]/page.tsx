@@ -236,7 +236,7 @@ export default function RequestDetailPage() {
             <div>
               <span className="text-slate-600">Bounty TX:</span>{" "}
               <a
-                href={`https://nearblocks.io/txns/${request.bounty_tx_hash}`}
+                href={`https://near.rocks/tx/${request.bounty_tx_hash}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-purple-400 hover:text-purple-300 transition"
@@ -392,7 +392,7 @@ export default function RequestDetailPage() {
               </p>
               {request.award_tx_hash && (
                 <a
-                  href={`https://nearblocks.io/txns/${request.award_tx_hash}`}
+                  href={`https://near.rocks/tx/${request.award_tx_hash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-purple-400 hover:text-purple-300 text-sm mt-2 inline-block transition"

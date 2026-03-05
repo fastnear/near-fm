@@ -41,6 +41,7 @@ export interface AuthUser {
   display_name: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  is_banned: boolean;
   auth_provider: string;
   reputation_score: string;
 }
@@ -305,9 +306,11 @@ export async function getFollowers(accountId: string): Promise<FollowerEntry[]> 
 
 export async function updateUserProfile(accountId: string, data: {
   avatar_url?: string;
+  display_name?: string;
   bio?: string;
   twitter_handle?: string;
-}): Promise<void> {
+  slug?: string;
+}): Promise<{ ok: boolean; new_slug?: string }> {
   return fetchApi(`/api/users/${accountId}/profile`, {
     method: "PATCH",
     body: JSON.stringify(data),
@@ -528,6 +531,29 @@ export async function toggleBanUser(accountId: string, is_banned: boolean): Prom
     method: "PATCH",
     body: JSON.stringify({ is_banned }),
   });
+}
+
+export interface AdminUser {
+  id: number;
+  slug: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  auth_provider: string;
+  account_id: string | null;
+  is_banned: boolean;
+  is_muted: boolean;
+  reputation_score: number;
+  total_uploads: number;
+  total_tips_received_yocto: string;
+  created_at: string;
+}
+
+export async function getAdminUsers(params?: { q?: string; page?: number }): Promise<AdminUser[]> {
+  const sp = new URLSearchParams();
+  if (params?.q) sp.set("q", params.q);
+  if (params?.page) sp.set("page", String(params.page));
+  const qs = sp.toString();
+  return fetchApi(`/api/admin/users${qs ? `?${qs}` : ""}`);
 }
 
 export interface AdminSongScore {

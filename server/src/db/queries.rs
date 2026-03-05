@@ -9,9 +9,9 @@ pub async fn get_or_create_user(
     account_id: &str,
     is_admin: bool,
 ) -> Result<User, sqlx::Error> {
-    // Try to find existing user, update is_admin from config
+    // Try to find existing user by account_id or slug, restore account_id if it was cleared by logout
     if let Some(user) = sqlx::query_as::<_, User>(
-        "UPDATE users SET is_admin = $2 WHERE account_id = $1 RETURNING *",
+        "UPDATE users SET account_id = $1, is_admin = $2 WHERE account_id = $1 OR (slug = $1 AND auth_provider = 'near') RETURNING *",
     )
     .bind(account_id)
     .bind(is_admin)
@@ -151,6 +151,7 @@ pub async fn get_song_by_uuid(
             u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,
@@ -190,6 +191,7 @@ pub async fn list_songs(
             u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,
@@ -360,8 +362,9 @@ pub async fn get_user_vote(
     .await
 }
 
-// ── Bookmarks ──
+// ── Bookmarks (deprecated: feature removed from UI) ──
 
+#[allow(dead_code)]
 pub async fn add_bookmark(
     pool: &PgPool,
     user_id: i32,
@@ -377,6 +380,7 @@ pub async fn add_bookmark(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn remove_bookmark(
     pool: &PgPool,
     user_id: i32,
@@ -493,6 +497,7 @@ pub async fn get_top_trending_songs(
             u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,

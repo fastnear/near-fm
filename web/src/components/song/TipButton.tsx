@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { Song } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useToast } from "@/components/ui/Toast";
 import { recordTip } from "@/lib/api";
 import { tipSongAction, tipFromBalanceArgs, getBalance } from "@/lib/near/contract";
 
@@ -27,6 +28,7 @@ function yoctoToNear(yocto: string): string {
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
   const { isAuthenticated, signInWithGoogle } = useAuth();
   const { accountId, linkWallet, callFunction, viewMethod } = useNearWallet();
+  const { showToast } = useToast();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -49,6 +51,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     if (!accountId) { linkWallet(); return; }
 
     setLoading(true);
+    const toastId = showToast({ message: `Sending ${amountNear} NEAR tip...`, type: "loading", id: "tip" });
     try {
       const amountYocto = nearToYocto(amountNear);
       let txHash: string;
@@ -99,6 +102,14 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
         ).then((b) => setBalance(b)).catch(() => {});
       }
 
+      showToast({
+        id: toastId,
+        message: `Tip of ${amountNear} NEAR sent!`,
+        type: "success",
+        link: { url: `https://near.rocks/tx/${txHash}`, label: "View transaction" },
+        duration: 8000,
+      });
+
       setSuccess(true);
       onTipSuccess?.();
       setTimeout(() => {
@@ -107,6 +118,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
       }, 2000);
     } catch (e) {
       console.error("Tip failed:", e);
+      showToast({ id: toastId, message: "Tip failed. Please try again.", type: "error", duration: 5000 });
     }
     setLoading(false);
   };

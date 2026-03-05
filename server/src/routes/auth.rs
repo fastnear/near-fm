@@ -15,7 +15,7 @@ use crate::{
 
 /// Build session cookie with appropriate flags for the environment.
 /// In production (near.fm), sets Domain and Secure. In dev, omits them.
-fn build_session_cookie(token: &str, frontend_url: &str) -> String {
+pub fn build_session_cookie(token: &str, frontend_url: &str) -> String {
     let is_prod = frontend_url.contains("near.fm");
     if is_prod {
         format!(
@@ -364,10 +364,45 @@ pub async fn google_callback(
     Ok(response.into_response())
 }
 
+const RESERVED_SLUGS: &[&str] = &[
+    "admin", "support", "moderator", "system", "null", "undefined",
+    "api", "www", "near", "help", "root", "bot", "official",
+    "staff", "team", "mod", "dev", "test", "login", "signup",
+    "settings", "profile", "upload", "cabinet", "requests", "song",
+    "genre", "about", "terms", "privacy",
+];
+
+/// Validate a slug for Google users (used at creation and rename).
+pub fn validate_slug(slug: &str) -> Result<(), String> {
+    if slug.len() < 5 {
+        return Err("Username must be at least 5 characters".into());
+    }
+    if slug.len() > 30 {
+        return Err("Username must be at most 30 characters".into());
+    }
+    if !slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err("Username may only contain lowercase letters, digits, and hyphens".into());
+    }
+    if slug.contains('.') {
+        return Err("Username must not contain dots".into());
+    }
+    if slug.starts_with('-') || slug.ends_with('-') {
+        return Err("Username must not start or end with a hyphen".into());
+    }
+    if slug.contains("--") {
+        return Err("Username must not contain consecutive hyphens".into());
+    }
+    if RESERVED_SLUGS.contains(&slug) {
+        return Err("This username is reserved".into());
+    }
+    Ok(())
+}
+
 fn generate_slug(display_name: &str) -> String {
     let base: String = display_name
         .to_lowercase()
         .chars()
+        .filter(|c| *c != '.') // remove dots
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
@@ -375,9 +410,16 @@ fn generate_slug(display_name: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
 
-    let base = if base.is_empty() { "user".to_string() } else { base };
+    let base = if base.is_empty() || base.len() < 3 { "user".to_string() } else { base };
     let suffix = &uuid::Uuid::new_v4().to_string()[..6];
-    format!("{}-{}", base, suffix)
+    let slug = format!("{}-{}", base, suffix);
+
+    // Ensure generated slug passes validation (fallback if not)
+    if validate_slug(&slug).is_err() {
+        let fallback = &uuid::Uuid::new_v4().to_string()[..8];
+        return format!("user-{}", fallback);
+    }
+    slug
 }
 
 // ── Get current user ──
@@ -391,6 +433,7 @@ pub struct MeResponse {
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub is_admin: bool,
+    pub is_banned: bool,
     pub auth_provider: String,
     pub reputation_score: String,
 }
@@ -419,6 +462,7 @@ pub async fn get_me(
         display_name: user.display_name,
         avatar_url: user.avatar_url,
         is_admin: user.is_admin,
+        is_banned: user.is_banned,
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
     }))

@@ -34,6 +34,7 @@ interface NearWalletContextType {
   accountId: string | null;
   wallet: Wallet | null;
   loading: boolean;
+  signInPending: boolean;
   connectWallet: () => void;
   connectAndSignIn: () => void;
   disconnectWallet: () => Promise<void>;
@@ -58,6 +59,7 @@ const NearWalletContext = createContext<NearWalletContextType>({
   accountId: null,
   wallet: null,
   loading: true,
+  signInPending: false,
   connectWallet: () => {},
   connectAndSignIn: () => {},
   disconnectWallet: async () => {},
@@ -73,6 +75,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signInPending, setSignInPending] = useState(false);
 
   const pendingAuthRef = useRef(false);
   const pendingLinkRef = useRef(false);
@@ -114,8 +117,14 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
 
   const doApiAuth = useCallback(async (w: Wallet, accId: string) => {
     const payload = await signNep413(w, accId);
-    if (!payload) return;
+    if (!payload) {
+      // signMessage failed or not supported — user needs to retry via button click
+      setSignInPending(true);
+      return;
+    }
     await verifyAuth(payload);
+    setSignInPending(false);
+    sessionStorage.removeItem("nearfm_pending_auth");
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, [signNep413]);
 
@@ -140,6 +149,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         if (hideReason === "user-triggered") {
           pendingAuthRef.current = false;
           pendingLinkRef.current = false;
+          sessionStorage.removeItem("nearfm_pending_auth");
         }
       });
 
@@ -153,6 +163,16 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         setAccountId(acc.accountId);
         const w = await sel.wallet();
         setWallet(w);
+
+        // If we returned from MNW redirect with pending auth, try to complete it
+        if (sessionStorage.getItem("nearfm_pending_auth") === "1") {
+          try {
+            await doApiAuth(w, acc.accountId);
+          } catch (e) {
+            console.error("NEAR sign-in failed on init:", e);
+            setSignInPending(true);
+          }
+        }
       }
 
       setLoading(false);
@@ -165,9 +185,16 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
           try {
             const w = await sel.wallet();
             setWallet(w);
-            if (pendingAuthRef.current) {
+            const shouldAuth = pendingAuthRef.current || sessionStorage.getItem("nearfm_pending_auth") === "1";
+            if (shouldAuth) {
               pendingAuthRef.current = false;
-              await doApiAuth(w, accId);
+              try {
+                await doApiAuth(w, accId);
+              } catch (e) {
+                console.error("NEAR sign-in failed:", e);
+                // Popup likely blocked by browser — let user retry via button
+                setSignInPending(true);
+              }
             } else if (pendingLinkRef.current) {
               pendingLinkRef.current = false;
               await doLinkWallet(w, accId);
@@ -193,14 +220,17 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   // Connect wallet + sign message for API auth (NEAR sign-in flow)
   const connectAndSignIn = useCallback(() => {
     pendingAuthRef.current = true;
+    sessionStorage.setItem("nearfm_pending_auth", "1");
     signInModal?.show();
   }, [signInModal]);
 
-  // Complete sign in with already-connected wallet
+  // Complete sign in with already-connected wallet (should be called from user gesture)
   const completeSignIn = useCallback(async (): Promise<boolean> => {
     if (!wallet || !accountId) return false;
     try {
       await doApiAuth(wallet, accountId);
+      setSignInPending(false);
+      sessionStorage.removeItem("nearfm_pending_auth");
       return true;
     } catch (e) {
       console.error("Complete sign-in failed:", e);
@@ -232,6 +262,8 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     }
     setAccountId(null);
     setWallet(null);
+    setSignInPending(false);
+    sessionStorage.removeItem("nearfm_pending_auth");
   }, [wallet]);
 
   // Auto-disconnect wallet when user signs out
@@ -326,6 +358,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         accountId,
         wallet,
         loading,
+        signInPending,
         connectWallet,
         connectAndSignIn,
         disconnectWallet,

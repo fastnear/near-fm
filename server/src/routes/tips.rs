@@ -24,6 +24,17 @@ pub async fn record_tip(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
+
     // Require a linked NEAR wallet for tips
     // Fallback: for NEAR-only users with old JWTs, sub == account_id
     let near_account = claims.account_id.as_deref()

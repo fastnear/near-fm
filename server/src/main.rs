@@ -160,14 +160,15 @@ async fn main() -> anyhow::Result<()> {
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route("/api/users/:account_id/profile", patch(routes::users::update_profile))
-        .route(
-            "/api/users/:account_id/bookmarks",
-            get(routes::users::list_bookmarks).post(routes::users::add_bookmark),
-        )
-        .route(
-            "/api/users/:account_id/bookmarks/:song_uuid",
-            delete(routes::users::remove_bookmark),
-        )
+        // Deprecated: bookmarks feature removed from UI
+        // .route(
+        //     "/api/users/:account_id/bookmarks",
+        //     get(routes::users::list_bookmarks).post(routes::users::add_bookmark),
+        // )
+        // .route(
+        //     "/api/users/:account_id/bookmarks/:song_uuid",
+        //     delete(routes::users::remove_bookmark),
+        // )
         .route(
             "/api/users/:account_id/follow",
             post(routes::users::follow_user).delete(routes::users::unfollow_user),
@@ -235,6 +236,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/requests/:uuid", patch(routes::admin::moderate_request))
         .route("/api/admin/comments", get(routes::comments::admin_list_comments))
         .route("/api/admin/comments/:id", patch(routes::comments::admin_moderate_comment))
+        .route("/api/admin/users", get(routes::admin::admin_list_users))
         .route("/api/admin/users/:account_id/mute", patch(routes::comments::admin_toggle_mute))
         .route("/api/admin/users/:account_id/ban", patch(routes::admin::admin_toggle_ban))
         .route("/api/admin/config", get(routes::admin::get_config).patch(routes::admin::update_config))

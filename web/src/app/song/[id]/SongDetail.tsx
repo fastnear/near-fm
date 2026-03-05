@@ -3,12 +3,13 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { Song, Category, Language } from "@/types";
-import { getSong, updateSong, addBookmark, removeBookmark, getBookmarks, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
+import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
+import { getRadioPlaylist } from "@/lib/api";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
@@ -17,7 +18,6 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [activeUuid, setActiveUuid] = useState(initialUuid);
   const [song, setSong] = useState<Song | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bookmarked, setBookmarked] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [showReportForm, setShowReportForm] = useState(false);
   const [reportSent, setReportSent] = useState(false);
@@ -31,7 +31,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [commentText, setCommentText] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState("");
-  const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
+  const { currentSong, isPlaying, togglePlay, playMode, setPlayMode, next, previous, startRadio, queue } = useAudioPlayer();
   const { user, isAuthenticated, signInWithGoogle } = useAuth();
   const { accountId } = useNearWallet();
 
@@ -69,7 +69,6 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   useEffect(() => {
     setLoading(true);
     // Reset per-song state
-    setBookmarked(false);
     setShowReportForm(false);
     setReportSent(false);
     setReportReason("");
@@ -109,16 +108,6 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   }, []);
 
   const userSlug = user?.slug;
-  useEffect(() => {
-    if (isAuthenticated && userSlug && song) {
-      getBookmarks(userSlug)
-        .then((bookmarks) => {
-          setBookmarked(bookmarks.some((b) => b.uuid === song.uuid));
-        })
-        .catch(() => {});
-    }
-  }, [isAuthenticated, userSlug, song]);
-
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-10">
@@ -243,6 +232,77 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
               )}
             </div>
           </button>
+
+          {/* Player controls (mobile) */}
+          {isActive && (
+            <div className="flex items-center justify-center gap-3 mt-3 md:hidden">
+              <button
+                onClick={previous}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] transition-all"
+                title="Previous"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                </svg>
+              </button>
+              <button
+                onClick={next}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] transition-all"
+                title="Next"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                </svg>
+              </button>
+              <button
+                onClick={() => {
+                  const modes: Array<"radio" | "repeat" | "none"> = ["radio", "repeat", "none"];
+                  const idx = modes.indexOf(playMode);
+                  setPlayMode(modes[(idx + 1) % 3]);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  playMode === "radio"
+                    ? "text-purple-400 bg-purple-500/15 border border-purple-500/20"
+                    : playMode === "repeat"
+                    ? "text-cyan-400 bg-cyan-500/15 border border-cyan-500/20"
+                    : "text-slate-500 bg-white/[0.04] border border-white/[0.06]"
+                }`}
+                title={playMode === "radio" ? "Radio mode: plays similar songs" : playMode === "repeat" ? "Repeat: loops this song" : "Off: stops after this song"}
+              >
+                {playMode === "radio" && (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                  </svg>
+                )}
+                {playMode === "repeat" && (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
+                {playMode === "none" && (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                  </svg>
+                )}
+                {playMode === "radio" ? "Radio" : playMode === "repeat" ? "Repeat" : "Off"}
+              </button>
+              {playMode === "radio" && queue.length === 0 && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const songs = await getRadioPlaylist();
+                      if (songs.length > 0) startRadio(songs);
+                    } catch {}
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-all"
+                  title="Load AI Radio playlist"
+                >
+                  Load Radio
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Remove cover button */}
           {canEdit && song.cover_image_url && (
@@ -442,7 +502,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
 
                 {/* Share on X */}
                 <a
-                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title} — listen on near.fm, decentralized platform for AI-generated music on NEAR\n\n${window.location.href}`)}`}
+                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title}${song.uploader_twitter_handle ? ` by @${song.uploader_twitter_handle}` : ""} — listen on near.fm, decentralized platform for AI-generated music on NEAR\n\n${window.location.href}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5"
@@ -464,35 +524,6 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </svg>
                   Download
                 </a>
-
-                {/* Bookmark */}
-                <button
-                  onClick={async () => {
-                    if (!isAuthenticated || !userSlug) {
-                      signInWithGoogle();
-                      return;
-                    }
-                    try {
-                      if (bookmarked) {
-                        await removeBookmark(userSlug, song.uuid);
-                        setBookmarked(false);
-                      } else {
-                        await addBookmark(userSlug, song.uuid);
-                        setBookmarked(true);
-                      }
-                    } catch (e) { console.error("Bookmark failed:", e); }
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-xl transition-all ${
-                    bookmarked
-                      ? "bg-purple-500/15 text-purple-400 border border-purple-500/20"
-                      : "btn-ghost"
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill={bookmarked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                  </svg>
-                  {bookmarked ? "Saved" : "Save"}
-                </button>
 
                 {/* Report */}
                 <button

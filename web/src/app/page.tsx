@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
 import { getSongs, getRadioPlaylist } from "@/lib/api";
@@ -14,7 +14,9 @@ function FeedPageInner() {
   const searchParams = useSearchParams();
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortReady, setSortReady] = useState(false);
   const [sort, setSort] = useState<SortMode>("trending");
+  const fetchVersionRef = useRef(0);
   const [period, setPeriod] = useState<TimePeriod>("week");
   const [languageId, setLanguageId] = useState<number | undefined>();
   const [categoryId, setCategoryId] = useState<number | undefined>();
@@ -50,7 +52,18 @@ function FeedPageInner() {
       "/top": "top",
       "/following": "following",
     };
-    if (sortRoutes[pathname]) setSort(sortRoutes[pathname]);
+    if (sortRoutes[pathname]) {
+      setSort(sortRoutes[pathname]);
+    } else if (pathname === "/") {
+      // Restore last selected feed tab from localStorage
+      try {
+        const saved = localStorage.getItem("nearfm_feed_sort");
+        if (saved && ["trending", "latest", "top", "following"].includes(saved)) {
+          setSort(saved as SortMode);
+          window.history.replaceState(null, "", `/${saved}`);
+        }
+      } catch {}
+    }
 
     // Also check searchParams (for direct ?genre=rock etc.)
     const cat = searchParams.get("category");
@@ -63,9 +76,12 @@ function FeedPageInner() {
     if (genreParam) setGenreSlug(genreParam);
     const langCodeParam = searchParams.get("lang_code");
     if (langCodeParam) setLangCode(langCodeParam);
+    setSortReady(true);
   }, [searchParams]);
 
   const fetchSongs = useCallback(async () => {
+    if (!sortReady) return;
+    const version = ++fetchVersionRef.current;
     setLoading(true);
     try {
       const data = await getSongs({
@@ -79,13 +95,15 @@ function FeedPageInner() {
         page,
         limit: 24,
       });
+      // Ignore stale responses
+      if (version !== fetchVersionRef.current) return;
       setSongs(data.songs);
       setFeedSongs(data.songs);
     } catch (e) {
       console.error("Failed to load songs:", e);
     }
-    setLoading(false);
-  }, [sort, period, languageId, categoryId, genreSlug, langCode, searchQuery, page, setFeedSongs, exclusionsVersion]);
+    if (version === fetchVersionRef.current) setLoading(false);
+  }, [sortReady, sort, period, languageId, categoryId, genreSlug, langCode, searchQuery, page, setFeedSongs, exclusionsVersion]);
 
   useEffect(() => {
     fetchSongs();

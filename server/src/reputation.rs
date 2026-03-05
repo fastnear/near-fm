@@ -7,11 +7,16 @@ use std::time::Duration;
 ///   base = 1.0
 ///       + LEAST(total_uploads, 10) * 0.1            (max contribution 1.0)
 ///       + LEAST(unique_tipped_songs, 10) * 0.2       (max contribution 2.0)
-///       + log10(total_tips_near + 1) * 0.5
-///       + log10(follower_weighted_sum + 1) * 0.1     (followers weighted by their reputation)
+///       + log10(total_tips_received_near + 1) * 0.5   (tips received)
+///       + log10(total_tips_sent_near + 1) * 0.4       (tips sent — real money, hard to fake)
+///       + log10(follower_weighted_sum + 1) * 0.1       (followers weighted by their reputation)
 ///
 ///   Clamped to [0.1, 5.0].
 ///   If user is_banned, reputation = 0.1.
+///
+///   Sending tips boosts reputation because it represents real economic activity
+///   that is costly to fake. This also means that votes from active tippers
+///   carry more weight in the feed scoring formula.
 pub async fn recalculate_reputation(pool: &PgPool) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         r#"
@@ -30,6 +35,9 @@ pub async fn recalculate_reputation(pool: &PgPool) -> Result<(), sqlx::Error> {
                         + LOG(
                             CAST(u.total_tips_received_yocto AS NUMERIC) / 1e24 + 1
                           ) * 0.5
+                        + LOG(
+                            COALESCE(sent.total_sent_near, 0) + 1
+                          ) * 0.4
                         + LOG(COALESCE(fol.weighted_followers, 0) + 1) * 0.1
                     ))
                 END AS new_reputation
@@ -42,6 +50,13 @@ pub async fn recalculate_reputation(pool: &PgPool) -> Result<(), sqlx::Error> {
                 WHERE CAST(s.total_tips_yocto AS NUMERIC) > 0
                 GROUP BY s.uploader_id
             ) tipped ON tipped.uploader_id = u.id
+            LEFT JOIN (
+                SELECT
+                    t.tipper_id,
+                    (SUM(CAST(t.amount_yocto AS NUMERIC)) / 1e24)::NUMERIC AS total_sent_near
+                FROM tips t
+                GROUP BY t.tipper_id
+            ) sent ON sent.tipper_id = u.id
             LEFT JOIN (
                 SELECT
                     uf.followed_id,

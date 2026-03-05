@@ -41,6 +41,7 @@ export interface Song {
   uploader_account_id: string;
   uploader_display_name: string | null;
   uploader_reputation: string;
+  uploader_twitter_handle: string | null;
   // Category join fields
   category_name: string | null;
   category_slug: string | null;

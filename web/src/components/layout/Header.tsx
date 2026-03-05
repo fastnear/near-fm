@@ -11,7 +11,7 @@ import { AnimatedLogo } from "@/components/AnimatedLogo";
 
 export function Header() {
   const { user, isAuthenticated, loading: authLoading, signInWithGoogle } = useAuth();
-  const { connectAndSignIn, loading: walletLoading } = useNearWallet();
+  const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, loading: walletLoading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showLoginMenu, setShowLoginMenu] = useState(false);
   const loginMenuRef = useRef<HTMLDivElement>(null);
@@ -80,7 +80,6 @@ export function Header() {
           <Link href="/" className={navLinkClass}>Feed</Link>
           <Link href="/requests" className={navLinkClass}>Requests</Link>
           <Link href="/upload" className={navLinkClass}>Upload</Link>
-          <Link href="/about" className={navLinkClass}>About</Link>
           <Link href="/cabinet" className={navLinkClass}>
             Cabinet
             {unreadCount > 0 && (
@@ -95,6 +94,26 @@ export function Header() {
         <div className="flex items-center gap-3">
           {loading ? (
             <div className="w-28 h-9 rounded-xl skeleton" />
+          ) : signInPending && accountId && !isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  await completeSignIn();
+                }}
+                className="btn-primary px-4 py-2 text-sm rounded-xl"
+              >
+                Complete Sign-In
+              </button>
+              <button
+                onClick={() => disconnectWallet()}
+                className="p-2 text-slate-500 hover:text-slate-300 transition-colors"
+                title="Cancel"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           ) : isAuthenticated && user ? (
             <Link
               href={`/profile/${profileSlug}`}
@@ -154,6 +173,13 @@ export function Header() {
         </div>
       </div>
 
+      {/* Ban banner */}
+      {user?.is_banned && (
+        <div className="bg-red-900/40 border-b border-red-500/20 px-4 py-2 text-center text-sm text-red-300">
+          Your account has been suspended. You cannot upload, comment, vote, or tip.
+        </div>
+      )}
+
       {/* Mobile bottom nav */}
       <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-2.5 text-xs">
         <Link href="/" className="text-slate-400 hover:text-white transition-colors py-1">
@@ -164,9 +190,6 @@ export function Header() {
         </Link>
         <Link href="/upload" className="text-slate-400 hover:text-white transition-colors py-1">
           Upload
-        </Link>
-        <Link href="/about" className="text-slate-400 hover:text-white transition-colors py-1">
-          About
         </Link>
         <Link href="/cabinet" className="relative text-slate-400 hover:text-white transition-colors py-1">
           Cabinet

@@ -25,12 +25,13 @@ import {
   getLanguages,
   createLanguage,
   deleteLanguage,
+  getAdminUsers,
 } from "@/lib/api";
-import type { AdminComment, AdminSongScore } from "@/lib/api";
+import type { AdminComment, AdminSongScore, AdminUser } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments";
+type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments";
 
 interface Report {
   id: number;
@@ -1571,6 +1572,171 @@ function CommentsPanel() {
   );
 }
 
+// ── Users Tab ──
+
+function UsersPanel() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [searchDebounce, setSearchDebounce] = useState("");
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebounce(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getAdminUsers({ q: searchDebounce || undefined, page });
+      setUsers(data);
+    } catch {}
+    setLoading(false);
+  }, [searchDebounce, page]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  const handleBan = async (user: AdminUser) => {
+    setActionLoading(user.id);
+    try {
+      await toggleBanUser(user.slug, !user.is_banned);
+      await fetchUsers();
+    } catch {}
+    setActionLoading(null);
+  };
+
+  const handleMute = async (user: AdminUser) => {
+    setActionLoading(user.id);
+    try {
+      await toggleMuteUser(user.slug, !user.is_muted);
+      await fetchUsers();
+    } catch {}
+    setActionLoading(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <input
+        type="text"
+        placeholder="Search by username, display name, or NEAR account..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="w-full px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/40"
+      />
+
+      {loading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-16 skeleton rounded-xl" />
+          ))}
+        </div>
+      ) : users.length === 0 ? (
+        <p className="text-center text-slate-500 py-8">No users found</p>
+      ) : (
+        <div className="space-y-1">
+          {users.map((u) => (
+            <div
+              key={u.id}
+              className={`glass-card rounded-xl px-4 py-3 flex items-center gap-4 ${
+                u.is_banned ? "border border-red-500/20 bg-red-500/5" : ""
+              }`}
+            >
+              {/* Avatar */}
+              {u.avatar_url ? (
+                <img src={u.avatar_url} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                  {(u.display_name || u.slug).charAt(0).toUpperCase()}
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a
+                    href={`/profile/${u.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-white hover:text-purple-400 transition-colors truncate"
+                  >
+                    {u.display_name || u.slug}
+                  </a>
+                  <span className="text-xs text-slate-500 font-mono truncate">{u.slug}</span>
+                  {u.auth_provider === "google" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Google</span>
+                  )}
+                  {u.is_banned && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">Banned</span>
+                  )}
+                  {u.is_muted && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Muted</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
+                  <span>Rep: {Number(u.reputation_score).toFixed(1)}</span>
+                  <span>Songs: {u.total_uploads}</span>
+                  {u.account_id && <span className="font-mono truncate max-w-[150px]">{u.account_id}</span>}
+                  <span>{formatDate(u.created_at)}</span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleMute(u)}
+                  disabled={actionLoading === u.id}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition disabled:opacity-50 ${
+                    u.is_muted
+                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
+                      : "bg-white/[0.04] text-slate-400 border-white/[0.08] hover:bg-white/[0.08]"
+                  }`}
+                >
+                  {u.is_muted ? "Unmute" : "Mute"}
+                </button>
+                <button
+                  onClick={() => handleBan(u)}
+                  disabled={actionLoading === u.id}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition disabled:opacity-50 ${
+                    u.is_banned
+                      ? "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20"
+                      : "bg-white/[0.04] text-slate-400 border-white/[0.08] hover:text-red-400 hover:border-red-500/20"
+                  }`}
+                >
+                  {u.is_banned ? "Unban" : "Ban"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {users.length >= 50 || page > 1 ? (
+        <div className="flex justify-center gap-3 pt-2">
+          {page > 1 && (
+            <button onClick={() => setPage(page - 1)} className="btn-ghost px-4 py-2 rounded-xl text-sm">
+              Previous
+            </button>
+          )}
+          <span className="flex items-center text-sm text-slate-500">Page {page}</span>
+          {users.length >= 50 && (
+            <button onClick={() => setPage(page + 1)} className="btn-ghost px-4 py-2 rounded-xl text-sm">
+              Next
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Main Admin Page ──
 
 function yoctoToNear(yocto: string): string {
@@ -1620,6 +1786,7 @@ export default function AdminPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "reports", label: "Reports" },
+    { key: "users", label: "Users" },
     { key: "songs", label: "Songs" },
     { key: "requests", label: "Requests" },
     { key: "comments", label: "Comments" },
@@ -1669,6 +1836,7 @@ export default function AdminPage() {
 
         {/* Tab Content */}
         {activeTab === "reports" && <ReportsPanel />}
+        {activeTab === "users" && <UsersPanel />}
         {activeTab === "songs" && <SongsPanel />}
         {activeTab === "requests" && <RequestsPanel />}
         {activeTab === "comments" && <CommentsPanel />}

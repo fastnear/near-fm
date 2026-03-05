@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers } from "@/lib/api";
 import type { FollowerEntry } from "@/lib/api";
 import Link from "next/link";
@@ -36,7 +36,8 @@ function formatDate(iso: string): string {
 export default function ProfilePage() {
   const params = useParams<{ accountId: string }>();
   const accountId = params.accountId;
-  const { user: authUser, signOut: authSignOut } = useAuth();
+  const router = useRouter();
+  const { user: authUser, signOut: authSignOut, refreshUser } = useAuth();
   const { accountId: walletAccountId, callFunction, linkWallet } = useNearWallet();
   const currentUser = authUser?.slug ?? null;
   const isOwnProfile = currentUser === accountId;
@@ -54,8 +55,11 @@ export default function ProfilePage() {
 
   // Edit profile state
   const [editing, setEditing] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState("");
   const [editBio, setEditBio] = useState("");
   const [editTwitter, setEditTwitter] = useState("");
+  const [editSlug, setEditSlug] = useState("");
+  const [slugError, setSlugError] = useState("");
   const [editAvatarPreview, setEditAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -117,9 +121,24 @@ export default function ProfilePage() {
     setBlockLoading(false);
   };
 
+  const isGoogleUser = authUser?.auth_provider === "google";
+
+  const validateSlug = (s: string): string => {
+    if (s.length < 5) return "Min 5 characters";
+    if (s.length > 30) return "Max 30 characters";
+    if (!/^[a-z0-9-]+$/.test(s)) return "Only lowercase letters, digits, hyphens";
+    if (s.includes(".")) return "Dots not allowed";
+    if (s.startsWith("-") || s.endsWith("-")) return "Cannot start/end with hyphen";
+    if (s.includes("--")) return "No consecutive hyphens";
+    return "";
+  };
+
   const startEditing = () => {
+    setEditDisplayName((profileData?.display_name as string) || "");
     setEditBio((profileData?.bio as string) || "");
     setEditTwitter((profileData?.twitter_handle as string) || "");
+    setEditSlug(accountId);
+    setSlugError("");
     setEditAvatarPreview(null);
     setAvatarFile(null);
     setEditing(true);
@@ -163,11 +182,25 @@ export default function ProfilePage() {
       }
 
       setUploadProgress("Saving profile...");
-      await updateUserProfile(accountId, {
+      const slugChanged = isGoogleUser && editSlug !== accountId;
+      if (slugChanged) {
+        const err = validateSlug(editSlug);
+        if (err) { setSlugError(err); setSaving(false); setUploadProgress(""); return; }
+      }
+
+      const result = await updateUserProfile(accountId, {
         avatar_url: avatarUrl,
+        display_name: editDisplayName.trim() || undefined,
         bio: editBio.trim(),
         twitter_handle: editTwitter.trim(),
+        ...(slugChanged ? { slug: editSlug } : {}),
       });
+
+      if (result?.new_slug) {
+        await refreshUser();
+        router.push(`/profile/${result.new_slug}`);
+        return;
+      }
 
       // Refresh profile data
       const data: any = await getUserProfile(accountId);
@@ -227,12 +260,14 @@ export default function ProfilePage() {
   }
 
   const displayName = profileData.display_name as string | null;
+  const nearAccountId = profileData.near_account_id as string | null;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
   const twitterHandle = profileData.twitter_handle as string | null;
   const reputationRaw = parseFloat(profileData.reputation_score as string);
   const reputationScore = Number.isFinite(reputationRaw) ? Math.round(reputationRaw * 100) / 100 : 0;
   const totalTipsYocto = profileData.total_tips_received_yocto as string;
+  const totalTipsSentYocto = profileData.total_tips_sent_yocto as string;
   const totalLikesGiven = (profileData.total_likes_given as number) ?? 0;
   const totalDislikesGiven = (profileData.total_dislikes_given as number) ?? 0;
   const followersCount = (profileData.followers_count as number) ?? 0;
@@ -241,54 +276,65 @@ export default function ProfilePage() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-10">
       {/* Profile header */}
-      <div className="glass-card rounded-2xl p-8 mb-8">
-        <div className="flex items-center gap-6">
-          {/* Avatar */}
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={displayName || accountId}
-              className="w-20 h-20 rounded-full object-cover ring-2 ring-white/[0.08] shrink-0"
-            />
-          ) : (
-            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-3xl font-bold text-white shrink-0">
-              {(displayName || accountId).charAt(0).toUpperCase()}
-            </div>
-          )}
+      <div className="glass-card rounded-2xl p-6 sm:p-8 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+          {/* Avatar + info row */}
+          <div className="flex items-center gap-4 sm:gap-6 min-w-0 flex-1">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={displayName || accountId}
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-white/[0.08] shrink-0"
+              />
+            ) : (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white shrink-0">
+                {(displayName || accountId).charAt(0).toUpperCase()}
+              </div>
+            )}
 
-          <div className="min-w-0 flex-1">
-            {displayName && (
-              <h1 className="text-2xl font-bold text-white truncate">
-                {displayName}
-              </h1>
-            )}
-            <p className={`${displayName ? "text-slate-400 text-sm" : "text-2xl font-bold text-white"} truncate`}>
-              {accountId}
-            </p>
-            {bio && (
-              <p className="text-slate-300 text-sm mt-1.5 line-clamp-2">{bio}</p>
-            )}
-            <div className="flex items-center gap-3 mt-1">
-              <p className="text-slate-500 text-xs">
-                Member since {formatDate(memberSince)}
-              </p>
-              {twitterHandle && (
-                <a
-                  href={`https://x.com/${twitterHandle}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                  </svg>
-                  @{twitterHandle}
-                </a>
+            <div className="min-w-0 flex-1">
+              {displayName && (
+                <h1 className="text-xl sm:text-2xl font-bold text-white truncate">
+                  {displayName}
+                </h1>
               )}
+              <p className={`${displayName ? "text-slate-400 text-sm" : "text-xl sm:text-2xl font-bold text-white"} truncate`}>
+                {accountId}
+              </p>
+              {bio && (
+                <p className="text-slate-300 text-sm mt-1.5 line-clamp-2 hidden sm:block">{bio}</p>
+              )}
+              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                {nearAccountId && nearAccountId !== accountId && (
+                  <span className="text-xs text-slate-500 font-mono">{nearAccountId}</span>
+                )}
+                <p className="text-slate-500 text-xs">
+                  Member since {formatDate(memberSince)}
+                </p>
+                {twitterHandle && (
+                  <a
+                    href={`https://x.com/${twitterHandle}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                    </svg>
+                    @{twitterHandle}
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Bio visible on mobile below avatar row */}
+          {bio && (
+            <p className="text-slate-300 text-sm line-clamp-3 sm:hidden -mt-1">{bio}</p>
+          )}
+
+          {/* Buttons */}
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:shrink-0">
             {!isOwnProfile && (
               <>
                 <FollowButton accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
@@ -371,6 +417,45 @@ export default function ProfilePage() {
               </div>
 
               <div className="flex-1 space-y-3">
+                {/* Display Name */}
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Display Name</label>
+                  <input
+                    type="text"
+                    value={editDisplayName}
+                    onChange={(e) => setEditDisplayName(e.target.value)}
+                    maxLength={100}
+                    placeholder="Your name"
+                    className="w-full rounded-xl px-4 py-2 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Username (Google users only) */}
+                {isGoogleUser && isOwnProfile && (
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Username</label>
+                    <input
+                      type="text"
+                      value={editSlug}
+                      onChange={(e) => {
+                        const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+                        setEditSlug(val);
+                        setSlugError(val === accountId ? "" : validateSlug(val));
+                      }}
+                      maxLength={30}
+                      placeholder="your-username"
+                      className={`w-full rounded-xl px-4 py-2 text-sm border bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:outline-none ${
+                        slugError ? "border-rose-500/50 focus:border-rose-500" : "border-white/[0.08] focus:border-purple-500"
+                      }`}
+                    />
+                    {slugError && <p className="text-[10px] text-rose-400 mt-1">{slugError}</p>}
+                    {!slugError && editSlug !== accountId && editSlug.length >= 5 && (
+                      <p className="text-[10px] text-slate-500 mt-1">Profile URL: near.fm/profile/{editSlug}</p>
+                    )}
+                    <p className="text-[10px] text-slate-600 mt-1">Your unique identifier used in profile URL and shown next to your songs and comments</p>
+                  </div>
+                )}
+
                 {/* Bio */}
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Bio</label>
@@ -437,6 +522,12 @@ export default function ProfilePage() {
             <p className="text-2xl font-bold text-white">{formatNear(totalTipsYocto)} <span className="text-lg text-slate-400 font-normal">NEAR</span></p>
             <p className="text-xs text-slate-400 mt-1">Tips Received</p>
           </div>
+          {totalTipsSentYocto && totalTipsSentYocto !== "0" && (
+            <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
+              <p className="text-2xl font-bold text-amber-400">{formatNear(totalTipsSentYocto)} <span className="text-lg text-slate-400 font-normal">NEAR</span></p>
+              <p className="text-xs text-slate-400 mt-1">Tips Sent</p>
+            </div>
+          )}
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
             <p className="text-2xl font-bold text-white">
               <span className="text-[#00ec97]">{totalLikesGiven}</span>

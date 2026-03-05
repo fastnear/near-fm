@@ -49,10 +49,10 @@ export function FollowButton({ accountId, currentUser, onFollowChange }: Props) 
     <button
       onClick={handleClick}
       disabled={loading}
-      className={`inline-block text-xs px-2.5 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
+      className={`px-4 py-2 text-sm rounded-xl transition-all disabled:opacity-50 ${
         isFollowing
-          ? "text-purple-400 bg-purple-500/10 border border-purple-500/15 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/15"
-          : "text-slate-400 bg-white/[0.04] border border-white/[0.06] hover:text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/15"
+          ? "text-purple-400 bg-purple-500/10 border border-purple-500/20 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20"
+          : "text-slate-400 bg-white/[0.04] border border-white/[0.06] hover:text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/20"
       }`}
     >
       {loading ? "..." : isFollowing ? "Following" : "Follow"}

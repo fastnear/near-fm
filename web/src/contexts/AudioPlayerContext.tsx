@@ -10,7 +10,7 @@ import React, {
   type ReactNode,
 } from "react";
 import type { Song } from "@/types";
-import { incrementPlay, radioSkip } from "@/lib/api";
+import { incrementPlay, radioSkip, getRadioPlaylist } from "@/lib/api";
 
 type PlayMode = "radio" | "repeat" | "none";
 
@@ -177,7 +177,24 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
           setQueue(feed.slice(1));
           playSong(feed[0]);
         } else {
-          setIsPlaying(false);
+          // No queue and no feed — fetch radio playlist from API
+          getRadioPlaylist().then((songs) => {
+            if (songs.length > 0) {
+              // Shuffle
+              for (let i = songs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [songs[i], songs[j]] = [songs[j], songs[i]];
+              }
+              feedSongsRef.current = songs;
+              setQueue(songs.slice(1));
+              setIsRadioActive(true);
+              playSong(songs[0]);
+            } else {
+              setIsPlaying(false);
+            }
+          }).catch(() => {
+            setIsPlaying(false);
+          });
         }
       });
     }
@@ -237,6 +254,20 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       const feed = feedSongsRef.current;
       setQueue(feed.slice(1));
       playSong(feed[0]);
+    } else if (playMode === "radio") {
+      // Fetch radio playlist from API
+      getRadioPlaylist().then((songs) => {
+        if (songs.length > 0) {
+          for (let i = songs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [songs[i], songs[j]] = [songs[j], songs[i]];
+          }
+          feedSongsRef.current = songs;
+          setQueue(songs.slice(1));
+          setIsRadioActive(true);
+          playSong(songs[0]);
+        }
+      }).catch(() => {});
     }
   }, [queue, playMode, playSong]);
 

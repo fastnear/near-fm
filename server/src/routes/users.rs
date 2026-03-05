@@ -1,24 +1,28 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{Extensions, StatusCode},
+    http::{header, Extensions, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    auth::jwt::require_auth,
+    auth::jwt::{self, require_auth},
     db::{models::SongWithUploader, queries},
+    routes::auth::validate_slug,
     AppState,
 };
 
 #[derive(Debug, Serialize)]
 pub struct UserProfileResponse {
     pub account_id: String, // slug (backward compat field name)
+    pub near_account_id: Option<String>,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub reputation_score: String,
     pub total_uploads: i32,
     pub total_tips_received_yocto: String,
+    pub total_tips_sent_yocto: String,
     pub total_likes_given: i64,
     pub total_dislikes_given: i64,
     pub followers_count: i64,
@@ -43,6 +47,7 @@ pub async fn get_profile(
             u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,
@@ -87,13 +92,23 @@ pub async fn get_profile(
     .await
     .unwrap_or(0);
 
+    let total_tips_sent_yocto: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(CAST(amount_yocto AS NUMERIC)), 0)::TEXT FROM tips WHERE tipper_id = $1"
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
     Ok(Json(UserProfileResponse {
         account_id: user.slug.clone(),
+        near_account_id: user.account_id,
         display_name: user.display_name,
         avatar_url: user.avatar_url,
         reputation_score: user.reputation_score.to_string(),
         total_uploads: user.total_uploads,
         total_tips_received_yocto: user.total_tips_received_yocto,
+        total_tips_sent_yocto,
         total_likes_given,
         total_dislikes_given,
         followers_count,
@@ -105,11 +120,14 @@ pub async fn get_profile(
     }))
 }
 
+// Deprecated: bookmarks feature removed from UI
 #[derive(Debug, Deserialize)]
 pub struct BookmarkRequest {
     pub song_uuid: String,
 }
 
+// Deprecated: bookmarks feature removed from UI
+#[allow(dead_code)]
 pub async fn add_bookmark(
     State(state): State<AppState>,
     Path(account_id): Path<String>,
@@ -135,6 +153,8 @@ pub async fn add_bookmark(
     Ok(StatusCode::CREATED)
 }
 
+// Deprecated: bookmarks feature removed from UI
+#[allow(dead_code)]
 pub async fn remove_bookmark(
     State(state): State<AppState>,
     Path((account_id, song_uuid)): Path<(String, String)>,
@@ -159,6 +179,8 @@ pub async fn remove_bookmark(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// Deprecated: bookmarks feature removed from UI
+#[allow(dead_code)]
 pub async fn list_bookmarks(
     State(state): State<AppState>,
     Path(account_id): Path<String>,
@@ -176,6 +198,7 @@ pub async fn list_bookmarks(
             u.slug AS uploader_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,
@@ -213,6 +236,17 @@ pub async fn follow_user(
 ) -> Result<StatusCode, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check if user is banned
+    let is_banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if is_banned {
+        return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
+    }
 
     let target = queries::get_user_by_slug(&state.db, &account_id)
         .await
@@ -347,8 +381,16 @@ pub struct FollowerEntry {
 #[derive(Debug, Deserialize)]
 pub struct UpdateProfileRequest {
     pub avatar_url: Option<String>,
+    pub display_name: Option<String>,
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
+    pub slug: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateProfileResponse {
+    pub ok: bool,
+    pub new_slug: Option<String>,
 }
 
 pub async fn update_profile(
@@ -356,7 +398,7 @@ pub async fn update_profile(
     Path(account_id): Path<String>,
     extensions: Extensions,
     Json(req): Json<UpdateProfileRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -373,9 +415,64 @@ pub async fn update_profile(
         if trimmed.is_empty() { None } else { Some(trimmed) }
     }).unwrap_or(None);
 
+    // Handle slug rename (Google users only)
+    let mut new_slug: Option<String> = None;
+    if let Some(ref requested_slug) = req.slug {
+        let requested_slug = requested_slug.trim().to_lowercase();
+
+        // Only allow rename if different from current
+        if requested_slug != account_id {
+            // Check auth_provider
+            let auth_provider: String = sqlx::query_scalar(
+                "SELECT auth_provider FROM users WHERE slug = $1"
+            )
+            .bind(&account_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            if auth_provider != "google" {
+                return Err((StatusCode::FORBIDDEN, "Only Google accounts can change username".to_string()));
+            }
+
+            validate_slug(&requested_slug)
+                .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+            // Check uniqueness
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM users WHERE slug = $1)"
+            )
+            .bind(&requested_slug)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            if exists {
+                return Err((StatusCode::CONFLICT, "This username is already taken".to_string()));
+            }
+
+            sqlx::query("UPDATE users SET slug = $1, updated_at = NOW() WHERE slug = $2")
+                .bind(&requested_slug)
+                .bind(&account_id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+            new_slug = Some(requested_slug);
+        }
+    }
+
+    // Sanitize display_name
+    let display_name = req.display_name.as_deref().map(|n| {
+        let trimmed: String = n.trim().chars().take(100).collect();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    }).unwrap_or(None);
+
+    // Update other profile fields
     sqlx::query(
         r#"UPDATE users
            SET avatar_url = COALESCE($1, avatar_url),
+               display_name = COALESCE($5, display_name),
                bio = $2,
                twitter_handle = $3,
                updated_at = NOW()
@@ -384,12 +481,45 @@ pub async fn update_profile(
     .bind(&req.avatar_url)
     .bind(&bio)
     .bind(&twitter)
-    .bind(&account_id)
+    .bind(new_slug.as_deref().unwrap_or(&account_id))
+    .bind(&display_name)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(StatusCode::OK)
+    // If slug changed, issue new JWT with updated sub
+    if let Some(ref slug) = new_slug {
+        let token = jwt::create_token(&state.config.jwt_secret, slug, claims.user_id, claims.is_admin, claims.account_id.as_deref())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let cookie = super::auth::build_session_cookie(&token, &state.config.frontend_url);
+
+        let body = serde_json::to_string(&UpdateProfileResponse {
+            ok: true,
+            new_slug: new_slug.clone(),
+        }).unwrap();
+
+        let response = axum::response::Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::SET_COOKIE, cookie)
+            .body(axum::body::Body::from(body))
+            .unwrap();
+
+        return Ok(response.into_response());
+    }
+
+    let body = serde_json::to_string(&UpdateProfileResponse {
+        ok: true,
+        new_slug: None,
+    }).unwrap();
+
+    Ok(axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap()
+        .into_response())
 }
 
 // ── Feed Preferences ──

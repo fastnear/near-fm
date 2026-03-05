@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { addBookmark, removeBookmark, getBookmarks } from "@/lib/api";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { AudioVisualizer } from "./AudioVisualizer";
@@ -40,20 +39,6 @@ export function AudioPlayer() {
   const { accountId } = useNearWallet();
   const userSlug = user?.slug;
   const [copied, setCopied] = useState(false);
-  const [bookmarked, setBookmarked] = useState(false);
-
-  // Load bookmark state when song changes
-  useEffect(() => {
-    if (isAuthenticated && userSlug && currentSong) {
-      getBookmarks(userSlug)
-        .then((bookmarks) => {
-          setBookmarked(bookmarks.some((b) => b.uuid === currentSong.uuid));
-        })
-        .catch(() => {});
-    } else {
-      setBookmarked(false);
-    }
-  }, [isAuthenticated, userSlug, currentSong?.uuid]);
 
   if (!currentSong) return null;
 
@@ -63,22 +48,6 @@ export function AudioPlayer() {
     navigator.clipboard.writeText(`${window.location.origin}${songUrl}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleBookmark = async () => {
-    if (!isAuthenticated || !userSlug) {
-      signInWithGoogle();
-      return;
-    }
-    try {
-      if (bookmarked) {
-        await removeBookmark(userSlug, currentSong.uuid);
-        setBookmarked(false);
-      } else {
-        await addBookmark(userSlug, currentSong.uuid);
-        setBookmarked(true);
-      }
-    } catch (e) { console.error("Bookmark failed:", e); }
   };
 
   return (
@@ -183,21 +152,6 @@ export function AudioPlayer() {
           <div className="hidden md:flex items-center gap-0.5">
             <VoteButtons song={currentSong} compact />
             <TipButton song={currentSong} compact />
-
-            {/* Bookmark */}
-            <button
-              onClick={handleBookmark}
-              className={`p-1.5 rounded-lg transition-all ${
-                bookmarked
-                  ? "text-purple-400 bg-purple-500/15"
-                  : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.06]"
-              }`}
-              title={bookmarked ? "Saved" : "Save"}
-            >
-              <svg className="w-4 h-4" fill={bookmarked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-              </svg>
-            </button>
 
             {/* Share */}
             <button

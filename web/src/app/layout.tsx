@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Header } from "@/components/layout/Header";
+import { Footer } from "@/components/layout/Footer";
 import { AudioPlayer } from "@/components/player/AudioPlayer";
 
 const inter = Inter({
@@ -59,6 +60,7 @@ export default function RootLayout({
           <div className="min-h-screen flex flex-col">
             <Header />
             <main className="flex-1 pb-24">{children}</main>
+            <Footer />
             <AudioPlayer />
           </div>
         </Providers>
