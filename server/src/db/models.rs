@@ -21,8 +21,57 @@ pub struct User {
     pub is_banned: bool,
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
+    pub premium_since: Option<DateTime<Utc>>,
+    pub premium_until: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Playlist {
+    pub id: i32,
+    pub uuid: String,
+    pub user_id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    pub cover_image_url: Option<String>,
+    pub feed_token: String,
+    pub is_auto: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistWithCount {
+    pub id: i32,
+    pub uuid: String,
+    pub user_id: i32,
+    pub name: String,
+    pub description: Option<String>,
+    pub cover_image_url: Option<String>,
+    pub feed_token: String,
+    pub is_auto: bool,
+    pub song_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl<'r> sqlx::FromRow<'r, PgRow> for PlaylistWithCount {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        Ok(PlaylistWithCount {
+            id: row.try_get("id")?,
+            uuid: row.try_get("uuid")?,
+            user_id: row.try_get("user_id")?,
+            name: row.try_get("name")?,
+            description: row.try_get("description")?,
+            cover_image_url: row.try_get("cover_image_url")?,
+            feed_token: row.try_get("feed_token")?,
+            is_auto: row.try_get("is_auto")?,
+            song_count: row.try_get("song_count")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -91,6 +140,7 @@ pub struct SongWithUploader {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub uploader_account_id: String,
+    pub uploader_near_account_id: Option<String>,
     pub uploader_display_name: Option<String>,
     pub uploader_reputation: f64,
     pub uploader_twitter_handle: Option<String>,
@@ -100,6 +150,8 @@ pub struct SongWithUploader {
     pub genres: Vec<Genre>,
     pub language_code: Option<String>,
     pub language_name: Option<String>,
+    pub fulfills_request_uuid: Option<String>,
+    pub fulfills_request_title: Option<String>,
 }
 
 impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
@@ -136,6 +188,7 @@ impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
             uploader_account_id: row.try_get("uploader_account_id")?,
+            uploader_near_account_id: row.try_get("uploader_near_account_id").unwrap_or(None),
             uploader_display_name: row.try_get("uploader_display_name")?,
             uploader_reputation: row.try_get("uploader_reputation")?,
             uploader_twitter_handle: row.try_get("uploader_twitter_handle").unwrap_or(None),
@@ -145,6 +198,8 @@ impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
             genres,
             language_code: row.try_get("language_code").unwrap_or(None),
             language_name: row.try_get("language_name").unwrap_or(None),
+            fulfills_request_uuid: row.try_get("fulfills_request_uuid").unwrap_or(None),
+            fulfills_request_title: row.try_get("fulfills_request_title").unwrap_or(None),
         })
     }
 }

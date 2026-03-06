@@ -56,10 +56,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
+        <script dangerouslySetInnerHTML={{ __html: `document.addEventListener('error',function(e){var t=e.target;if(t&&t.tagName==='IMG'){t.style.opacity='0';t.removeAttribute('src')}},true)` }} />
         <Providers>
-          <div className="min-h-screen flex flex-col">
+          <div className="min-h-screen flex flex-col pb-24">
             <Header />
-            <main className="flex-1 pb-24">{children}</main>
+            <main className="flex-1">{children}</main>
             <Footer />
             <AudioPlayer />
           </div>

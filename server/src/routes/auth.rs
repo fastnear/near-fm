@@ -53,9 +53,17 @@ pub struct UserResponse {
     pub slug: String,
     pub display_name: Option<String>,
     pub is_admin: bool,
+    pub is_premium: bool,
+    pub premium_until: Option<String>,
     pub reputation_score: String,
     pub auth_provider: String,
     pub near_account_id: Option<String>,
+}
+
+fn compute_premium(user: &crate::db::models::User) -> (bool, Option<String>) {
+    let is_premium = user.premium_until.map_or(false, |u| u > chrono::Utc::now());
+    let premium_until = user.premium_until.map(|u| u.to_rfc3339());
+    (is_premium, premium_until)
 }
 
 pub async fn verify(
@@ -148,6 +156,8 @@ pub async fn verify(
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
+    let (is_premium, premium_until) = compute_premium(&user);
+
     let body = Json(VerifyResponse {
         token,
         user: UserResponse {
@@ -156,6 +166,8 @@ pub async fn verify(
             slug: user.slug,
             display_name: user.display_name,
             is_admin: user.is_admin,
+            is_premium,
+            premium_until,
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
@@ -434,6 +446,8 @@ pub struct MeResponse {
     pub avatar_url: Option<String>,
     pub is_admin: bool,
     pub is_banned: bool,
+    pub is_premium: bool,
+    pub premium_until: Option<String>,
     pub auth_provider: String,
     pub reputation_score: String,
 }
@@ -454,6 +468,8 @@ pub async fn get_me(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let (is_premium, premium_until) = compute_premium(&user);
+
     Ok(Json(MeResponse {
         id: user.id,
         slug: user.slug.clone(),
@@ -463,6 +479,8 @@ pub async fn get_me(
         avatar_url: user.avatar_url,
         is_admin: user.is_admin,
         is_banned: user.is_banned,
+        is_premium,
+        premium_until,
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
     }))
@@ -556,6 +574,8 @@ pub async fn link_wallet(
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
+    let (is_premium, premium_until) = compute_premium(&user);
+
     let body = Json(VerifyResponse {
         token,
         user: UserResponse {
@@ -564,6 +584,8 @@ pub async fn link_wallet(
             slug: user.slug,
             display_name: user.display_name,
             is_admin,
+            is_premium,
+            premium_until,
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),

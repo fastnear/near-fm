@@ -116,6 +116,12 @@ export default function RequestDetailPage() {
   const handleAward = async (submission: any) => {
     if (!request) return;
 
+    const recipientNearId = submission.submitter_near_account_id;
+    if (!recipientNearId) {
+      setError("This submitter hasn't linked a NEAR wallet. Cannot award bounty.");
+      return;
+    }
+
     const confirmed = window.confirm(
       `Award the bounty of ${formatNear(request.bounty_amount_yocto)} NEAR to "${submission.song_title}" by ${submission.submitter_account_id}?`
     );
@@ -125,7 +131,7 @@ export default function RequestDetailPage() {
     setError("");
 
     try {
-      const action = awardBountyAction(request.uuid, submission.submitter_account_id);
+      const action = awardBountyAction(request.uuid, recipientNearId);
       await callFunction({
         contractId: action.contractId,
         method: action.method,
@@ -326,13 +332,19 @@ export default function RequestDetailPage() {
 
                   {/* Award button (requester only, open status) */}
                   {isRequester && isOpen && (
-                    <button
-                      onClick={() => handleAward(sub)}
-                      disabled={awarding === sub.id}
-                      className="px-4 py-1.5 text-xs font-medium bg-[#00ec97]/10 hover:bg-[#00ec97]/20 text-[#00ec97] disabled:opacity-30 rounded-lg border border-[#00ec97]/20 transition flex-shrink-0"
-                    >
-                      {awarding === sub.id ? "Awarding..." : "Award Bounty"}
-                    </button>
+                    sub.submitter_near_account_id ? (
+                      <button
+                        onClick={() => handleAward(sub)}
+                        disabled={awarding === sub.id}
+                        className="px-4 py-1.5 text-xs font-medium bg-[#00ec97]/10 hover:bg-[#00ec97]/20 text-[#00ec97] disabled:opacity-30 rounded-lg border border-[#00ec97]/20 transition flex-shrink-0"
+                      >
+                        {awarding === sub.id ? "Awarding..." : "Award Bounty"}
+                      </button>
+                    ) : (
+                      <span className="px-3 py-1 text-xs text-slate-500 flex-shrink-0" title="This user hasn't linked a NEAR wallet">
+                        No wallet
+                      </span>
+                    )
                   )}
 
                   {/* Show winner badge if this song was awarded */}

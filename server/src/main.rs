@@ -107,6 +107,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/requests", post(routes::requests::create_request))
         .route("/api/songs/:uuid/vote", post(routes::songs::vote_song))
         .route("/api/songs/:uuid/report", post(routes::songs::report_song))
+        .route("/api/playlists", post(routes::playlists::create_playlist))
+        .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
+        .route("/api/playlists/:uuid/songs", post(routes::playlists::add_song_to_playlist))
+        .route("/api/playlists/:uuid/songs/:song_uuid", delete(routes::playlists::remove_song_from_playlist))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,
@@ -125,8 +129,8 @@ async fn main() -> anyhow::Result<()> {
                 let row: (i64, i64, String, String) = sqlx::query_as(
                     r#"SELECT
                         (SELECT COUNT(*) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_songs,
-                        (SELECT COALESCE(SUM(play_count), 0) FROM songs WHERE NOT is_deleted) AS total_plays,
-                        (SELECT COALESCE(SUM(CAST(total_tips_yocto AS NUMERIC)), 0)::TEXT FROM songs WHERE NOT is_deleted) AS total_tips_yocto,
+                        (SELECT COALESCE(SUM(play_count), 0) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_plays,
+                        (SELECT COALESCE(SUM(CAST(total_tips_yocto AS NUMERIC)), 0)::TEXT FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_tips_yocto,
                         (SELECT COALESCE(SUM(CAST(bounty_amount_yocto AS NUMERIC)), 0)::TEXT FROM song_requests) AS total_bounties_yocto
                     "#,
                 )
@@ -248,6 +252,12 @@ async fn main() -> anyhow::Result<()> {
             "/api/categories",
             get(routes::admin::list_categories),
         )
+        // Playlists (reads)
+        .route("/api/playlists", get(routes::playlists::list_playlists))
+        .route("/api/playlists/:uuid", get(routes::playlists::get_playlist))
+        .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
+        // RSS feed
+        .route("/feed/:feed_token", get(routes::rss::playlist_feed))
         .route("/api/languages", get(routes::admin::list_languages))
         .route("/api/admin/languages", post(routes::admin::create_language))
         .route("/api/admin/languages/:id", delete(routes::admin::delete_language))

@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import type { Song, Category, Language } from "@/types";
-import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages } from "@/lib/api";
+import type { Song, Category, Language, Playlist } from "@/types";
+import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -32,6 +32,10 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [commentText, setCommentText] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState("");
+  const [showPlaylistDropdown, setShowPlaylistDropdown] = useState(false);
+  const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
+  const [playlistsLoaded, setPlaylistsLoaded] = useState(false);
+  const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null);
   const { currentSong, isPlaying, togglePlay, playMode, setPlayMode, next, previous, startRadio, queue } = useAudioPlayer();
   const { user, isAuthenticated, signInWithGoogle } = useAuth();
   const { accountId } = useNearWallet();
@@ -543,6 +547,80 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   Report
                 </button>
 
+                {/* Add to Playlist */}
+                {user?.is_premium && (
+                  <div className="relative">
+                    <button
+                      onClick={async () => {
+                        if (!playlistsLoaded || showPlaylistDropdown === false) {
+                          try {
+                            const data = await getPlaylists(song.uuid);
+                            setUserPlaylists(data.filter((p: Playlist) => !p.is_auto));
+                            setPlaylistsLoaded(true);
+                          } catch (e) {
+                            console.error("Failed to load playlists:", e);
+                          }
+                        }
+                        setShowPlaylistDropdown(!showPlaylistDropdown);
+                        setAddedToPlaylist(null);
+                      }}
+                      className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      {addedToPlaylist ? "Added!" : "Playlist"}
+                    </button>
+                    {showPlaylistDropdown && (
+                      <div className="absolute z-50 top-full mt-1 left-0 w-56 rounded-xl border border-white/[0.1] shadow-2xl overflow-hidden bg-[#1a1a2e]">
+                        {userPlaylists.length === 0 ? (
+                          <p className="text-xs text-slate-500 px-3 py-3">No playlists. Create one in Cabinet.</p>
+                        ) : (
+                          userPlaylists.map((pl) => {
+                            const alreadyIn = pl.contains_song === true;
+                            return (
+                              <button
+                                key={pl.uuid}
+                                onClick={async () => {
+                                  if (alreadyIn) return;
+                                  try {
+                                    await addSongToPlaylist(pl.uuid, song.uuid);
+                                    setAddedToPlaylist(pl.uuid);
+                                    setUserPlaylists((prev) => prev.map((p) =>
+                                      p.uuid === pl.uuid ? { ...p, contains_song: true, song_count: p.song_count + 1 } : p
+                                    ));
+                                    setTimeout(() => { setAddedToPlaylist(null); setShowPlaylistDropdown(false); }, 800);
+                                  } catch (e: any) {
+                                    console.error("Add to playlist failed:", e);
+                                  }
+                                }}
+                                disabled={alreadyIn}
+                                className={`w-full text-left px-3 py-2.5 text-sm transition flex items-center gap-2 ${
+                                  alreadyIn
+                                    ? "text-slate-500 cursor-default"
+                                    : "text-slate-300 hover:bg-white/[0.08] hover:text-white"
+                                }`}
+                              >
+                                {alreadyIn ? (
+                                  <svg className="w-4 h-4 text-[#00ec97] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                ) : (
+                                  <svg className="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                  </svg>
+                                )}
+                                <span className="truncate flex-1">{pl.name}</span>
+                                <span className="text-xs text-slate-600">{pl.song_count}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Admin: Hide */}
                 {isAdmin && (
                   <button
@@ -631,6 +709,14 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 <span>Added {new Date(song.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
                 {song.updated_at && new Date(song.updated_at).toDateString() !== new Date(song.created_at).toDateString() && (
                   <span>Updated {new Date(song.updated_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
+                )}
+                {song.fulfills_request_uuid && (
+                  <span>
+                    Submitted for bounty{" "}
+                    <Link href={`/requests/${song.fulfills_request_uuid}`} className="text-purple-400 hover:text-purple-300 transition-colors">
+                      {song.fulfills_request_title || "request"}
+                    </Link>
+                  </span>
                 )}
               </div>
 

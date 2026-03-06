@@ -52,6 +52,7 @@ export default function ProfilePage() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockLoading, setBlockLoading] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followKey, setFollowKey] = useState(0);
 
   // Edit profile state
   const [editing, setEditing] = useState(false);
@@ -340,7 +341,7 @@ export default function ProfilePage() {
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:shrink-0">
             {!isOwnProfile && (
               <>
-                <FollowButton accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
+                <FollowButton key={followKey} accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
                 {currentUser && !isFollowing && (
                   <button
                     onClick={handleBlock}
@@ -553,7 +554,7 @@ export default function ProfilePage() {
         <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
           <p className="text-sm text-slate-200">
             <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalNear} NEAR</span>.{" "}
-            <button onClick={async () => { try { await followUser(accountId); setIsFollowing(true); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
+            <button onClick={async () => { try { await followUser(accountId); setIsFollowing(true); setFollowKey(k => k + 1); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
           </p>
         </div>
       )}

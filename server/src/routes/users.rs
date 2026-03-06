@@ -47,6 +47,7 @@ pub async fn get_profile(
     let songs = sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,
@@ -208,6 +209,7 @@ pub async fn list_bookmarks(
     let songs = sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,

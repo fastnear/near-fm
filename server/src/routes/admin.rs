@@ -472,6 +472,7 @@ pub async fn list_song_scores(
             s.uuid,
             s.title,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             s.score,
             s.upvotes,
             s.downvotes,

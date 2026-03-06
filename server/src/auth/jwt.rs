@@ -102,6 +102,11 @@ pub fn require_auth(extensions: &axum::http::Extensions) -> Result<&Claims, Stat
     extensions.get::<Claims>().ok_or(StatusCode::UNAUTHORIZED)
 }
 
+/// Extract claims if present (no error if not authenticated).
+pub fn try_auth(extensions: &axum::http::Extensions) -> Option<&Claims> {
+    extensions.get::<Claims>()
+}
+
 /// Extract claims and require admin. Returns 403 if not admin.
 pub fn require_admin(extensions: &axum::http::Extensions) -> Result<&Claims, StatusCode> {
     let claims = require_auth(extensions)?;

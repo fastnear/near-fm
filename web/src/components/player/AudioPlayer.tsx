@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -39,6 +39,53 @@ export function AudioPlayer() {
   const { accountId } = useNearWallet();
   const userSlug = user?.slug;
   const [copied, setCopied] = useState(false);
+  const seekBarRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragProgress, setDragProgress] = useState(0);
+  const dragProgressRef = useRef(0);
+
+  const getPercentFromEvent = useCallback((clientX: number) => {
+    const bar = seekBarRef.current;
+    if (!bar) return 0;
+    const rect = bar.getBoundingClientRect();
+    return Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+  }, []);
+
+  const handleSeekStart = useCallback((clientX: number) => {
+    const pct = getPercentFromEvent(clientX);
+    setIsDragging(true);
+    setDragProgress(pct);
+    dragProgressRef.current = pct;
+  }, [getPercentFromEvent]);
+
+  // Global mouse/touch listeners for drag — prevents losing drag when cursor leaves the bar
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const pct = getPercentFromEvent(e.clientX);
+      setDragProgress(pct);
+      dragProgressRef.current = pct;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const pct = getPercentFromEvent(e.touches[0].clientX);
+      setDragProgress(pct);
+      dragProgressRef.current = pct;
+    };
+    const onEnd = () => {
+      seek(dragProgressRef.current);
+      setIsDragging(false);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchmove", onTouchMove);
+    document.addEventListener("touchend", onEnd);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onEnd);
+    };
+  }, [isDragging, getPercentFromEvent, seek]);
 
   if (!currentSong) return null;
 
@@ -52,13 +99,17 @@ export function AudioPlayer() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 glass-strong">
-      {/* Seekable area: visualizer + progress bar */}
+      {/* Seekable area: visualizer + progress bar (draggable) */}
       <div
-        className="cursor-pointer py-1 sm:py-0 group"
+        ref={seekBarRef}
+        className="cursor-pointer py-1 sm:py-0 group touch-none"
+        onMouseDown={(e) => { e.preventDefault(); handleSeekStart(e.clientX); }}
+        onTouchStart={(e) => handleSeekStart(e.touches[0].clientX)}
         onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const percent = ((e.clientX - rect.left) / rect.width) * 100;
-          seek(percent);
+          if (!isDragging) {
+            const pct = getPercentFromEvent(e.clientX);
+            seek(pct);
+          }
         }}
       >
         {/* Audio visualizer — desktop only */}
@@ -67,12 +118,20 @@ export function AudioPlayer() {
         {/* Progress bar */}
         <div className="h-1 bg-white/[0.06] relative">
           <div
-            className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all relative"
-            style={{ width: `${progress}%` }}
+            className="h-full bg-gradient-to-r from-purple-500 to-cyan-500 relative"
+            style={{ width: `${isDragging ? dragProgress : progress}%`, transition: isDragging ? "none" : "width 0.2s" }}
           >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 shadow-lg shadow-purple-500/30 transition-opacity" />
+            <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg shadow-purple-500/30 transition-opacity ${isDragging ? "opacity-100 scale-125" : "opacity-0 group-hover:opacity-100"}`} />
           </div>
         </div>
+        {isDragging && (
+          <div
+            className="absolute top-[-28px] bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none"
+            style={{ left: `${dragProgress}%`, transform: "translateX(-50%)" }}
+          >
+            {formatTime((dragProgress / 100) * duration)}
+          </div>
+        )}
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2 sm:gap-3">
@@ -107,7 +166,7 @@ export function AudioPlayer() {
         <div className="flex items-center gap-1">
           <button
             onClick={previous}
-            className="hidden sm:block text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/[0.06] transition-all"
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/[0.06] transition-all"
             aria-label="Previous"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">

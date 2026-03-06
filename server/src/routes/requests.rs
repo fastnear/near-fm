@@ -23,6 +23,7 @@ pub struct SubmissionWithSong {
     pub song_title: String,
     pub song_cover_image_url: Option<String>,
     pub submitter_account_id: String,
+    pub submitter_near_account_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -453,11 +454,12 @@ pub async fn list_submissions(
     let submissions = sqlx::query_as::<_, SubmissionWithSong>(
         r#"SELECT rs.id, rs.request_id, rs.song_id, rs.submitter_id, rs.created_at,
                   s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
-                  u.slug AS submitter_account_id
+                  u.slug AS submitter_account_id,
+                  u.account_id AS submitter_near_account_id
            FROM request_submissions rs
            JOIN songs s ON s.id = rs.song_id
            JOIN users u ON u.id = rs.submitter_id
-           WHERE rs.request_id = $1 AND NOT s.is_deleted
+           WHERE rs.request_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
            ORDER BY rs.created_at DESC"#,
     )
     .bind(request.id)

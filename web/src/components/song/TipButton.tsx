@@ -57,11 +57,18 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
       let txHash: string;
       let fromBalance = false;
 
+      const recipientNearId = song.uploader_near_account_id;
+      if (!recipientNearId) {
+        showToast({ message: "This artist hasn't linked a NEAR wallet yet", type: "error", id: "tip" });
+        setLoading(false);
+        return;
+      }
+
       // If user has enough virtual balance, tip from balance (no wallet popup)
       if (balance && BigInt(balance) >= BigInt(amountYocto)) {
         fromBalance = true;
         const action = tipFromBalanceArgs(
-          song.uploader_account_id,
+          recipientNearId,
           amountYocto,
           song.uuid
         );
@@ -74,7 +81,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
       } else {
         // Not enough balance — send full amount as deposit (goes to virtual balance)
         const action = tipSongAction(
-          song.uploader_account_id,
+          recipientNearId,
           song.uuid,
           amountYocto
         );

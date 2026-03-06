@@ -125,6 +125,45 @@ async fn notify_validated(pool: &PgPool, song_id: i32) {
     .execute(pool)
     .await
     .ok();
+
+    // Notify followers of the uploader
+    let uploader_slug: Option<String> = sqlx::query_scalar(
+        "SELECT slug FROM users WHERE id = $1",
+    )
+    .bind(uploader_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(slug) = uploader_slug {
+        let follower_ids: Vec<i32> = sqlx::query_scalar(
+            "SELECT uf.user_id FROM user_follows uf WHERE uf.followed_slug = $1",
+        )
+        .bind(&slug)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        let follower_data = serde_json::json!({
+            "song_id": song_id,
+            "song_uuid": song_uuid,
+            "song_title": song_title,
+            "uploader_slug": slug,
+        });
+
+        for fid in follower_ids {
+            sqlx::query(
+                "INSERT INTO notifications (user_id, type, data) VALUES ($1, $2, $3)",
+            )
+            .bind(fid)
+            .bind("followed_user_new_song")
+            .bind(&follower_data)
+            .execute(pool)
+            .await
+            .ok();
+        }
+    }
 }
 
 /// Hide the song and notify the uploader about the failed validation.

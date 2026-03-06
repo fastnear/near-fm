@@ -149,6 +149,7 @@ pub async fn get_song_by_uuid(
     sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,
@@ -157,7 +158,9 @@ pub async fn get_song_by_uuid(
             l.code AS language_code,
             l.name AS language_name,
             (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
-            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
+            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json,
+            (SELECT sr.uuid FROM song_requests sr WHERE sr.id = s.fulfills_request_id) AS fulfills_request_uuid,
+            (SELECT sr.title FROM song_requests sr WHERE sr.id = s.fulfills_request_id) AS fulfills_request_title
            FROM songs s
            JOIN users u ON s.uploader_id = u.id
            LEFT JOIN categories c ON s.category_id = c.id
@@ -189,6 +192,7 @@ pub async fn list_songs(
 ) -> Result<Vec<SongWithUploader>, sqlx::Error> {
     let final_sql = r#"SELECT s.*,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,
@@ -495,6 +499,7 @@ pub async fn get_top_trending_songs(
     sqlx::query_as::<_, SongWithUploader>(
         r#"SELECT s.*,
             u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,

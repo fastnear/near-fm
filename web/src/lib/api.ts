@@ -1,4 +1,4 @@
-import type { Song, Genre, Category, Language, SongRequest, Notification } from "@/types";
+import type { Song, Genre, Category, Language, SongRequest, Notification, Playlist } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -42,6 +42,8 @@ export interface AuthUser {
   avatar_url: string | null;
   is_admin: boolean;
   is_banned: boolean;
+  is_premium: boolean;
+  premium_until: string | null;
   auth_provider: string;
   reputation_score: string;
 }
@@ -587,4 +589,53 @@ export interface AdminSongScore {
 
 export async function getAdminSongScores(): Promise<AdminSongScore[]> {
   return fetchApi("/api/admin/songs/scores");
+}
+
+// ── Playlists ──
+
+export async function getPlaylists(songUuid?: string): Promise<Playlist[]> {
+  const params = songUuid ? `?song_uuid=${encodeURIComponent(songUuid)}` : "";
+  return fetchApi(`/api/playlists${params}`);
+}
+
+export async function getPlaylist(uuid: string): Promise<{
+  playlist: Playlist;
+  owner_account_id: string;
+  owner_display_name: string | null;
+  owner_avatar_url: string | null;
+}> {
+  return fetchApi(`/api/playlists/${uuid}`);
+}
+
+export async function createPlaylist(data: { name: string; description?: string }): Promise<{ playlist: Playlist }> {
+  return fetchApi("/api/playlists", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePlaylist(uuid: string, data: { name?: string; description?: string; cover_image_url?: string }): Promise<{ playlist: Playlist }> {
+  return fetchApi(`/api/playlists/${uuid}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePlaylist(uuid: string): Promise<void> {
+  return fetchApi(`/api/playlists/${uuid}`, { method: "DELETE" });
+}
+
+export async function getPlaylistSongs(uuid: string): Promise<Song[]> {
+  return fetchApi(`/api/playlists/${uuid}/songs`);
+}
+
+export async function addSongToPlaylist(playlistUuid: string, songUuid: string): Promise<void> {
+  return fetchApi(`/api/playlists/${playlistUuid}/songs`, {
+    method: "POST",
+    body: JSON.stringify({ song_uuid: songUuid }),
+  });
+}
+
+export async function removeSongFromPlaylist(playlistUuid: string, songUuid: string): Promise<void> {
+  return fetchApi(`/api/playlists/${playlistUuid}/songs/${songUuid}`, { method: "DELETE" });
 }

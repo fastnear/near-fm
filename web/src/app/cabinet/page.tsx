@@ -5,11 +5,12 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
-import type { Song, Notification } from "@/types";
+import type { Song, Notification, Playlist } from "@/types";
+import { prepareFastFSUpload, uploadToFastFS, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
 
 // ── Helpers ──
 
@@ -46,13 +47,17 @@ function timeAgo(iso: string): string {
 
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "feed" | "notifications" | "reports";
+type TabKey = "balance" | "songs" | "playlists" | "feed" | "notifications" | "reports";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
   { key: "feed", label: "Blocked Users" },
   { key: "notifications", label: "Notifications" },
+];
+
+const PREMIUM_TABS: { key: TabKey; label: string }[] = [
+  { key: "playlists", label: "Playlists" },
 ];
 
 const ADMIN_TABS: { key: TabKey; label: string }[] = [
@@ -66,7 +71,11 @@ export default function CabinetPage() {
   const { accountId, connectAndSignIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
   const isAdmin = user?.is_admin;
-  const TABS = isAdmin ? [...BASE_TABS, ...ADMIN_TABS] : BASE_TABS;
+  const isPremium = user?.is_premium;
+  const baseTabs = isPremium
+    ? [...BASE_TABS.slice(0, 2), ...PREMIUM_TABS, ...BASE_TABS.slice(2)]
+    : BASE_TABS;
+  const TABS = isAdmin ? [...baseTabs, ...ADMIN_TABS] : baseTabs;
   const userSlug = user?.slug;
 
   if (authLoading || walletLoading) {
@@ -152,7 +161,7 @@ export default function CabinetPage() {
       {/* Tab content */}
       {activeTab === "balance" && <BalanceTab />}
       {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
-
+      {activeTab === "playlists" && isPremium && <PlaylistsTab />}
       {activeTab === "feed" && <BlockedUsers />}
       {activeTab === "notifications" && <NotificationsTab />}
       {activeTab === "reports" && isAdmin && <ReportsTab />}
@@ -480,6 +489,12 @@ function NotificationIcon({ type }: { type: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
         </svg>
       );
+    case "followed_user_new_song":
+      return (
+        <svg className="w-5 h-5 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+        </svg>
+      );
     default:
       return (
         <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -583,6 +598,20 @@ function notificationText(notif: Notification): React.ReactNode {
         </>
       );
     }
+    case "followed_user_new_song": {
+      const uploaderSlug = data.uploader_slug as string | undefined;
+      const songTitle = data.song_title as string | undefined;
+      const songUuid = data.song_uuid as string | undefined;
+      return (
+        <>
+          <Link href={`/profile/${uploaderSlug}`} className="text-purple-400 hover:underline">{uploaderSlug}</Link>
+          {" uploaded a new song "}
+          {songTitle && songUuid ? (
+            <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link>
+          ) : ""}
+        </>
+      );
+    }
     default:
       return `You have a new notification (${notif.type})`;
   }
@@ -679,6 +708,427 @@ function NotificationsTab() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Playlists Tab (Premium) ──
+
+function PlaylistsTab() {
+  const { user } = useAuth();
+  const { accountId, callFunction } = useNearWallet();
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [songsLoading, setSongsLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [editDesc, setEditDesc] = useState("");
+  const [rssCopied, setRssCopied] = useState(false);
+  const [coverUploading, setCoverUploading] = useState(false);
+
+  const fetchPlaylists = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getPlaylists();
+      setPlaylists(data);
+    } catch (e) {
+      console.error("Failed to load playlists:", e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchPlaylists();
+  }, [fetchPlaylists]);
+
+  const loadSongs = useCallback(async (playlist: Playlist) => {
+    setSongsLoading(true);
+    try {
+      const data = await getPlaylistSongs(playlist.uuid);
+      setSongs(data);
+    } catch (e) {
+      console.error("Failed to load playlist songs:", e);
+    }
+    setSongsLoading(false);
+  }, []);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const { playlist } = await createPlaylist({ name: newName.trim() });
+      setPlaylists((prev) => [playlist, ...prev]);
+      setNewName("");
+    } catch (e: any) {
+      alert(e.message || "Failed to create playlist");
+    }
+    setCreating(false);
+  };
+
+  const handleDelete = async (playlist: Playlist) => {
+    if (!window.confirm(`Delete playlist "${playlist.name}"?`)) return;
+    try {
+      await deletePlaylist(playlist.uuid);
+      setPlaylists((prev) => prev.filter((p) => p.uuid !== playlist.uuid));
+      if (selectedPlaylist?.uuid === playlist.uuid) setSelectedPlaylist(null);
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
+  };
+
+  const handleRemoveSong = async (songUuid: string) => {
+    if (!selectedPlaylist) return;
+    try {
+      await removeSongFromPlaylist(selectedPlaylist.uuid, songUuid);
+      setSongs((prev) => prev.filter((s) => s.uuid !== songUuid));
+      setPlaylists((prev) =>
+        prev.map((p) =>
+          p.uuid === selectedPlaylist.uuid ? { ...p, song_count: p.song_count - 1 } : p
+        )
+      );
+      setSelectedPlaylist((prev) => prev ? { ...prev, song_count: prev.song_count - 1 } : prev);
+    } catch (e) {
+      console.error("Remove song failed:", e);
+    }
+  };
+
+  const handleSaveName = async () => {
+    if (!selectedPlaylist || !editName.trim()) return;
+    try {
+      const { playlist } = await updatePlaylist(selectedPlaylist.uuid, { name: editName.trim() });
+      setSelectedPlaylist(playlist);
+      setPlaylists((prev) => prev.map((p) => (p.uuid === playlist.uuid ? playlist : p)));
+      setEditingName(false);
+    } catch (e) {
+      console.error("Update name failed:", e);
+    }
+  };
+
+  const handleSaveDesc = async () => {
+    if (!selectedPlaylist) return;
+    try {
+      const { playlist } = await updatePlaylist(selectedPlaylist.uuid, { description: editDesc });
+      setSelectedPlaylist(playlist);
+      setPlaylists((prev) => prev.map((p) => (p.uuid === playlist.uuid ? playlist : p)));
+      setEditingDesc(false);
+    } catch (e) {
+      console.error("Update description failed:", e);
+    }
+  };
+
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedPlaylist || !accountId || !callFunction) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { alert("Please select an image file"); return; }
+    if (file.size > 1024 * 1024) { alert("Image must be under 1MB"); return; }
+
+    setCoverUploading(true);
+    try {
+      const content = new Uint8Array(await file.arrayBuffer());
+      const hash = await import("@/lib/near/fastfs").then((m) => m.computeFileHash(content));
+      const relativePath = getRelativePath(await hash, file.type);
+      const parts = prepareFastFSUpload(relativePath, file.type, content);
+      await uploadToFastFS(
+        (params) => callFunction(params) as Promise<string>,
+        parts
+      );
+      // Wait for FastFS indexing
+      await new Promise((r) => setTimeout(r, 3000));
+      const url = getFastFSUrl(accountId, relativePath);
+      const { playlist } = await updatePlaylist(selectedPlaylist.uuid, { cover_image_url: url });
+      setSelectedPlaylist(playlist);
+      setPlaylists((prev) => prev.map((p) => (p.uuid === playlist.uuid ? playlist : p)));
+    } catch (err) {
+      console.error("Cover upload failed:", err);
+    }
+    setCoverUploading(false);
+  };
+
+  // Detail view
+  if (selectedPlaylist) {
+    const rssUrl = `https://api.near.fm/feed/${selectedPlaylist.feed_token}`;
+    const deepLink = `podcast://${rssUrl.replace("https://", "")}`;
+    const isAuto = selectedPlaylist.is_auto;
+
+    // Load songs on first open
+    if (songs.length === 0 && !songsLoading && (selectedPlaylist.song_count > 0 || isAuto)) {
+      loadSongs(selectedPlaylist);
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Back + title */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => { setSelectedPlaylist(null); setSongs([]); }}
+            className="btn-ghost px-3 py-1.5 text-sm rounded-xl"
+          >
+            &larr; Back
+          </button>
+          <div className="flex-1 min-w-0">
+            {editingName && !isAuto ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="flex-1 rounded-xl px-3 py-1.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 focus:border-purple-500 focus:outline-none"
+                  autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
+                />
+                <button onClick={handleSaveName} className="btn-primary px-3 py-1.5 text-sm rounded-xl">Save</button>
+                <button onClick={() => setEditingName(false)} className="btn-ghost px-3 py-1.5 text-sm rounded-xl">Cancel</button>
+              </div>
+            ) : (
+              <h2
+                className={`text-xl font-bold text-white truncate ${!isAuto ? "cursor-pointer hover:text-purple-400 transition-colors" : ""}`}
+                onClick={() => { if (!isAuto) { setEditName(selectedPlaylist.name); setEditingName(true); } }}
+                title={isAuto ? "Auto playlist" : "Click to edit"}
+              >
+                {selectedPlaylist.name}
+                {isAuto && <span className="ml-2 text-xs font-normal text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full">Auto</span>}
+              </h2>
+            )}
+          </div>
+          {!isAuto && (
+            <button onClick={() => handleDelete(selectedPlaylist)} className="btn-ghost px-3 py-1.5 text-sm rounded-xl text-rose-400 hover:bg-rose-500/10">
+              Delete
+            </button>
+          )}
+        </div>
+
+        {/* Cover + meta */}
+        <div className="flex flex-col sm:flex-row gap-6">
+          <div className="relative w-40 h-40 rounded-2xl overflow-hidden ring-1 ring-white/[0.06] shrink-0">
+            {selectedPlaylist.cover_image_url ? (
+              <img src={selectedPlaylist.cover_image_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-purple-900/50 to-cyan-900/50 flex items-center justify-center">
+                <svg className="w-12 h-12 text-white/15" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+              </div>
+            )}
+            <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
+              <span className="text-xs text-white font-medium">{coverUploading ? "Uploading..." : "Change Cover"}</span>
+              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || !accountId} />
+            </label>
+          </div>
+
+          <div className="flex-1 space-y-3">
+            {/* Description */}
+            {editingDesc ? (
+              <div className="space-y-2">
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl px-3 py-2 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 focus:border-purple-500 focus:outline-none resize-none"
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleSaveDesc} className="btn-primary px-3 py-1.5 text-sm rounded-xl">Save</button>
+                  <button onClick={() => setEditingDesc(false)} className="btn-ghost px-3 py-1.5 text-sm rounded-xl">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <p
+                className="text-sm text-slate-400 cursor-pointer hover:text-slate-300 transition-colors"
+                onClick={() => { setEditDesc(selectedPlaylist.description || ""); setEditingDesc(true); }}
+                title="Click to edit description"
+              >
+                {selectedPlaylist.description || "Add a description..."}
+              </p>
+            )}
+
+            {isAuto ? (
+              <p className="text-xs text-slate-500">{songs.length} song{songs.length !== 1 ? "s" : ""} (all your uploads)</p>
+            ) : (
+              <p className="text-xs text-slate-500">{selectedPlaylist.song_count} song{selectedPlaylist.song_count !== 1 ? "s" : ""}</p>
+            )}
+
+            {/* RSS links */}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => { navigator.clipboard.writeText(rssUrl); setRssCopied(true); setTimeout(() => setRssCopied(false), 2000); }}
+                className="btn-ghost px-3 py-1.5 text-xs rounded-xl flex items-center gap-1.5"
+              >
+                {rssCopied ? (
+                  <svg className="w-3.5 h-3.5 text-[#00ec97]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+                {rssCopied ? "Copied!" : "Copy Playlist RSS URL"}
+              </button>
+              <a
+                href={deepLink}
+                className="btn-ghost px-3 py-1.5 text-xs rounded-xl flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728" />
+                </svg>
+                Open in Podcast App
+              </a>
+              {!isAuto && (
+                <Link
+                  href={`/playlist/${selectedPlaylist.uuid}`}
+                  className="btn-ghost px-3 py-1.5 text-xs rounded-xl flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.102" />
+                  </svg>
+                  Public Page
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Songs list */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-400 mb-3">Songs</h3>
+          {songsLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="glass-card rounded-xl p-3 flex gap-3">
+                  <div className="w-10 h-10 skeleton rounded" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 skeleton rounded w-2/3" />
+                    <div className="h-3 skeleton rounded w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : songs.length === 0 ? (
+            <p className="text-sm text-slate-500 py-8 text-center">{isAuto ? "No uploaded songs yet." : "No songs yet. Add songs from any song page."}</p>
+          ) : (
+            <div className="space-y-2">
+              {songs.map((song) => (
+                <div key={song.uuid} className="glass-card rounded-xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded overflow-hidden shrink-0 ring-1 ring-white/[0.06]">
+                    {song.cover_image_url ? (
+                      <img src={song.cover_image_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-purple-900/50 to-cyan-900/50" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <Link href={`/song/${song.uuid}`} className="text-sm text-white hover:text-purple-400 transition-colors truncate block">
+                      {song.title}
+                    </Link>
+                    <p className="text-xs text-slate-500 truncate">{song.uploader_display_name || song.uploader_account_id}</p>
+                  </div>
+                  {!isAuto && (
+                    <button
+                      onClick={() => handleRemoveSong(song.uuid)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
+                      title="Remove from playlist"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // List view
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="glass-card rounded-xl p-4">
+            <div className="flex gap-3">
+              <div className="w-16 h-16 skeleton rounded-xl" />
+              <div className="flex-1 space-y-2">
+                <div className="h-5 skeleton rounded w-1/2" />
+                <div className="h-3 skeleton rounded w-1/4" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Create form */}
+      <div className="flex gap-3">
+        <input
+          type="text"
+          placeholder="New playlist name..."
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          disabled={creating || playlists.length >= 3}
+          className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+        />
+        <button
+          onClick={handleCreate}
+          disabled={creating || !newName.trim() || playlists.length >= 3}
+          className="btn-primary px-5 py-2.5 rounded-xl text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          {creating ? "..." : "Create"}
+        </button>
+      </div>
+      {playlists.length >= 3 && (
+        <p className="text-xs text-slate-500">Maximum 3 playlists reached.</p>
+      )}
+
+      {/* Playlist list */}
+      {playlists.length === 0 ? (
+        <div className="text-center py-16">
+          <div className="text-5xl mb-4 text-slate-700">&#9835;</div>
+          <p className="text-slate-400 text-lg">No playlists yet</p>
+          <p className="text-slate-500 text-sm mt-2">Create your first playlist and add songs to it!</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {playlists.map((playlist) => (
+            <button
+              key={playlist.uuid}
+              onClick={() => { setSelectedPlaylist(playlist); setSongs([]); }}
+              className="w-full glass-card rounded-xl p-4 flex items-center gap-4 hover:bg-white/[0.06] transition text-left"
+            >
+              <div className="w-16 h-16 rounded-xl overflow-hidden ring-1 ring-white/[0.06] shrink-0">
+                {playlist.cover_image_url ? (
+                  <img src={playlist.cover_image_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-purple-900/50 to-cyan-900/50 flex items-center justify-center">
+                    <svg className="w-6 h-6 text-white/15" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium truncate">{playlist.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{playlist.song_count} song{playlist.song_count !== 1 ? "s" : ""}</p>
+              </div>
+              <svg className="w-5 h-5 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

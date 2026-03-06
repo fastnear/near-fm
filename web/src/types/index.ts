@@ -39,6 +39,7 @@ export interface Song {
   updated_at: string;
   // Uploader join fields
   uploader_account_id: string;
+  uploader_near_account_id: string | null;
   uploader_display_name: string | null;
   uploader_reputation: string;
   uploader_twitter_handle: string | null;
@@ -52,6 +53,9 @@ export interface Song {
   // Language join fields
   language_code: string | null;
   language_name: string | null;
+  // Bounty request join fields
+  fulfills_request_uuid: string | null;
+  fulfills_request_title: string | null;
 }
 
 export interface Genre {
@@ -105,6 +109,21 @@ export interface FeedPreferences {
   excluded_genres: number[];
   excluded_languages: number[];
   excluded_categories: number[];
+}
+
+export interface Playlist {
+  id: number;
+  uuid: string;
+  user_id: number;
+  name: string;
+  description: string | null;
+  cover_image_url: string | null;
+  feed_token: string;
+  is_auto: boolean;
+  song_count: number;
+  created_at: string;
+  updated_at: string;
+  contains_song?: boolean;
 }
 
 export type SortMode = "trending" | "latest" | "top" | "following";

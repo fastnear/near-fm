@@ -108,6 +108,36 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { playModeRef.current = playMode; }, [playMode]);
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
 
+  // Update Media Session metadata (CarPlay, lock screen, Bluetooth, AirPlay)
+  const updateMediaSession = useCallback((song: Song) => {
+    if (!("mediaSession" in navigator)) return;
+    const artwork: MediaImage[] = [];
+    if (song.cover_image_url) {
+      artwork.push({ src: song.cover_image_url, sizes: "512x512", type: "image/jpeg" });
+    }
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: song.title,
+      artist: song.uploader_display_name || song.uploader_account_id,
+      album: "NEAR FM",
+      artwork,
+    });
+  }, []);
+
+  // Update Media Session position state
+  const updatePositionState = useCallback(() => {
+    if (!("mediaSession" in navigator) || !audioRef.current) return;
+    const audio = audioRef.current;
+    if (audio.duration && isFinite(audio.duration)) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: audio.duration,
+          playbackRate: audio.playbackRate,
+          position: Math.min(audio.currentTime, audio.duration),
+        });
+      } catch { /* ignore */ }
+    }
+  }, []);
+
   const playSong = useCallback(
     (song: Song) => {
       const audio = audioRef.current;
@@ -122,6 +152,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       audio.play().catch(console.error);
       setCurrentSong(song);
       setIsPlaying(true);
+      updateMediaSession(song);
 
       // Notify other tabs to pause
       channelRef.current?.postMessage({ type: "playing", tabId: tabIdRef.current });
@@ -129,7 +160,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       // Track play count
       incrementPlay(song.uuid).catch(() => {});
     },
-    []
+    [updateMediaSession]
   );
 
   // Initialize audio element
@@ -143,11 +174,13 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         if (a.duration) {
           setCurrentTime(a.currentTime);
           setProgress((a.currentTime / a.duration) * 100);
+          updatePositionState();
         }
       });
 
       audioRef.current.addEventListener("loadedmetadata", () => {
         setDuration(audioRef.current!.duration);
+        updatePositionState();
       });
 
       audioRef.current.addEventListener("ended", () => {
@@ -272,6 +305,12 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   }, [queue, playMode, playSong]);
 
   const previous = useCallback(() => {
+    // Apple Music behavior: if >3s into song, restart; otherwise go to previous
+    const audio = audioRef.current;
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      return;
+    }
     if (history.length > 0) {
       const prevSong = history[0];
       setHistory((h) => h.slice(1));
@@ -280,6 +319,8 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
         setQueue((q) => [cur, ...q]);
       }
       playSong(prevSong);
+    } else if (audio) {
+      audio.currentTime = 0;
     }
   }, [history, playSong]);
 
@@ -296,6 +337,37 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       audioRef.current.volume = vol;
     }
   }, []);
+
+  // Register Media Session action handlers (CarPlay, Bluetooth, lock screen)
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
+    ms.setActionHandler("play", () => { resume(); });
+    ms.setActionHandler("pause", () => { pause(); });
+    ms.setActionHandler("nexttrack", () => { next(); });
+    ms.setActionHandler("previoustrack", () => { previous(); });
+    ms.setActionHandler("seekto", (details) => {
+      const audio = audioRef.current;
+      if (audio && details.seekTime != null) {
+        audio.currentTime = details.seekTime;
+        updatePositionState();
+      }
+    });
+    ms.setActionHandler("seekbackward", (details) => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.currentTime = Math.max(0, audio.currentTime - (details.seekOffset || 10));
+        updatePositionState();
+      }
+    });
+    ms.setActionHandler("seekforward", (details) => {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (details.seekOffset || 10));
+        updatePositionState();
+      }
+    });
+  }, [pause, resume, next, previous, updatePositionState]);
 
   const addToQueue = useCallback((song: Song) => {
     setQueue((q) => [...q, song]);
