@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, getDiamondLikesRemaining } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
@@ -70,6 +70,7 @@ export default function CabinetPage() {
   const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut: authSignOut } = useAuth();
   const { accountId, connectAndSignIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
+  const [diamondRemaining, setDiamondRemaining] = useState<number | null>(null);
   const isAdmin = user?.is_admin;
   const isPremium = user?.is_premium;
   const baseTabs = isPremium
@@ -77,6 +78,13 @@ export default function CabinetPage() {
     : BASE_TABS;
   const TABS = isAdmin ? [...baseTabs, ...ADMIN_TABS] : baseTabs;
   const userSlug = user?.slug;
+
+  useEffect(() => {
+    if (isPremium) {
+      getDiamondLikesRemaining().then(r => setDiamondRemaining(r.diamond_likes_remaining_today)).catch(() => {});
+    }
+  }, [isPremium]);
+
 
   if (authLoading || walletLoading) {
     return (
@@ -140,6 +148,36 @@ export default function CabinetPage() {
           </button>
         </div>
       </div>
+
+      {/* Premium status */}
+      {isPremium && (
+        <div className="glass-card rounded-2xl p-5 mb-6 border border-cyan-500/10">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-2xl">✦</span>
+            <h2 className="text-lg font-bold diamond-shimmer">Premium</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+            <div className="space-y-1">
+              <div className="text-slate-400">Diamond Likes today</div>
+              <div className="text-white font-semibold text-lg">
+                {diamondRemaining !== null ? `${diamondRemaining} / 5` : "..."}
+              </div>
+              <div className="text-xs text-slate-500">Diamond likes boost songs much higher in the feed</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-slate-400">Playlists</div>
+              <div className="text-[#00ec97] font-semibold">Available</div>
+              <div className="text-xs text-slate-500">Create playlists and share them</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-slate-400">Premium until</div>
+              <div className="text-white font-semibold">
+                {user?.premium_until ? new Date(user.premium_until).toLocaleDateString() : "Active"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 glass rounded-2xl p-1 mb-8 overflow-x-auto">
@@ -729,6 +767,11 @@ function PlaylistsTab() {
   const [editingDesc, setEditingDesc] = useState(false);
   const [editDesc, setEditDesc] = useState("");
   const [rssCopied, setRssCopied] = useState(false);
+  const [isApple, setIsApple] = useState(false);
+
+  useEffect(() => {
+    setIsApple(/Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  }, []);
   const [coverUploading, setCoverUploading] = useState(false);
 
   const fetchPlaylists = useCallback(async () => {
@@ -969,15 +1012,17 @@ function PlaylistsTab() {
                 )}
                 {rssCopied ? "Copied!" : "Copy Playlist RSS URL"}
               </button>
-              <a
-                href={deepLink}
-                className="btn-ghost px-3 py-1.5 text-xs rounded-xl flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728" />
-                </svg>
-                Open in Podcast App
-              </a>
+              {isApple && (
+                <a
+                  href={deepLink}
+                  className="btn-ghost px-3 py-1.5 text-xs rounded-xl flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 010-7.072m-2.828 9.9a9 9 0 010-12.728" />
+                  </svg>
+                  Open in Podcasts
+                </a>
+              )}
               {!isAuto && (
                 <Link
                   href={`/playlist/${selectedPlaylist.uuid}`}

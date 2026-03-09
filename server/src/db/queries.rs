@@ -233,7 +233,7 @@ pub async fn list_songs(
              AND (CARDINALITY($15::int[]) = 0 OR s.uploader_id != ALL($15))
            ORDER BY
              CASE WHEN $7 = 'latest' THEN EXTRACT(EPOCH FROM s.created_at) END DESC,
-             CASE WHEN $7 = 'top' THEN (s.upvotes - s.downvotes)::FLOAT END DESC,
+             CASE WHEN $7 = 'top' THEN (s.upvotes + s.diamond_like_count - s.downvotes)::FLOAT END DESC,
              CASE WHEN $7 = 'trending' OR $7 IS NULL THEN s.score END DESC,
              s.created_at DESC
            LIMIT $1 OFFSET $2"#;
@@ -520,6 +520,110 @@ pub async fn get_top_trending_songs(
     .bind(limit)
     .fetch_all(pool)
     .await
+}
+
+// ── Diamond Likes ──
+
+pub async fn toggle_diamond_like(
+    pool: &PgPool,
+    song_id: i32,
+    user_id: i32,
+) -> Result<bool, sqlx::Error> {
+    // Try to delete first; if a row was deleted, it was a removal
+    let deleted = sqlx::query(
+        "DELETE FROM diamond_likes WHERE song_id = $1 AND user_id = $2",
+    )
+    .bind(song_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    if deleted.rows_affected() > 0 {
+        // Removed — decrement count
+        sqlx::query(
+            "UPDATE songs SET diamond_like_count = GREATEST(diamond_like_count - 1, 0) WHERE id = $1",
+        )
+        .bind(song_id)
+        .execute(pool)
+        .await?;
+        return Ok(false);
+    }
+
+    // Insert new diamond like
+    sqlx::query(
+        "INSERT INTO diamond_likes (song_id, user_id) VALUES ($1, $2)",
+    )
+    .bind(song_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "UPDATE songs SET diamond_like_count = diamond_like_count + 1 WHERE id = $1",
+    )
+    .bind(song_id)
+    .execute(pool)
+    .await?;
+
+    Ok(true)
+}
+
+pub async fn get_diamond_likes_today(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM diamond_likes WHERE user_id = $1 AND created_at >= CURRENT_DATE",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn get_user_diamond_like(
+    pool: &PgPool,
+    song_id: i32,
+    user_id: i32,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM diamond_likes WHERE song_id = $1 AND user_id = $2)",
+    )
+    .bind(song_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiamondLiker {
+    pub account_id: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+pub async fn get_diamond_likers(
+    pool: &PgPool,
+    song_id: i32,
+) -> Result<Vec<DiamondLiker>, sqlx::Error> {
+    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"SELECT u.slug, u.display_name, u.avatar_url
+           FROM diamond_likes dl
+           JOIN users u ON dl.user_id = u.id
+           WHERE dl.song_id = $1
+           ORDER BY dl.created_at DESC"#,
+    )
+    .bind(song_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(account_id, display_name, avatar_url)| DiamondLiker {
+            account_id,
+            display_name,
+            avatar_url,
+        })
+        .collect())
 }
 
 pub async fn set_song_genres(

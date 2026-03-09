@@ -35,6 +35,7 @@ export interface Song {
   is_hidden: boolean;
   is_deleted: boolean;
   fulfills_request_id: number | null;
+  diamond_like_count: number;
   created_at: string;
   updated_at: string;
   // Uploader join fields

@@ -288,6 +288,8 @@ pub struct VoteResponse {
     pub upvotes: i32,
     pub downvotes: i32,
     pub user_vote: i16,
+    pub diamond_like_count: i32,
+    pub user_has_diamond_liked: bool,
 }
 
 pub async fn vote_song(
@@ -337,6 +339,16 @@ pub async fn vote_song(
         queries::upsert_vote(&state.db, song.id, claims.user_id, req.value, weight)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Mutual exclusion: upvote removes diamond like
+        if req.value == 1 {
+            let has_diamond = queries::get_user_diamond_like(&state.db, song.id, claims.user_id)
+                .await
+                .unwrap_or(false);
+            if has_diamond {
+                let _ = queries::toggle_diamond_like(&state.db, song.id, claims.user_id).await;
+            }
+        }
     }
 
     // Get updated counts
@@ -345,10 +357,16 @@ pub async fn vote_song(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
 
+    let user_has_diamond_liked = queries::get_user_diamond_like(&state.db, updated.id, claims.user_id)
+        .await
+        .unwrap_or(false);
+
     Ok(Json(VoteResponse {
         upvotes: updated.upvotes,
         downvotes: updated.downvotes,
         user_vote: req.value,
+        diamond_like_count: updated.diamond_like_count,
+        user_has_diamond_liked,
     }))
 }
 
@@ -375,10 +393,16 @@ pub async fn get_vote(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .unwrap_or(0);
 
+    let user_has_diamond_liked = queries::get_user_diamond_like(&state.db, song.id, claims.user_id)
+        .await
+        .unwrap_or(false);
+
     Ok(Json(VoteResponse {
         upvotes: song.upvotes,
         downvotes: song.downvotes,
         user_vote,
+        diamond_like_count: song.diamond_like_count,
+        user_has_diamond_liked,
     }))
 }
 
@@ -716,6 +740,126 @@ pub async fn radio_skip(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(StatusCode::CREATED)
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiamondLikeResponse {
+    pub diamond_like_count: i32,
+    pub user_has_diamond_liked: bool,
+    pub diamond_likes_remaining_today: i64,
+}
+
+pub async fn diamond_like_song(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+) -> Result<Json<DiamondLikeResponse>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check premium status
+    let premium_until: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT premium_until FROM users WHERE id = $1")
+            .bind(claims.user_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let is_premium = premium_until
+        .map(|until| until > chrono::Utc::now())
+        .unwrap_or(false);
+
+    if !is_premium && !claims.is_admin {
+        return Err((StatusCode::FORBIDDEN, "Premium subscription required".to_string()));
+    }
+
+    let song = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    // Check if user already has a diamond like on this song (to know if this is a removal)
+    let already_liked = queries::get_user_diamond_like(&state.db, song.id, claims.user_id)
+        .await
+        .unwrap_or(false);
+
+    // If adding (not removing), check daily limit
+    if !already_liked {
+        let today_count = queries::get_diamond_likes_today(&state.db, claims.user_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if today_count >= 5 {
+            return Err((StatusCode::TOO_MANY_REQUESTS, "Daily diamond like limit reached (5/day)".to_string()));
+        }
+    }
+
+    let now_liked = queries::toggle_diamond_like(&state.db, song.id, claims.user_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Mutual exclusion: adding diamond like removes regular upvote
+    if now_liked {
+        let current_vote: Option<i16> = sqlx::query_scalar(
+            "SELECT value FROM votes WHERE song_id = $1 AND user_id = $2"
+        )
+        .bind(song.id)
+        .bind(claims.user_id)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+        if current_vote == Some(1) {
+            let _ = queries::delete_vote(&state.db, song.id, claims.user_id).await;
+        }
+    }
+
+    let updated = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    let today_count = queries::get_diamond_likes_today(&state.db, claims.user_id)
+        .await
+        .unwrap_or(0);
+
+    Ok(Json(DiamondLikeResponse {
+        diamond_like_count: updated.diamond_like_count,
+        user_has_diamond_liked: now_liked,
+        diamond_likes_remaining_today: (5 - today_count).max(0),
+    }))
+}
+
+pub async fn get_diamond_likes_remaining(
+    State(state): State<AppState>,
+    extensions: Extensions,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let today_count = queries::get_diamond_likes_today(&state.db, claims.user_id)
+        .await
+        .unwrap_or(0);
+
+    Ok(Json(serde_json::json!({
+        "diamond_likes_remaining_today": (5 - today_count).max(0),
+        "diamond_likes_used_today": today_count,
+        "diamond_likes_daily_limit": 5
+    })))
+}
+
+pub async fn get_diamond_likers(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<Vec<queries::DiamondLiker>>, (StatusCode, String)> {
+    let song = queries::get_song_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    let likers = queries::get_diamond_likers(&state.db, song.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(likers))
 }
 
 pub async fn report_song(

@@ -146,16 +146,22 @@ export async function createSong(data: {
   });
 }
 
-export async function getUserVote(
-  uuid: string
-): Promise<{ upvotes: number; downvotes: number; user_vote: number }> {
+export interface VoteData {
+  upvotes: number;
+  downvotes: number;
+  user_vote: number;
+  diamond_like_count: number;
+  user_has_diamond_liked: boolean;
+}
+
+export async function getUserVote(uuid: string): Promise<VoteData> {
   return fetchApi(`/api/songs/${uuid}/vote`);
 }
 
 export async function voteSong(
   uuid: string,
   value: 1 | -1 | 0
-): Promise<{ upvotes: number; downvotes: number; user_vote: number }> {
+): Promise<VoteData> {
   return fetchApi(`/api/songs/${uuid}/vote`, {
     method: "POST",
     body: JSON.stringify({ value }),
@@ -166,6 +172,30 @@ export async function incrementPlay(
   uuid: string
 ): Promise<{ play_count: number }> {
   return fetchApi(`/api/songs/${uuid}/play`, { method: "POST" });
+}
+
+export async function diamondLikeSong(uuid: string): Promise<{
+  diamond_like_count: number;
+  user_has_diamond_liked: boolean;
+  diamond_likes_remaining_today: number;
+}> {
+  return fetchApi(`/api/songs/${uuid}/diamond-like`, { method: "POST" });
+}
+
+export async function getDiamondLikers(uuid: string): Promise<{
+  account_id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}[]> {
+  return fetchApi(`/api/songs/${uuid}/diamond-likers`);
+}
+
+export async function getDiamondLikesRemaining(): Promise<{
+  diamond_likes_remaining_today: number;
+  diamond_likes_used_today: number;
+  diamond_likes_daily_limit: number;
+}> {
+  return fetchApi("/api/me/diamond-likes-remaining");
 }
 
 export async function reportSong(uuid: string, reason: string): Promise<void> {
@@ -485,6 +515,7 @@ export interface Comment {
   author_account_id: string;
   author_display_name: string | null;
   author_avatar_url: string | null;
+  author_is_premium: boolean;
 }
 
 export async function getComments(songUuid: string): Promise<Comment[]> {

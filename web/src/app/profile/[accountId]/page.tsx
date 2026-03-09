@@ -261,6 +261,7 @@ export default function ProfilePage() {
   }
 
   const displayName = profileData.display_name as string | null;
+  const isProfilePremium = profileData.is_premium as boolean;
   const nearAccountId = profileData.near_account_id as string | null;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
@@ -284,25 +285,46 @@ export default function ProfilePage() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
           {/* Avatar + info row */}
           <div className="flex items-center gap-4 sm:gap-6 min-w-0 flex-1">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={displayName || accountId}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-white/[0.08] shrink-0"
-              />
-            ) : (
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white shrink-0">
-                {(displayName || accountId).charAt(0).toUpperCase()}
-              </div>
-            )}
+            <div className="flex flex-col items-center gap-1.5 shrink-0">
+              {isProfilePremium ? (
+                <div className="diamond-avatar-ring">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={displayName || accountId}
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white">
+                      {(displayName || accountId).charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              ) : avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={displayName || accountId}
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-white/[0.08]"
+                />
+              ) : (
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white">
+                  {(displayName || accountId).charAt(0).toUpperCase()}
+                </div>
+              )}
+              {isProfilePremium && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 border border-cyan-500/20 diamond-shimmer">
+                  ✦ Premium
+                </span>
+              )}
+            </div>
 
             <div className="min-w-0 flex-1">
               {displayName && (
-                <h1 className="text-xl sm:text-2xl font-bold text-white truncate">
+                <h1 className={`text-xl sm:text-2xl font-bold truncate ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
                   {displayName}
                 </h1>
               )}
-              <p className={`${displayName ? "text-slate-400 text-sm" : "text-xl sm:text-2xl font-bold text-white"} truncate`}>
+              <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate`}>
                 {accountId}
               </p>
               {bio && (
@@ -325,7 +347,7 @@ export default function ProfilePage() {
                     <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                     </svg>
-                    @{twitterHandle}
+                    {twitterHandle}
                   </a>
                 )}
               </div>

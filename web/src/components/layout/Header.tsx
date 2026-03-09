@@ -80,6 +80,7 @@ export function Header() {
           <Link href="/" className={navLinkClass}>Feed</Link>
           <Link href="/requests" className={navLinkClass}>Requests</Link>
           <Link href="/upload" className={navLinkClass}>Upload</Link>
+          <Link href="/premium" className={`${navLinkClass} diamond-shimmer`}>Premium</Link>
           <Link href="/cabinet" className={navLinkClass}>
             Cabinet
             {unreadCount > 0 && (
@@ -201,6 +202,9 @@ export function Header() {
         </Link>
         <Link href="/upload" className="text-slate-400 hover:text-white transition-colors py-1">
           Upload
+        </Link>
+        <Link href="/premium" className="diamond-shimmer transition-colors py-1">
+          ✦
         </Link>
         <Link href="/cabinet" className="relative text-slate-400 hover:text-white transition-colors py-1">
           Cabinet

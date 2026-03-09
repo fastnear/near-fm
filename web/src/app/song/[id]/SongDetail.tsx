@@ -899,12 +899,13 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                           )}
                           <Link
                             href={`/profile/${comment.author_account_id}`}
-                            className="text-sm text-slate-300 hover:text-purple-400 transition-colors font-medium"
+                            className={`text-sm transition-colors font-medium ${comment.author_is_premium ? "diamond-shimmer" : "text-slate-300 hover:text-purple-400"}`}
                           >
                             {(() => {
                               const name = comment.author_display_name || comment.author_account_id;
                               return name.length > 25 ? `${name.slice(0, 12)}...${name.slice(-10)}` : name;
                             })()}
+                            {comment.author_is_premium && " ✦"}
                           </Link>
                           <span className="text-xs text-slate-600">
                             {new Date(comment.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}

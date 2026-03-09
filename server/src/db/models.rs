@@ -99,6 +99,7 @@ pub struct Song {
     pub is_hidden: bool,
     pub is_deleted: bool,
     pub fulfills_request_id: Option<i32>,
+    pub diamond_like_count: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -137,6 +138,7 @@ pub struct SongWithUploader {
     pub is_hidden: bool,
     pub is_deleted: bool,
     pub fulfills_request_id: Option<i32>,
+    pub diamond_like_count: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub uploader_account_id: String,
@@ -185,6 +187,7 @@ impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
             is_hidden: row.try_get("is_hidden")?,
             is_deleted: row.try_get("is_deleted")?,
             fulfills_request_id: row.try_get("fulfills_request_id")?,
+            diamond_like_count: row.try_get("diamond_like_count")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
             uploader_account_id: row.try_get("uploader_account_id")?,

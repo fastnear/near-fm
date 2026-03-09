@@ -31,6 +31,7 @@ pub struct UserProfileResponse {
     pub active_bounties_total_yocto: String,
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
+    pub is_premium: bool,
     pub created_at: String,
     pub songs: Vec<SongWithUploader>,
 }
@@ -128,6 +129,7 @@ pub async fn get_profile(
         active_bounties_total_yocto,
         bio: user.bio,
         twitter_handle: user.twitter_handle,
+        is_premium: user.premium_until.map_or(false, |u| u > chrono::Utc::now()),
         created_at: user.created_at.to_rfc3339(),
         songs,
     }))

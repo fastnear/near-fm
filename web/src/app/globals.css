@@ -287,3 +287,63 @@ input[type="range"]::-moz-range-thumb {
   color: white;
 }
 
+/* ── Diamond like golden shimmer ───────────── */
+
+@keyframes diamond-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.diamond-shimmer {
+  background: linear-gradient(90deg, #60a5fa, #22d3ee, #a78bfa, #22d3ee, #60a5fa);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: diamond-shimmer 3s linear infinite;
+}
+
+.diamond-shimmer-icon {
+  animation: diamond-shimmer-color 3s linear infinite;
+}
+
+@keyframes diamond-shimmer-color {
+  0% { color: #60a5fa; filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.5)); }
+  33% { color: #22d3ee; filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.5)); }
+  66% { color: #a78bfa; filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.5)); }
+  100% { color: #60a5fa; filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.5)); }
+}
+
+@keyframes diamond-border-spin {
+  0% { --border-angle: 0deg; }
+  100% { --border-angle: 360deg; }
+}
+
+.diamond-avatar-ring {
+  position: relative;
+  border-radius: 9999px;
+  padding: 3px;
+  background: conic-gradient(from var(--border-angle, 0deg), #60a5fa, #22d3ee, #a78bfa, #60a5fa);
+  animation: diamond-border-spin 3s linear infinite;
+}
+
+@supports not (animation-timeline: auto) {
+  .diamond-avatar-ring {
+    background: conic-gradient(from 0deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa);
+    animation: diamond-avatar-rotate 3s linear infinite;
+  }
+}
+
+@keyframes diamond-avatar-rotate {
+  0% { background: conic-gradient(from 0deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa); }
+  25% { background: conic-gradient(from 90deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa); }
+  50% { background: conic-gradient(from 180deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa); }
+  75% { background: conic-gradient(from 270deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa); }
+  100% { background: conic-gradient(from 360deg, #60a5fa, #22d3ee, #a78bfa, #60a5fa); }
+}
+
+.diamond-avatar-ring > img,
+.diamond-avatar-ring > div {
+  border-radius: 9999px;
+}
+

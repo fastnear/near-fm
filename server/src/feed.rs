@@ -12,8 +12,8 @@ use std::time::Duration;
 ///
 ///   Multipliers: newbie(×0.5), no-genre(×0.7), no-lyrics(×0.7/0.85), no-cover(×0.7)
 ///
-///   effective_age = max(hours_age - 168, 0)   (no decay in first 7 days)
-///   score = base × multipliers / (effective_age + 2)^1.8
+///   effective_days = max((hours_age - 168) / 24, 0)   (no decay in first 7 days)
+///   score = base × multipliers / (effective_days + 1)^0.5  (gradual fade)
 pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
     let result = sqlx::query(
         r#"
@@ -25,6 +25,7 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                 s.id,
                 (
                     COALESCE(v_agg.weighted_upvotes, 0)
+                    + COALESCE(dl_agg.diamond_weight, 0)
                     - COALESCE(v_agg.weighted_downvotes, 0)
                     + LOG(GREATEST(s.play_count, 1)::NUMERIC) * 2
                     + LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 9
@@ -41,8 +42,8 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                   END
                 * CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END
                 / POWER(
-                    GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 168, 0) + 2,
-                    1.8
+                    GREATEST(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0 - 168, 0) / 24.0 + 1,
+                    0.5
                   )
                 AS new_score
             FROM songs s
@@ -62,6 +63,10 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
                 JOIN users vu ON vu.id = v.user_id
                 GROUP BY v.song_id
             ) v_agg ON v_agg.song_id = s.id
+            LEFT JOIN (
+                SELECT song_id, COUNT(*) * 7.0 AS diamond_weight
+                FROM diamond_likes GROUP BY song_id
+            ) dl_agg ON dl_agg.song_id = s.id
             WHERE s.is_deleted = FALSE
               AND s.is_hidden = FALSE
         ) sub

@@ -277,11 +277,21 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   }, [signInModal]);
 
   // Connect wallet + sign message for API auth (NEAR sign-in flow)
-  const connectAndSignIn = useCallback(() => {
+  const connectAndSignIn = useCallback(async () => {
+    if (wallet && accountId) {
+      // Wallet already connected — just re-authenticate with API
+      try {
+        await doApiAuth(wallet, accountId);
+      } catch (e) {
+        console.error("Re-auth with connected wallet failed:", e);
+        setSignInPending(true);
+      }
+      return;
+    }
     pendingAuthRef.current = true;
     sessionStorage.setItem("nearfm_pending_auth", "1");
     signInModal?.show();
-  }, [signInModal]);
+  }, [signInModal, wallet, accountId, doApiAuth]);
 
   // Complete sign in with already-connected wallet (should be called from user gesture)
   const completeSignIn = useCallback(async (): Promise<boolean> => {

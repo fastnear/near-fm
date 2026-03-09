@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Song } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
-import { voteSong, getUserVote } from "@/lib/api";
+import { voteSong, getUserVote, diamondLikeSong, getDiamondLikers } from "@/lib/api";
 
 interface Props {
   song: Song;
   compact?: boolean;
 }
 
-// Thumbs up SVG (outline when inactive, filled when active)
 function ThumbUp({ filled, className }: { filled: boolean; className?: string }) {
   return filled ? (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -23,7 +25,6 @@ function ThumbUp({ filled, className }: { filled: boolean; className?: string })
   );
 }
 
-// Thumbs down SVG
 function ThumbDown({ filled, className }: { filled: boolean; className?: string }) {
   return filled ? (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
@@ -36,12 +37,107 @@ function ThumbDown({ filled, className }: { filled: boolean; className?: string 
   );
 }
 
+function PortalTooltip({
+  anchorRef,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  children: React.ReactNode;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.top + window.scrollY,
+      left: rect.left + rect.width / 2 + window.scrollX,
+    });
+  }, [anchorRef]);
+
+  if (!pos) return null;
+
+  return createPortal(
+    <div
+      style={{ position: "absolute", top: pos.top, left: pos.left, transform: "translate(-50%, -100%)" }}
+      className="z-[9999] pointer-events-auto"
+    >
+      <div className="mb-2">{children}</div>
+    </div>,
+    document.body
+  );
+}
+
+function DiamondTooltipContent({
+  songUuid,
+  diamondLikeCount,
+  onClick,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  songUuid: string;
+  diamondLikeCount: number;
+  onClick: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  const [likers, setLikers] = useState<{ account_id: string; display_name: string | null }[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!loaded && diamondLikeCount > 0) {
+      setLoaded(true);
+      getDiamondLikers(songUuid).then(setLikers).catch(() => {});
+    }
+  }, [loaded, songUuid, diamondLikeCount]);
+
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="px-3 py-2 rounded-lg bg-slate-900/95 border border-white/10 text-xs text-slate-300 whitespace-nowrap shadow-xl cursor-pointer hover:border-cyan-400/30 transition-colors"
+    >
+      <div className="font-medium mb-1 diamond-shimmer">Diamond likes</div>
+      {likers.length > 0 && (
+        <div className="space-y-0.5">
+          {likers.map((l) => (
+            <Link
+              key={l.account_id}
+              href={`/profile/${l.account_id}`}
+              className="block text-cyan-300 hover:text-cyan-200 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              ✦ {l.display_name || l.account_id}
+            </Link>
+          ))}
+        </div>
+      )}
+      <div className="text-[10px] text-slate-500 mt-1 border-t border-white/10 pt-1">
+        Learn about Premium →
+      </div>
+    </div>
+  );
+}
+
 export function VoteButtons({ song, compact }: Props) {
-  const { isAuthenticated, promptSignIn } = useAuth();
+  const router = useRouter();
+  const { isAuthenticated, isPremium, promptSignIn } = useAuth();
   const [upvotes, setUpvotes] = useState(song.upvotes);
   const [downvotes, setDownvotes] = useState(song.downvotes);
   const [userVote, setUserVote] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [diamondLikeCount, setDiamondLikeCount] = useState(song.diamond_like_count || 0);
+  const [userHasDiamondLiked, setUserHasDiamondLiked] = useState(false);
+  const [diamondLoading, setDiamondLoading] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+  const tooltipTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const panelTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const didHold = useRef(false);
+  const diamondAnchorRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isAuthenticated && song.uuid) {
@@ -50,69 +146,255 @@ export function VoteButtons({ song, compact }: Props) {
           setUserVote(r.user_vote);
           setUpvotes(r.upvotes);
           setDownvotes(r.downvotes);
+          setDiamondLikeCount(r.diamond_like_count);
+          setUserHasDiamondLiked(r.user_has_diamond_liked);
         })
         .catch(() => {});
     }
   }, [isAuthenticated, song.uuid]);
 
-  const handleVote = async (value: 1 | -1) => {
-    if (!isAuthenticated) {
-      promptSignIn();
-      return;
-    }
+  const handleVote = useCallback(async (value: 1 | -1) => {
+    if (!isAuthenticated) { promptSignIn(); return; }
     if (loading) return;
     setLoading(true);
     try {
-      // Toggle: if already voted this way, remove the vote
       const sendValue = userVote === value ? 0 : value;
       const result = await voteSong(song.uuid, sendValue as 1 | -1 | 0);
       setUpvotes(result.upvotes);
       setDownvotes(result.downvotes);
       setUserVote(result.user_vote);
+      setDiamondLikeCount(result.diamond_like_count);
+      setUserHasDiamondLiked(result.user_has_diamond_liked);
     } catch (e) {
       console.error("Vote failed:", e);
     }
     setLoading(false);
-  };
+  }, [isAuthenticated, loading, userVote, song.uuid, promptSignIn]);
 
-  const net = upvotes - downvotes;
+  const handleDiamondLike = useCallback(async () => {
+    if (!isAuthenticated) { promptSignIn(); return; }
+    if (!isPremium) { router.push("/premium"); return; }
+    if (diamondLoading) return;
+    setDiamondLoading(true);
+    try {
+      const result = await diamondLikeSong(song.uuid);
+      setDiamondLikeCount(result.diamond_like_count);
+      setUserHasDiamondLiked(result.user_has_diamond_liked);
+      // Also refresh vote counts since diamond like changes net score display
+      getUserVote(song.uuid).then((r) => {
+        setUpvotes(r.upvotes);
+        setDownvotes(r.downvotes);
+      }).catch(() => {});
+    } catch (e) {
+      console.error("Diamond like failed:", e);
+    }
+    setDiamondLoading(false);
+  }, [isAuthenticated, isPremium, diamondLoading, song.uuid, promptSignIn, router]);
 
+  const handleTooltipEnter = useCallback(() => {
+    clearTimeout(tooltipTimeout.current);
+    setShowTooltip(true);
+  }, []);
+  const handleTooltipLeave = useCallback(() => {
+    tooltipTimeout.current = setTimeout(() => setShowTooltip(false), 200);
+  }, []);
+
+  const openPanel = useCallback(() => setShowPanel(true), []);
+  const handlePanelEnter = useCallback(() => {
+    clearTimeout(panelTimeout.current);
+    clearTimeout(hoverTimer.current);
+    setShowPanel(true);
+  }, []);
+  const handlePanelLeave = useCallback(() => {
+    panelTimeout.current = setTimeout(() => setShowPanel(false), 300);
+  }, []);
+
+  // Full mode premium button: hold 0.3s OR hover 0.5s = open panel
+  const handleBtnMouseDown = useCallback(() => {
+    didHold.current = false;
+    holdTimer.current = setTimeout(() => {
+      didHold.current = true;
+      openPanel();
+    }, 300);
+  }, [openPanel]);
+
+  const handleBtnMouseUp = useCallback(() => {
+    clearTimeout(holdTimer.current);
+    if (!didHold.current) {
+      handleVote(1);
+    }
+  }, [handleVote]);
+
+  const handleBtnMouseEnter = useCallback(() => {
+    clearTimeout(panelTimeout.current);
+    hoverTimer.current = setTimeout(() => {
+      openPanel();
+    }, 500);
+  }, [openPanel]);
+
+  const handleBtnMouseLeave = useCallback(() => {
+    clearTimeout(holdTimer.current);
+    clearTimeout(hoverTimer.current);
+    panelTimeout.current = setTimeout(() => setShowPanel(false), 300);
+  }, []);
+
+  const net = upvotes + diamondLikeCount - downvotes;
+  const hasDiamondLikes = diamondLikeCount > 0;
+
+  // ── Compact mode (SongCard) ──
   if (compact) {
+    const showDiamondButton = isPremium || hasDiamondLikes;
+
     return (
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => handleVote(1)}
-          className={`p-1.5 rounded-lg transition-all duration-200 ${
-            userVote === 1
-              ? "text-[#00ec97] bg-[#00ec97]/15"
-              : "text-slate-500 hover:text-[#00ec97] hover:bg-[#00ec97]/10"
-          }`}
-          disabled={loading}
-        >
-          <ThumbUp filled={userVote === 1} className="w-5 h-5" />
-        </button>
+      <div className="flex items-center">
+        {showDiamondButton ? (
+          <>
+            <button
+              ref={diamondAnchorRef}
+              onClick={isPremium ? handleDiamondLike : () => handleVote(1)}
+              onMouseEnter={hasDiamondLikes ? handleTooltipEnter : undefined}
+              onMouseLeave={hasDiamondLikes ? handleTooltipLeave : undefined}
+              className="p-1 rounded-lg transition-all duration-200 diamond-shimmer-icon hover:scale-110"
+              disabled={diamondLoading}
+            >
+              <ThumbUp filled={true} className="w-[18px] h-[18px]" />
+            </button>
+            {showTooltip && hasDiamondLikes && (
+              <PortalTooltip anchorRef={diamondAnchorRef}>
+                <DiamondTooltipContent
+                  songUuid={song.uuid}
+                  diamondLikeCount={diamondLikeCount}
+                  onClick={() => router.push("/premium")}
+                  onMouseEnter={handleTooltipEnter}
+                  onMouseLeave={handleTooltipLeave}
+                />
+              </PortalTooltip>
+            )}
+          </>
+        ) : (
+          <button
+            onClick={() => handleVote(1)}
+            className={`p-1 rounded-lg transition-all duration-200 ${
+              userVote === 1
+                ? "text-[#00ec97] bg-[#00ec97]/15"
+                : "text-slate-500 hover:text-[#00ec97] hover:bg-[#00ec97]/10"
+            }`}
+            disabled={loading}
+          >
+            <ThumbUp filled={userVote === 1} className="w-[18px] h-[18px]" />
+          </button>
+        )}
+
         <span
-          className={`text-sm font-semibold min-w-[24px] text-center tabular-nums ${
-            net > 0 ? "text-[#00ec97]" : net < 0 ? "text-rose-400" : "text-slate-500"
+          className={`text-sm font-semibold min-w-[20px] text-center tabular-nums ${
+            hasDiamondLikes
+              ? "diamond-shimmer"
+              : net > 0
+                ? "text-[#00ec97]"
+                : net < 0
+                  ? "text-rose-400"
+                  : "text-slate-500"
           }`}
         >
           {net}
         </span>
+
         <button
           onClick={() => handleVote(-1)}
-          className={`p-1.5 rounded-lg transition-all duration-200 ${
+          className={`p-1 rounded-lg transition-all duration-200 ${
             userVote === -1
               ? "text-rose-400 bg-rose-400/15"
               : "text-slate-500 hover:text-rose-400 hover:bg-rose-400/10"
           }`}
           disabled={loading}
         >
-          <ThumbDown filled={userVote === -1} className="w-5 h-5" />
+          <ThumbDown filled={userVote === -1} className="w-[18px] h-[18px]" />
         </button>
       </div>
     );
   }
 
+  // ── Full mode (SongDetail) ──
+
+  // Premium user: diamond-styled button + hold/hover panel
+  if (isPremium) {
+    return (
+      <div className="flex items-center gap-3">
+        <div className="relative">
+          {/* Main button: diamond-styled, quick click = like, hold/hover = panel */}
+          <button
+            onMouseDown={handleBtnMouseDown}
+            onMouseUp={handleBtnMouseUp}
+            onMouseEnter={handleBtnMouseEnter}
+            onMouseLeave={handleBtnMouseLeave}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 select-none ${
+              userVote === 1 || userHasDiamondLiked
+                ? "bg-cyan-400/15 border border-cyan-400/20"
+                : "bg-white/[0.04] border border-white/[0.06] hover:border-cyan-400/20 hover:bg-cyan-400/10"
+            }`}
+            disabled={loading && diamondLoading}
+          >
+            <span className="diamond-shimmer-icon">
+              <ThumbUp filled={true} className="w-5 h-5" />
+            </span>
+            <span className={hasDiamondLikes ? "diamond-shimmer" : "text-slate-400"}>{upvotes + diamondLikeCount}</span>
+          </button>
+
+          {/* Panel: diamond like + regular like */}
+          {showPanel && (
+            <div
+              className="absolute top-full left-0 mt-1.5 z-50 bg-slate-900/95 border border-white/10 rounded-xl shadow-xl p-1.5 space-y-1"
+              onMouseEnter={handlePanelEnter}
+              onMouseLeave={handlePanelLeave}
+            >
+              <button
+                onClick={() => { handleDiamondLike(); setShowPanel(false); }}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 w-full whitespace-nowrap ${
+                  userHasDiamondLiked
+                    ? "bg-cyan-400/10 text-cyan-300"
+                    : "text-slate-300 hover:bg-cyan-400/10 hover:text-cyan-300"
+                }`}
+                disabled={diamondLoading}
+              >
+                <span className="diamond-shimmer-icon">
+                  <ThumbUp filled={true} className="w-4 h-4" />
+                </span>
+                Boost with Diamond Like
+              </button>
+              <button
+                onClick={() => { handleVote(1); setShowPanel(false); }}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 w-full whitespace-nowrap ${
+                  userVote === 1
+                    ? "text-[#00ec97] bg-[#00ec97]/10"
+                    : "text-slate-400 hover:text-[#00ec97] hover:bg-[#00ec97]/10"
+                }`}
+                disabled={loading}
+              >
+                <ThumbUp filled={userVote === 1} className="w-4 h-4" />
+                Regular like
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Downvote */}
+        <button
+          onClick={() => handleVote(-1)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+            userVote === -1
+              ? "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+              : "bg-white/[0.04] text-slate-400 border border-white/[0.06] hover:text-rose-400 hover:border-rose-500/20 hover:bg-rose-500/10"
+          }`}
+          disabled={loading}
+        >
+          <ThumbDown filled={userVote === -1} className="w-5 h-5" />
+          {downvotes}
+        </button>
+      </div>
+    );
+  }
+
+  // Non-premium user: standard layout
   return (
     <div className="flex items-center gap-3">
       <button
@@ -125,7 +407,7 @@ export function VoteButtons({ song, compact }: Props) {
         disabled={loading}
       >
         <ThumbUp filled={userVote === 1} className="w-5 h-5" />
-        {upvotes}
+        <span className={hasDiamondLikes ? "diamond-shimmer" : ""}>{upvotes}</span>
       </button>
       <button
         onClick={() => handleVote(-1)}

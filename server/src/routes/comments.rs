@@ -23,6 +23,7 @@ pub struct CommentRow {
     pub author_account_id: String,
     pub author_display_name: Option<String>,
     pub author_avatar_url: Option<String>,
+    pub author_is_premium: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,7 +75,8 @@ pub async fn list_comments(
         r#"SELECT c.id, c.body, c.is_hidden, c.created_at,
                   u.slug AS author_account_id,
                   u.display_name AS author_display_name,
-                  u.avatar_url AS author_avatar_url
+                  u.avatar_url AS author_avatar_url,
+                  COALESCE(u.premium_until > NOW(), FALSE) AS author_is_premium
            FROM comments c
            JOIN users u ON u.id = c.user_id
            JOIN songs s ON s.id = c.song_id
@@ -143,7 +145,8 @@ pub async fn create_comment(
            RETURNING id, body, is_hidden, created_at,
                      (SELECT slug FROM users WHERE id = $2) AS author_account_id,
                      (SELECT display_name FROM users WHERE id = $2) AS author_display_name,
-                     (SELECT avatar_url FROM users WHERE id = $2) AS author_avatar_url"#,
+                     (SELECT avatar_url FROM users WHERE id = $2) AS author_avatar_url,
+                     COALESCE((SELECT premium_until > NOW() FROM users WHERE id = $2), FALSE) AS author_is_premium"#,
     )
     .bind(song_id)
     .bind(claims.user_id)

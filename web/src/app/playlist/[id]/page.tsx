@@ -17,7 +17,7 @@ export default function PlaylistPage() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const { currentSong, isPlaying, togglePlay } = useAudioPlayer();
+  const { currentSong, isPlaying, togglePlay, playFromFeed, setQueue, next, previous } = useAudioPlayer();
 
   useEffect(() => {
     if (!uuid) return;
@@ -98,6 +98,34 @@ export default function PlaylistPage() {
           {playlist.description && (
             <p className="text-sm text-slate-400 mb-4 whitespace-pre-wrap">{playlist.description}</p>
           )}
+
+          {songs.length > 0 && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  const isPlayingFromThisPlaylist = currentSong && songs.some(s => s.uuid === currentSong.uuid);
+                  if (isPlayingFromThisPlaylist && isPlaying) {
+                    togglePlay(currentSong!);
+                  } else if (isPlayingFromThisPlaylist) {
+                    togglePlay(currentSong!);
+                  } else {
+                    playFromFeed(songs[0], songs);
+                  }
+                }}
+                className="w-12 h-12 rounded-full bg-purple-500 hover:bg-purple-400 transition flex items-center justify-center shadow-lg shadow-purple-500/25"
+              >
+                {currentSong && songs.some(s => s.uuid === currentSong.uuid) && isPlaying ? (
+                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -116,7 +144,14 @@ export default function PlaylistPage() {
                 }`}
               >
                 <button
-                  onClick={() => togglePlay(song)}
+                  onClick={() => {
+                    const isActive = currentSong?.uuid === song.uuid;
+                    if (isActive) {
+                      togglePlay(song);
+                    } else {
+                      playFromFeed(song, songs);
+                    }
+                  }}
                   className="w-8 h-8 flex items-center justify-center shrink-0 text-slate-400 hover:text-white transition"
                 >
                   {isActive && isPlaying ? (

@@ -26,6 +26,7 @@ function clearCookie(name: string) {
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
+  isPremium: boolean;
   loading: boolean;
   signInWithGoogle: () => void;
   promptSignIn: () => void;
@@ -38,6 +39,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   isAuthenticated: false,
+  isPremium: false,
   loading: true,
   signInWithGoogle: () => {},
   promptSignIn: () => {},
@@ -53,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [showSignInModal, setShowSignInModal] = useState(false);
 
   const isAuthenticated = !!user;
+  const isPremium = !!user?.is_premium;
 
   const fetchUser = useCallback(async () => {
     if (!getCookie("nearfm_session")) {
@@ -126,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isAuthenticated,
+        isPremium,
         loading,
         signInWithGoogle,
         promptSignIn,
