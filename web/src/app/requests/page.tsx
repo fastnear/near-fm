@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { SongRequest } from "@/types";
 import { getRequests } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNearWallet } from "@/contexts/NearWalletContext";
 
 type Tab = "open" | "awarded" | "all";
 type SortOption = "newest" | "highest_bounty";
@@ -40,7 +41,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function RequestsPage() {
   const { user } = useAuth();
-  const accountId = user?.slug;
+  const { accountId: nearAccountId, connectWallet } = useNearWallet();
   const [requests, setRequests] = useState<SongRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("open");
@@ -95,13 +96,20 @@ export default function RequestsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <h1 className="text-2xl font-bold">Song Requests</h1>
-        {accountId && (
+        {nearAccountId ? (
           <Link
             href="/requests/new"
             className="inline-flex items-center justify-center px-5 py-2.5 btn-primary rounded-xl font-medium transition text-sm"
           >
             + Create Request
           </Link>
+        ) : (
+          <button
+            onClick={connectWallet}
+            className="inline-flex items-center justify-center px-5 py-2.5 btn-primary rounded-xl font-medium transition text-sm"
+          >
+            + Create Request
+          </button>
         )}
       </div>
 

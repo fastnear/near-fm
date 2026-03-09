@@ -26,8 +26,8 @@ function yoctoToNear(yocto: string): string {
 }
 
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
-  const { isAuthenticated, signInWithGoogle } = useAuth();
-  const { accountId, linkWallet, callFunction, viewMethod } = useNearWallet();
+  const { isAuthenticated } = useAuth();
+  const { accountId, linkWallet, connectWallet, callFunction, viewMethod } = useNearWallet();
   const { showToast } = useToast();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -47,8 +47,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
   }, [accountId, showModal, viewMethod]);
 
   const handleTip = async (amountNear: string) => {
-    if (!isAuthenticated) { signInWithGoogle(); return; }
-    if (!accountId) { linkWallet(); return; }
+    if (!accountId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
 
     setLoading(true);
     const toastId = showToast({ message: `Sending ${amountNear} NEAR tip...`, type: "loading", id: "tip" });
@@ -138,8 +137,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     <div className="relative">
       <button
         onClick={() => {
-          if (!isAuthenticated) { signInWithGoogle(); return; }
-          if (!accountId) { linkWallet(); return; }
+          if (!accountId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
           setShowModal(!showModal);
         }}
         className={compact

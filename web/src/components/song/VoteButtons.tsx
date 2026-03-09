@@ -37,7 +37,7 @@ function ThumbDown({ filled, className }: { filled: boolean; className?: string 
 }
 
 export function VoteButtons({ song, compact }: Props) {
-  const { isAuthenticated, signInWithGoogle } = useAuth();
+  const { isAuthenticated, promptSignIn } = useAuth();
   const [upvotes, setUpvotes] = useState(song.upvotes);
   const [downvotes, setDownvotes] = useState(song.downvotes);
   const [userVote, setUserVote] = useState<number | null>(null);
@@ -57,7 +57,7 @@ export function VoteButtons({ song, compact }: Props) {
 
   const handleVote = async (value: 1 | -1) => {
     if (!isAuthenticated) {
-      signInWithGoogle();
+      promptSignIn();
       return;
     }
     if (loading) return;

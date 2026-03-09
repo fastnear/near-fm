@@ -35,7 +35,7 @@ export function AudioPlayer() {
     queue,
   } = useAudioPlayer();
 
-  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { accountId } = useNearWallet();
   const userSlug = user?.slug;
   const [copied, setCopied] = useState(false);

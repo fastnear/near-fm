@@ -163,7 +163,7 @@ function FeedPageInner() {
             )}
             <span className="hidden sm:inline">AI Radio</span>
           </button>
-          <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); }} isAuthenticated={!!currentUser} />
+          <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); setGenreSlug(undefined); setLangCode(undefined); }} isAuthenticated={!!currentUser} />
         </div>
         <FeedFilters
           languageId={languageId}

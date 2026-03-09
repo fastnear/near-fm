@@ -139,13 +139,15 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playSong = useCallback(
-    (song: Song) => {
+    (song: Song, { skipHistory = false }: { skipHistory?: boolean } = {}) => {
       const audio = audioRef.current;
       if (!audio) return;
 
-      const cur = currentSongRef.current;
-      if (cur) {
-        setHistory((h) => [cur, ...h.slice(0, 49)]);
+      if (!skipHistory) {
+        const cur = currentSongRef.current;
+        if (cur) {
+          setHistory((h) => [cur, ...h.slice(0, 49)]);
+        }
       }
 
       audio.src = song.audio_url;
@@ -318,7 +320,7 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       if (cur) {
         setQueue((q) => [cur, ...q]);
       }
-      playSong(prevSong);
+      playSong(prevSong, { skipHistory: true });
     } else if (audio) {
       audio.currentTime = 0;
     }

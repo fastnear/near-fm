@@ -28,6 +28,9 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   signInWithGoogle: () => void;
+  promptSignIn: () => void;
+  showSignInModal: boolean;
+  closeSignInModal: () => void;
   signOut: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -37,6 +40,9 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   loading: true,
   signInWithGoogle: () => {},
+  promptSignIn: () => {},
+  showSignInModal: false,
+  closeSignInModal: () => {},
   signOut: () => {},
   refreshUser: async () => {},
 });
@@ -44,6 +50,7 @@ const AuthContext = createContext<AuthContextType>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showSignInModal, setShowSignInModal] = useState(false);
 
   const isAuthenticated = !!user;
 
@@ -89,6 +96,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = `${API_URL}/api/auth/google`;
   }, []);
 
+  const promptSignIn = useCallback(() => {
+    setShowSignInModal(true);
+  }, []);
+
+  const closeSignInModal = useCallback(() => {
+    setShowSignInModal(false);
+  }, []);
+
   const signOut = useCallback(async () => {
     // Clear wallet link on server before clearing cookie
     try {
@@ -113,6 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated,
         loading,
         signInWithGoogle,
+        promptSignIn,
+        showSignInModal,
+        closeSignInModal,
         signOut,
         refreshUser,
       }}

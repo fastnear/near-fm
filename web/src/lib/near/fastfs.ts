@@ -167,12 +167,13 @@ export async function computeFileHash(content: Uint8Array): Promise<string> {
 
 /**
  * Construct the FastFS URL for a file.
+ * Uses main.fastfs.io path-based format to avoid SSL/DNS issues with subdomains.
  */
 export function getFastFSUrl(
   accountId: string,
   relativePath: string
 ): string {
-  return `https://${accountId}.fastfs.io/${FASTFS_CONTRACT}/${relativePath}`;
+  return `https://main.fastfs.io/${accountId}/${FASTFS_CONTRACT}/${relativePath}`;
 }
 
 /**

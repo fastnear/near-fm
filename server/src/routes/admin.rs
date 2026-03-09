@@ -565,7 +565,7 @@ pub struct AdminUserRow {
     pub reputation_score: f64,
     pub total_uploads: i32,
     pub total_tips_received_yocto: String,
-    pub created_at: chrono::NaiveDateTime,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn admin_list_users(

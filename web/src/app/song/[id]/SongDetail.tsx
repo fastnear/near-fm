@@ -10,6 +10,13 @@ import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getRadioPlaylist } from "@/lib/api";
+import {
+  prepareFastFSUpload,
+  uploadToFastFS,
+  computeFileHash,
+  getFastFSUrl,
+  getRelativePath,
+} from "@/lib/near/fastfs";
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
@@ -36,9 +43,12 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
   const [playlistsLoaded, setPlaylistsLoaded] = useState(false);
   const [addedToPlaylist, setAddedToPlaylist] = useState<string | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
   const { currentSong, isPlaying, togglePlay, playMode, setPlayMode, next, previous, startRadio, queue } = useAudioPlayer();
-  const { user, isAuthenticated, signInWithGoogle } = useAuth();
-  const { accountId } = useNearWallet();
+  const { user, isAuthenticated, promptSignIn } = useAuth();
+  const { accountId, callFunction } = useNearWallet();
 
   // Track whether the user navigated here manually (should not auto-follow currentSong)
   // vs. the song changed automatically via radio/queue (should follow)
@@ -152,12 +162,36 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       language_id: song.language_id ?? undefined,
       category_id: song.category_id ?? undefined,
     });
+    setCoverFile(null);
+    setCoverPreview(null);
     setEditing(true);
+  };
+
+  const handleCoverSelect = (file: File) => {
+    setCoverFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setCoverPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
   };
 
   const saveEdit = async () => {
     setEditSaving(true);
     try {
+      let cover_image_url: string | undefined;
+
+      // Upload cover to FastFS if a new one was selected
+      if (coverFile && accountId) {
+        setCoverUploading(true);
+        const coverBuffer = await coverFile.arrayBuffer();
+        const coverBytes = new Uint8Array(coverBuffer);
+        const coverHash = await computeFileHash(coverBytes);
+        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
+        const coverParts = prepareFastFSUpload(coverRelPath, coverFile.type || "image/jpeg", coverBytes);
+        await uploadToFastFS((params) => callFunction(params), coverParts);
+        cover_image_url = getFastFSUrl(accountId, coverRelPath);
+        setCoverUploading(false);
+      }
+
       const result = await updateSong(song.uuid, {
         title: editForm.title.trim() || undefined,
         description: editForm.description.trim() || undefined,
@@ -166,11 +200,15 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
         genre_ids: editForm.genre_ids,
         language_id: editForm.language_id,
         category_id: editForm.category_id,
+        cover_image_url,
       });
       setSong(result.song);
+      setCoverFile(null);
+      setCoverPreview(null);
       setEditing(false);
     } catch (e) {
       console.error("Update failed:", e);
+      setCoverUploading(false);
     }
     setEditSaving(false);
   };
@@ -309,8 +347,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
             </div>
           )}
 
-          {/* Remove cover button */}
-          {canEdit && song.cover_image_url && (
+          {/* Remove cover button — admin only (authors cannot change cover once set) */}
+          {isAdmin && song.cover_image_url && (
             <button
               onClick={removeCover}
               className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-slate-400 hover:text-rose-400 transition-colors"
@@ -398,16 +436,52 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </select>
                 </div>
               </div>
+              {/* Cover image upload — only if song has no cover yet */}
+              {!song.cover_image_url && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Cover Image</label>
+                  {coverPreview ? (
+                    <div className="flex items-center gap-3">
+                      <img src={coverPreview} alt="Cover preview" className="w-20 h-20 rounded-xl object-cover ring-1 ring-white/[0.08]" />
+                      <button
+                        onClick={() => { setCoverFile(null); setCoverPreview(null); }}
+                        className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/[0.12] bg-white/[0.02] cursor-pointer hover:border-purple-500/30 hover:bg-purple-500/[0.04] transition-all">
+                      <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      </svg>
+                      <span className="text-sm text-slate-400">Add cover image</span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleCoverSelect(f);
+                        }}
+                      />
+                    </label>
+                  )}
+                  {coverFile && !accountId && (
+                    <p className="text-xs text-amber-400 mt-1">Connect NEAR wallet to upload cover image</p>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={saveEdit}
-                  disabled={editSaving}
+                  disabled={editSaving || coverUploading || (!!coverFile && !accountId)}
                   className="px-5 py-2 btn-primary rounded-xl text-sm disabled:opacity-50"
                 >
-                  {editSaving ? "Saving..." : "Save"}
+                  {coverUploading ? "Uploading cover..." : editSaving ? "Saving..." : "Save"}
                 </button>
                 <button
-                  onClick={() => setEditing(false)}
+                  onClick={() => { setEditing(false); setCoverFile(null); setCoverPreview(null); }}
                   className="px-5 py-2 btn-ghost rounded-xl text-sm"
                 >
                   Cancel
@@ -534,7 +608,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 <button
                   onClick={() => {
                     if (!isAuthenticated) {
-                      signInWithGoogle();
+                      promptSignIn();
                       return;
                     }
                     setShowReportForm(!showReportForm);
@@ -799,7 +873,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                     </div>
                 ) : (
                   <p className="text-sm text-slate-500 mb-4">
-                    <button onClick={signInWithGoogle} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.
+                    <button onClick={promptSignIn} className="text-purple-400 hover:text-purple-300 transition-colors">Sign in</button> to leave a comment.
                   </p>
                 )}
 

@@ -145,7 +145,9 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, []);
 
-  // Check if the function call access key has enough allowance
+  // Check if the function call access key has enough allowance.
+  // Uses the maximum allowance across all function call keys for the contract,
+  // because after reconnect the old depleted key may still exist on-chain.
   const checkAllowance = useCallback(async (accId: string) => {
     try {
       const res = await fetch(RPC_URL, {
@@ -165,17 +167,18 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       const json = await res.json();
       if (!json.result?.keys) return;
 
+      let maxAllowance = BigInt(-1);
       for (const key of json.result.keys) {
         const perm = key.access_key.permission;
         if (perm !== "FullAccess" && perm.FunctionCall?.receiver_id === CONTRACT_ID) {
           const allowance = BigInt(perm.FunctionCall.allowance);
-          if (allowance < MIN_ALLOWANCE) {
-            setLowAllowance(true);
-          } else {
-            setLowAllowance(false);
+          if (allowance > maxAllowance) {
+            maxAllowance = allowance;
           }
-          return;
         }
+      }
+      if (maxAllowance >= BigInt(0)) {
+        setLowAllowance(maxAllowance < MIN_ALLOWANCE);
       }
     } catch (e) {
       console.error("Failed to check key allowance:", e);
@@ -237,6 +240,10 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
           try {
             const w = await sel.wallet();
             setWallet(w);
+
+            // Re-check allowance on every wallet (re)connect
+            checkAllowance(accId);
+
             const shouldAuth = pendingAuthRef.current || sessionStorage.getItem("nearfm_pending_auth") === "1";
             if (shouldAuth) {
               pendingAuthRef.current = false;
