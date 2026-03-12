@@ -173,15 +173,23 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
 
       audioRef.current.addEventListener("timeupdate", () => {
         const a = audioRef.current!;
-        if (a.duration) {
+        const dur = isFinite(a.duration) && a.duration > 0
+          ? a.duration
+          : currentSongRef.current?.audio_duration_seconds || 0;
+        if (dur > 0) {
           setCurrentTime(a.currentTime);
-          setProgress((a.currentTime / a.duration) * 100);
+          setProgress((a.currentTime / dur) * 100);
           updatePositionState();
         }
       });
 
       audioRef.current.addEventListener("loadedmetadata", () => {
-        setDuration(audioRef.current!.duration);
+        const d = audioRef.current!.duration;
+        if (isFinite(d) && d > 0) {
+          setDuration(d);
+        } else if (currentSongRef.current?.audio_duration_seconds) {
+          setDuration(currentSongRef.current.audio_duration_seconds);
+        }
         updatePositionState();
       });
 
@@ -328,8 +336,12 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
 
   const seek = useCallback((percent: number) => {
     const audio = audioRef.current;
-    if (audio && audio.duration) {
-      audio.currentTime = (percent / 100) * audio.duration;
+    if (!audio) return;
+    const dur = isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : currentSongRef.current?.audio_duration_seconds || 0;
+    if (dur > 0) {
+      audio.currentTime = (percent / 100) * dur;
     }
   }, []);
 
