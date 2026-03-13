@@ -23,6 +23,7 @@ pub struct User {
     pub twitter_handle: Option<String>,
     pub premium_since: Option<DateTime<Utc>>,
     pub premium_until: Option<DateTime<Utc>>,
+    pub credit_balance: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -122,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/reorder", put(routes::playlists::reorder_playlist_songs))
         .route("/api/suno/generate", post(routes::suno::generate))
         .route("/api/suno/generate-lyrics", post(routes::suno::generate_lyrics))
+        .route("/api/credits/topup", post(routes::credits::topup))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,
@@ -271,6 +272,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
         // RSS feed
         .route("/feed/:feed_token", get(routes::rss::playlist_feed))
+        // Credits
+        .route("/api/credits/balance", get(routes::credits::balance))
+        .route("/api/credits/history", get(routes::credits::history))
         // Suno AI
         .route("/api/suno/status", get(routes::suno::status))
         .route("/api/suno/credits", get(routes::suno::credits))

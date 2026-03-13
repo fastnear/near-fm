@@ -58,6 +58,7 @@ pub struct UserResponse {
     pub reputation_score: String,
     pub auth_provider: String,
     pub near_account_id: Option<String>,
+    pub credit_balance: i32,
 }
 
 fn compute_premium(user: &crate::db::models::User) -> (bool, Option<String>) {
@@ -171,6 +172,7 @@ pub async fn verify(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
+            credit_balance: user.credit_balance,
         },
     });
 
@@ -450,6 +452,7 @@ pub struct MeResponse {
     pub premium_until: Option<String>,
     pub auth_provider: String,
     pub reputation_score: String,
+    pub credit_balance: i32,
 }
 
 /// GET /api/auth/me — get current authenticated user
@@ -483,6 +486,7 @@ pub async fn get_me(
         premium_until,
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
+        credit_balance: user.credit_balance,
     }))
 }
 
@@ -589,6 +593,7 @@ pub async fn link_wallet(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),
+            credit_balance: user.credit_balance,
         },
     });
 

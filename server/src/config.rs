@@ -17,6 +17,7 @@ pub struct Config {
     pub google_redirect_uri: String,
     pub frontend_url: String,
     pub suno_api_key: String,
+    pub outlayer_api_key: String,
 }
 
 impl Config {
@@ -75,6 +76,7 @@ impl Config {
             google_redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_default(),
             frontend_url: env::var("FRONTEND_URL").unwrap_or_else(|_| "https://near.fm".to_string()),
             suno_api_key: env::var("SUNO_API_KEY").unwrap_or_default(),
+            outlayer_api_key: env::var("OUTLAYER_API_KEY").unwrap_or_default(),
         }
     }
 

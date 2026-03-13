@@ -46,6 +46,7 @@ export interface AuthUser {
   premium_until: string | null;
   auth_provider: string;
   reputation_score: string;
+  credit_balance: number;
 }
 
 export async function verifyAuth(payload: {
@@ -741,4 +742,32 @@ export interface SunoLyricsResponse {
 
 export async function sunoLyricsStatus(taskId: string): Promise<SunoLyricsResponse> {
   return fetchApi(`/api/suno/lyrics-status?taskId=${encodeURIComponent(taskId)}`);
+}
+
+// ── Credits ──
+
+export async function creditTopup(checkKey: string, accountId: string): Promise<{
+  credits_added: number;
+  new_balance: number;
+}> {
+  return fetchApi("/api/credits/topup", {
+    method: "POST",
+    body: JSON.stringify({ check_key: checkKey, account_id: accountId }),
+  });
+}
+
+export async function creditBalance(): Promise<{ credit_balance: number }> {
+  return fetchApi("/api/credits/balance");
+}
+
+export interface TopupRecord {
+  token: string;
+  amount: string;
+  credits_added: number;
+  created_at: string;
+}
+
+export async function creditHistory(limit?: number): Promise<TopupRecord[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi(`/api/credits/history${params}`);
 }

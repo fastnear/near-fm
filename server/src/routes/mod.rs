@@ -7,5 +7,6 @@ pub mod reports;
 pub mod admin;
 pub mod comments;
 pub mod playlists;
+pub mod credits;
 pub mod rss;
 pub mod suno;
