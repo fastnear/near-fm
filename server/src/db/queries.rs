@@ -115,13 +115,14 @@ pub async fn create_song(
     language_id: Option<i32>,
     category_id: Option<i32>,
     fulfills_request_id: Option<i32>,
+    created_on_nearfm: bool,
 ) -> Result<Song, sqlx::Error> {
     sqlx::query_as::<_, Song>(
         r#"INSERT INTO songs
             (uuid, uploader_id, title, description, lyrics, ai_model,
              audio_url, audio_hash, audio_duration_seconds, audio_mime_type,
-             cover_image_url, language_id, category_id, fulfills_request_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             cover_image_url, language_id, category_id, fulfills_request_id, created_on_nearfm)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *"#,
     )
     .bind(uuid)
@@ -138,6 +139,7 @@ pub async fn create_song(
     .bind(language_id)
     .bind(category_id)
     .bind(fulfills_request_id)
+    .bind(created_on_nearfm)
     .fetch_one(pool)
     .await
 }

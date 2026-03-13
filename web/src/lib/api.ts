@@ -139,6 +139,7 @@ export async function createSong(data: {
   category_id?: number;
   fulfills_request_id?: number;
   genre_ids?: number[];
+  suno_task_id?: string;
 }): Promise<Song> {
   return fetchApi("/api/songs", {
     method: "POST",
@@ -552,6 +553,10 @@ export async function moderateComment(id: number, is_hidden: boolean): Promise<v
   });
 }
 
+export async function deleteComment(id: number): Promise<void> {
+  return fetchApi(`/api/comments/${id}`, { method: "DELETE" });
+}
+
 export async function toggleMuteUser(accountId: string, is_muted: boolean): Promise<void> {
   return fetchApi(`/api/admin/users/${accountId}/mute`, {
     method: "PATCH",
@@ -669,4 +674,71 @@ export async function addSongToPlaylist(playlistUuid: string, songUuid: string):
 
 export async function removeSongFromPlaylist(playlistUuid: string, songUuid: string): Promise<void> {
   return fetchApi(`/api/playlists/${playlistUuid}/songs/${songUuid}`, { method: "DELETE" });
+}
+
+export async function reorderPlaylistSongs(playlistUuid: string, songUuids: string[]): Promise<void> {
+  return fetchApi(`/api/playlists/${playlistUuid}/reorder`, {
+    method: "PUT",
+    body: JSON.stringify({ song_uuids: songUuids }),
+  });
+}
+
+// ── Suno AI ──
+
+export interface SunoGenerateParams {
+  prompt?: string;
+  style?: string;
+  title?: string;
+  lyrics?: string;
+  model?: string;
+  instrumental?: boolean;
+  customMode?: boolean;
+}
+
+export interface SunoSongVariant {
+  id: string;
+  audio_url: string | null;
+  stream_audio_url: string | null;
+  image_url: string | null;
+  title: string;
+  tags: string;
+  duration: number | null;
+  lyrics: string;
+}
+
+export interface SunoStatusResponse {
+  status: string;
+  songs: SunoSongVariant[];
+}
+
+export async function sunoGenerate(params: SunoGenerateParams): Promise<{ task_id: string }> {
+  return fetchApi("/api/suno/generate", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function sunoStatus(taskId: string): Promise<SunoStatusResponse> {
+  return fetchApi(`/api/suno/status?taskId=${encodeURIComponent(taskId)}`);
+}
+
+export async function sunoCredits(): Promise<{ credits: number }> {
+  return fetchApi("/api/suno/credits");
+}
+
+export async function sunoGenerateLyrics(prompt: string): Promise<{ task_id: string }> {
+  return fetchApi("/api/suno/generate-lyrics", {
+    method: "POST",
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export interface SunoLyricsResponse {
+  status: string;
+  title: string | null;
+  text: string | null;
+}
+
+export async function sunoLyricsStatus(taskId: string): Promise<SunoLyricsResponse> {
+  return fetchApi(`/api/suno/lyrics-status?taskId=${encodeURIComponent(taskId)}`);
 }

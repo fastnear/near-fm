@@ -69,6 +69,11 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
               {song.title}
             </h3>
           </Link>
+          {song.created_on_nearfm && (
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20 font-medium" title="Created on near.fm">
+              near.fm
+            </span>
+          )}
           {song.language_code && song.language_code !== "en" && langFlags[song.language_code] && (
             <span className="shrink-0 text-xs opacity-[0.65]" title={song.language_name || song.language_code}>
               {langFlags[song.language_code]}

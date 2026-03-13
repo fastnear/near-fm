@@ -24,6 +24,9 @@ mod validation;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: Arc<config::Config>,
+    pub http_client: reqwest::Client,
+    pub suno_cache: routes::suno::SunoTaskCache,
+    pub suno_lyrics_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, routes::suno::SunoLyricsCallbackData>>>,
 }
 
 #[tokio::main]
@@ -59,6 +62,9 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db,
         config: Arc::new(config.clone()),
+        http_client: reqwest::Client::new(),
+        suno_cache: routes::suno::new_task_cache(),
+        suno_lyrics_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     };
 
     // CORS
@@ -92,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
     let strict_routes = Router::new()
         .route("/api/tips", post(routes::tips::record_tip))
         .route("/api/songs/:uuid/comments", post(routes::comments::create_comment))
+        .route("/api/comments/:id", delete(routes::comments::delete_comment))
         .route("/api/requests/:uuid", patch(routes::requests::update_request))
         .layer(middleware::from_fn_with_state(
             strict_limiter,
@@ -112,6 +119,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
         .route("/api/playlists/:uuid/songs", post(routes::playlists::add_song_to_playlist))
         .route("/api/playlists/:uuid/songs/:song_uuid", delete(routes::playlists::remove_song_from_playlist))
+        .route("/api/playlists/:uuid/reorder", put(routes::playlists::reorder_playlist_songs))
+        .route("/api/suno/generate", post(routes::suno::generate))
+        .route("/api/suno/generate-lyrics", post(routes::suno::generate_lyrics))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,
@@ -261,6 +271,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
         // RSS feed
         .route("/feed/:feed_token", get(routes::rss::playlist_feed))
+        // Suno AI
+        .route("/api/suno/status", get(routes::suno::status))
+        .route("/api/suno/credits", get(routes::suno::credits))
+        .route("/api/suno/callback", post(routes::suno::callback))
+        .route("/api/suno/download", get(routes::suno::download))
+        .route("/api/suno/lyrics-status", get(routes::suno::lyrics_status))
+        .route("/api/suno/lyrics-callback", post(routes::suno::lyrics_callback))
         .route("/api/languages", get(routes::admin::list_languages))
         .route("/api/admin/languages", post(routes::admin::create_language))
         .route("/api/admin/languages/:id", delete(routes::admin::delete_language))

@@ -30,6 +30,7 @@ export function middleware(request: NextRequest) {
     "/trending": "trending",
     "/latest": "latest",
     "/top": "top",
+    "/following": "following",
   };
   if (sortRoutes[pathname]) {
     const url = request.nextUrl.clone();

@@ -84,14 +84,15 @@ function FeedPageInner() {
     const version = ++fetchVersionRef.current;
     setLoading(true);
     try {
+      const isFollowing = sort === "following";
       const data = await getSongs({
         sort,
         period: sort === "top" ? period : undefined,
-        lang: languageId,
-        category: categoryId,
-        genre: genreSlug,
-        lang_code: langCode,
-        q: searchQuery || undefined,
+        lang: isFollowing ? undefined : languageId,
+        category: isFollowing ? undefined : categoryId,
+        genre: isFollowing ? undefined : genreSlug,
+        lang_code: isFollowing ? undefined : langCode,
+        q: isFollowing ? undefined : (searchQuery || undefined),
         page,
         limit: 24,
       });
@@ -165,20 +166,22 @@ function FeedPageInner() {
           </button>
           <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); setGenreSlug(undefined); setLangCode(undefined); }} isAuthenticated={!!currentUser} />
         </div>
-        <FeedFilters
-          languageId={languageId}
-          categoryId={categoryId}
-          genreSlug={genreSlug}
-          period={period}
-          showPeriod={sort === "top"}
-          searchQuery={searchDebounce}
-          onLanguageChange={(id) => { setLanguageId(id); setPage(1); }}
-          onCategoryChange={(id) => { setCategoryId(id); setPage(1); }}
-          onGenreChange={(slug) => { setGenreSlug(slug); setPage(1); }}
-          onPeriodChange={(p) => { setPeriod(p); setPage(1); }}
-          onSearchChange={setSearchDebounce}
-          onExclusionsChange={() => setExclusionsVersion((v) => v + 1)}
-        />
+        {sort !== "following" && (
+          <FeedFilters
+            languageId={languageId}
+            categoryId={categoryId}
+            genreSlug={genreSlug}
+            period={period}
+            showPeriod={sort === "top"}
+            searchQuery={searchDebounce}
+            onLanguageChange={(id) => { setLanguageId(id); setPage(1); }}
+            onCategoryChange={(id) => { setCategoryId(id); setPage(1); }}
+            onGenreChange={(slug) => { setGenreSlug(slug); setPage(1); }}
+            onPeriodChange={(p) => { setPeriod(p); setPage(1); }}
+            onSearchChange={setSearchDebounce}
+            onExclusionsChange={() => setExclusionsVersion((v) => v + 1)}
+          />
+        )}
       </div>
 
       {/* Song grid */}

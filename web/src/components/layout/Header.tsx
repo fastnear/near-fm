@@ -10,7 +10,7 @@ import { AnimatedLogo } from "@/components/AnimatedLogo";
 
 
 export function Header() {
-  const { user, isAuthenticated, loading: authLoading, signInWithGoogle } = useAuth();
+  const { user, isAuthenticated, isPremium, loading: authLoading, signInWithGoogle } = useAuth();
   const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, reconnectWallet, lowAllowance, loading: walletLoading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showLoginMenu, setShowLoginMenu] = useState(false);
@@ -79,6 +79,7 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-8">
           <Link href="/" className={navLinkClass}>Feed</Link>
           <Link href="/requests" className={navLinkClass}>Requests</Link>
+          {(isPremium || user?.is_admin) && <Link href="/create" className={navLinkClass}>Create</Link>}
           <Link href="/upload" className={navLinkClass}>Upload</Link>
           <Link href="/premium" className={`${navLinkClass} diamond-shimmer`}>Premium</Link>
           <Link href="/cabinet" className={navLinkClass}>
@@ -200,6 +201,11 @@ export function Header() {
         <Link href="/requests" className="text-slate-400 hover:text-white transition-colors py-1">
           Requests
         </Link>
+        {(isPremium || user?.is_admin) && (
+          <Link href="/create" className="text-slate-400 hover:text-white transition-colors py-1">
+            Create
+          </Link>
+        )}
         <Link href="/upload" className="text-slate-400 hover:text-white transition-colors py-1">
           Upload
         </Link>

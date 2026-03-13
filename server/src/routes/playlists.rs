@@ -607,3 +607,60 @@ pub async fn remove_song_from_playlist(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ── Reorder songs in playlist ──
+
+#[derive(Deserialize)]
+pub struct ReorderRequest {
+    /// Ordered list of song UUIDs in desired order
+    pub song_uuids: Vec<String>,
+}
+
+/// PUT /api/playlists/:uuid/reorder — set song order (owner, non-auto only)
+pub async fn reorder_playlist_songs(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+    Json(req): Json<ReorderRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let playlist = sqlx::query_as::<_, crate::db::models::Playlist>(
+        "SELECT * FROM playlists WHERE uuid = $1",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Playlist not found".to_string()))?;
+
+    if playlist.user_id != claims.user_id {
+        return Err((StatusCode::FORBIDDEN, "Not your playlist".to_string()));
+    }
+
+    if playlist.is_auto {
+        return Err((StatusCode::BAD_REQUEST, "Cannot reorder auto playlist".to_string()));
+    }
+
+    // Update positions based on the order of UUIDs
+    for (i, song_uuid) in req.song_uuids.iter().enumerate() {
+        sqlx::query(
+            "UPDATE playlist_songs SET position = $1 WHERE playlist_id = $2 AND song_id = (SELECT id FROM songs WHERE uuid = $3)"
+        )
+        .bind(i as i32)
+        .bind(playlist.id)
+        .bind(song_uuid)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    sqlx::query("UPDATE playlists SET updated_at = NOW() WHERE id = $1")
+        .bind(playlist.id)
+        .execute(&state.db)
+        .await
+        .ok();
+
+    Ok(StatusCode::OK)
+}

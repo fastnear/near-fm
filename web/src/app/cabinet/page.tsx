@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, getDiamondLikesRemaining } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
@@ -840,6 +840,25 @@ function PlaylistsTab() {
     }
   };
 
+  const handleMoveSong = async (songUuid: string, direction: "up" | "down") => {
+    if (!selectedPlaylist) return;
+    const idx = songs.findIndex((s) => s.uuid === songUuid);
+    if (idx < 0) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= songs.length) return;
+
+    const newSongs = [...songs];
+    [newSongs[idx], newSongs[swapIdx]] = [newSongs[swapIdx], newSongs[idx]];
+    setSongs(newSongs);
+
+    try {
+      await reorderPlaylistSongs(selectedPlaylist.uuid, newSongs.map((s) => s.uuid));
+    } catch (e) {
+      console.error("Reorder failed:", e);
+      setSongs(songs); // revert
+    }
+  };
+
   const handleSaveName = async () => {
     if (!selectedPlaylist || !editName.trim()) return;
     try {
@@ -1074,15 +1093,37 @@ function PlaylistsTab() {
                     <p className="text-xs text-slate-500 truncate">{song.uploader_display_name || song.uploader_account_id}</p>
                   </div>
                   {!isAuto && (
-                    <button
-                      onClick={() => handleRemoveSong(song.uuid)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors shrink-0"
-                      title="Remove from playlist"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => handleMoveSong(song.uuid, "up")}
+                        disabled={songs.indexOf(song) === 0}
+                        className="p-1 rounded text-slate-500 hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-20 disabled:pointer-events-none"
+                        title="Move up"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleMoveSong(song.uuid, "down")}
+                        disabled={songs.indexOf(song) === songs.length - 1}
+                        className="p-1 rounded text-slate-500 hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-20 disabled:pointer-events-none"
+                        title="Move down"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleRemoveSong(song.uuid)}
+                        className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="Remove from playlist"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}

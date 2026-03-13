@@ -36,6 +36,7 @@ export interface Song {
   is_deleted: boolean;
   fulfills_request_id: number | null;
   diamond_like_count: number;
+  created_on_nearfm: boolean;
   created_at: string;
   updated_at: string;
   // Uploader join fields

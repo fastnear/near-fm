@@ -331,6 +331,40 @@ pub async fn admin_moderate_comment(
     Ok(StatusCode::OK)
 }
 
+/// DELETE /api/comments/:id — delete own comment (or admin)
+pub async fn delete_comment(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+    extensions: Extensions,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Check ownership: author or admin
+    let comment_user_id: Option<i32> =
+        sqlx::query_scalar("SELECT user_id FROM comments WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    match comment_user_id {
+        None => return Err((StatusCode::NOT_FOUND, "Comment not found".to_string())),
+        Some(uid) if uid != claims.user_id && !claims.is_admin => {
+            return Err((StatusCode::FORBIDDEN, "Not your comment".to_string()));
+        }
+        _ => {}
+    }
+
+    sqlx::query("DELETE FROM comments WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// PATCH /api/admin/users/:account_id/mute
 pub async fn admin_toggle_mute(
     State(state): State<AppState>,

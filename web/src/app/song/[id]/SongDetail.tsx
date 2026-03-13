@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { Song, Category, Language, Playlist } from "@/types";
-import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist } from "@/lib/api";
+import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, deleteComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -544,7 +544,15 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                 )}
               </div>
 
-              {song.ai_model && (
+              {song.created_on_nearfm && (
+                <p className="text-xs text-purple-400 mt-1.5 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                  </svg>
+                  Created on near.fm{song.ai_model ? ` with ${song.ai_model}` : ""}
+                </p>
+              )}
+              {!song.created_on_nearfm && song.ai_model && (
                 <p className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -913,6 +921,23 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                           {comment.is_hidden && (
                             <span className="text-xs text-rose-400 ml-auto">hidden</span>
                           )}
+                          {(userSlug === comment.author_account_id || isAdmin) && (
+                            <button
+                              onClick={async () => {
+                                if (!confirm("Delete this comment?")) return;
+                                try {
+                                  await deleteComment(comment.id);
+                                  setComments((prev) => prev.filter((c) => c.id !== comment.id));
+                                } catch (e) {
+                                  console.error("Delete comment failed:", e);
+                                }
+                              }}
+                              className="text-xs text-slate-500 hover:text-rose-400 transition-colors ml-auto"
+                              title="Delete comment"
+                            >
+                              delete
+                            </button>
+                          )}
                           {isAdmin && (
                             <button
                               onClick={async () => {
@@ -927,7 +952,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                                   console.error("Moderate comment failed:", e);
                                 }
                               }}
-                              className="text-xs text-slate-500 hover:text-rose-400 transition-colors ml-auto"
+                              className="text-xs text-slate-500 hover:text-rose-400 transition-colors"
                               title={comment.is_hidden ? "Show comment" : "Hide comment"}
                             >
                               {comment.is_hidden ? "show" : "hide"}

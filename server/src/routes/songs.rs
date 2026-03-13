@@ -142,6 +142,7 @@ pub struct CreateSongRequest {
     pub category_id: Option<i32>,
     pub fulfills_request_id: Option<i32>,
     pub genre_ids: Option<Vec<i32>>,
+    pub suno_task_id: Option<String>,
 }
 
 pub async fn create_song(
@@ -174,6 +175,14 @@ pub async fn create_song(
     let uuid = uuid::Uuid::new_v4().to_string();
     let mime = req.audio_mime_type.as_deref().unwrap_or("audio/mpeg");
 
+    // Check if song was created via our Suno pipeline
+    let created_on_nearfm = if let Some(ref task_id) = req.suno_task_id {
+        let cache = state.suno_cache.read().await;
+        cache.contains_key(task_id)
+    } else {
+        false
+    };
+
     let song = queries::create_song(
         &state.db,
         &uuid,
@@ -190,6 +199,7 @@ pub async fn create_song(
         req.language_id,
         req.category_id,
         req.fulfills_request_id,
+        created_on_nearfm,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
