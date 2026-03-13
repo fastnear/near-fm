@@ -43,7 +43,7 @@ export default function CreditsPage() {
     refreshUser,
     promptSignIn,
   } = useAuth();
-  const { accountId, wallet, callFunction, connectWallet } = useNearWallet();
+  const { accountId, wallet, callFunction, connectWallet, viewMethod } = useNearWallet();
 
   const [selectedToken, setSelectedToken] = useState<"USDC" | "USDT">("USDC");
   const [amountUsd, setAmountUsd] = useState("");
@@ -57,6 +57,31 @@ export default function CreditsPage() {
   } | null>(null);
   const [history, setHistory] = useState<TopupRecord[]>([]);
   const [usageHistory, setUsageHistory] = useState<UsageRecord[]>([]);
+  const [tokenBalances, setTokenBalances] = useState<{ USDC: string | null; USDT: string | null }>({ USDC: null, USDT: null });
+
+  // Fetch FT balances
+  useEffect(() => {
+    if (!accountId) return;
+    const fetchBalance = async (token: "USDC" | "USDT") => {
+      try {
+        const raw = await viewMethod({
+          contractId: TOKENS[token].contract,
+          method: "ft_balance_of",
+          args: { account_id: accountId },
+        });
+        const val = BigInt(String(raw ?? "0"));
+        const whole = val / BigInt(10 ** DECIMALS);
+        const frac = val % BigInt(10 ** DECIMALS);
+        const formatted = `${whole}.${frac.toString().padStart(DECIMALS, "0").replace(/0+$/, "") || "0"}`;
+        return formatted;
+      } catch {
+        return null;
+      }
+    };
+    Promise.all([fetchBalance("USDC"), fetchBalance("USDT")]).then(([usdc, usdt]) => {
+      setTokenBalances({ USDC: usdc, USDT: usdt });
+    });
+  }, [accountId, viewMethod, result]);
 
   // Load history
   useEffect(() => {
@@ -271,6 +296,16 @@ export default function CreditsPage() {
                 ))}
               </div>
 
+              {/* Wallet token balance */}
+              {tokenBalances[selectedToken] !== null && (
+                <div className="flex items-center justify-between text-xs px-1">
+                  <span className="text-slate-500">Wallet balance:</span>
+                  <span className={`font-medium ${parseFloat(tokenBalances[selectedToken]!) > 0 ? "text-slate-300" : "text-red-400"}`}>
+                    {tokenBalances[selectedToken]} {selectedToken}
+                  </span>
+                </div>
+              )}
+
               {/* Amount input */}
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
@@ -291,10 +326,17 @@ export default function CreditsPage() {
               </div>
 
               {amountUsd && parseFloat(amountUsd) > 0 && (
-                <div className="text-xs text-slate-500">
-                  = {Math.floor(parseFloat(amountUsd) * 100).toLocaleString()}{" "}
-                  credits ({Math.floor((parseFloat(amountUsd) * 100) / 12)}{" "}
-                  songs)
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-500">
+                    = {Math.floor(parseFloat(amountUsd) * 100).toLocaleString()}{" "}
+                    credits ({Math.floor((parseFloat(amountUsd) * 100) / 12)}{" "}
+                    songs)
+                  </div>
+                  {tokenBalances[selectedToken] !== null && parseFloat(amountUsd) > parseFloat(tokenBalances[selectedToken]!) && (
+                    <div className="text-xs text-red-400">
+                      Insufficient {selectedToken} balance in your wallet
+                    </div>
+                  )}
                 </div>
               )}
 

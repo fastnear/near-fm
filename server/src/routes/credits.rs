@@ -47,7 +47,7 @@ pub async fn topup(
     State(state): State<AppState>,
     Json(req): Json<TopupRequest>,
 ) -> Result<Json<TopupResponse>, (StatusCode, String)> {
-    if state.config.outlayer_api_key.is_empty() {
+    if state.config.treasury_agent_key.is_empty() {
         return Err((StatusCode::SERVICE_UNAVAILABLE, "Credits top-up is not configured".to_string()));
     }
 
@@ -70,7 +70,7 @@ pub async fn topup(
     let peek_resp = state
         .http_client
         .post(format!("{}/wallet/v1/payment-check/peek", OUTLAYER_API))
-        .header("Authorization", format!("Bearer {}", state.config.outlayer_api_key))
+        .header("Authorization", format!("Bearer {}", state.config.treasury_agent_key))
         .json(&serde_json::json!({ "check_key": req.check_key }))
         .send()
         .await
@@ -113,7 +113,7 @@ pub async fn topup(
     let claim_resp = state
         .http_client
         .post(format!("{}/wallet/v1/payment-check/claim", OUTLAYER_API))
-        .header("Authorization", format!("Bearer {}", state.config.outlayer_api_key))
+        .header("Authorization", format!("Bearer {}", state.config.treasury_agent_key))
         .json(&serde_json::json!({ "check_key": req.check_key }))
         .send()
         .await

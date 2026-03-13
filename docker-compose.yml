@@ -55,6 +55,7 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3847}
       RUST_LOG: ${RUST_LOG:-nearfm_server=info,tower_http=info}
       SUNO_API_KEY: ${SUNO_API_KEY:-}
+      TREASURY_AGENT_KEY: ${TREASURY_AGENT_KEY:-}
       PORT: "8477"
 
   web:
