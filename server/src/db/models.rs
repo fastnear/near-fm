@@ -24,6 +24,8 @@ pub struct User {
     pub premium_since: Option<DateTime<Utc>>,
     pub premium_until: Option<DateTime<Utc>>,
     pub credit_balance: i32,
+    pub daily_credits_used: i32,
+    pub daily_credits_date: chrono::NaiveDate,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

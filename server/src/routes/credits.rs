@@ -235,3 +235,38 @@ pub async fn history(
 
     Ok(Json(records))
 }
+
+// ── Usage (authenticated) ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct UsageRecord {
+    pub credits_spent: i32,
+    pub from_daily: i32,
+    pub from_purchased: i32,
+    pub action: String,
+    pub reference_id: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn usage(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<Vec<UsageRecord>>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    let limit = q.limit.unwrap_or(50).min(100);
+
+    let records = sqlx::query_as::<_, UsageRecord>(
+        "SELECT credits_spent, from_daily, from_purchased, action, reference_id, created_at \
+         FROM credit_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
+    )
+    .bind(claims.user_id)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(records))
+}

@@ -26,12 +26,14 @@ import {
   createLanguage,
   deleteLanguage,
   getAdminUsers,
+  getAdminCreditsSummary,
+  getAdminCreditsTransactions,
 } from "@/lib/api";
-import type { AdminComment, AdminSongScore, AdminUser } from "@/lib/api";
+import type { AdminComment, AdminSongScore, AdminUser, CreditsSummary, CreditTransaction } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments";
+type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments" | "credits";
 
 interface Report {
   id: number;
@@ -1754,6 +1756,126 @@ function yoctoToNear(yocto: string): string {
   return near < 0.01 ? near.toFixed(6) : near.toFixed(2);
 }
 
+// ── Credits Panel ──
+
+function CreditsPanel() {
+  const [summary, setSummary] = useState<CreditsSummary | null>(null);
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      getAdminCreditsSummary(),
+      getAdminCreditsTransactions(100),
+    ]).then(([s, t]) => {
+      setSummary(s);
+      setTransactions(t);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div className="text-slate-500 text-sm py-8 text-center">Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Top-ups</div>
+            <div className="text-lg font-bold text-green-400">
+              +{summary.total_topup_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Spent</div>
+            <div className="text-lg font-bold text-orange-400">
+              -{summary.total_spent_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Refunded</div>
+            <div className="text-lg font-bold text-cyan-400">
+              +{summary.total_refunded_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Net Balance</div>
+            <div className="text-lg font-bold text-slate-100">
+              {summary.net_balance.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transactions table */}
+      <div className="glass-card rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">
+          Transactions
+        </h3>
+        {transactions.length === 0 ? (
+          <p className="text-slate-500 text-sm">No transactions yet</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-500 border-b border-white/[0.06]">
+                  <th className="text-left py-2 pr-4">Date</th>
+                  <th className="text-left py-2 pr-4">User</th>
+                  <th className="text-left py-2 pr-4">Type</th>
+                  <th className="text-left py-2 pr-4">Detail</th>
+                  <th className="text-right py-2">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((t, i) => (
+                  <tr key={i} className="border-b border-white/[0.04]">
+                    <td className="py-2 pr-4 text-slate-400">
+                      {new Date(t.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-2 pr-4 text-slate-300 font-mono">
+                      {t.slug}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          t.type === "topup"
+                            ? "bg-green-500/10 text-green-400"
+                            : t.type === "refund"
+                            ? "bg-cyan-500/10 text-cyan-400"
+                            : "bg-orange-500/10 text-orange-400"
+                        }`}
+                      >
+                        {t.type}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 text-slate-500">
+                      {t.detail.replace(/_/g, " ")}
+                    </td>
+                    <td
+                      className={`py-2 text-right font-mono ${
+                        t.type === "topup"
+                          ? "text-green-400"
+                          : t.type === "refund"
+                          ? "text-cyan-400"
+                          : "text-orange-400"
+                      }`}
+                    >
+                      {t.type === "usage" ? "-" : "+"}{Math.abs(t.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, isAuthenticated, loading, signInWithGoogle } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("reports");
@@ -1803,6 +1925,7 @@ export default function AdminPage() {
     { key: "categories", label: "Categories" },
     { key: "genres", label: "Genres" },
     { key: "languages", label: "Languages" },
+    { key: "credits", label: "Credits" },
   ];
 
   return (
@@ -1853,6 +1976,7 @@ export default function AdminPage() {
         {activeTab === "categories" && <CategoriesPanel />}
         {activeTab === "genres" && <GenresPanel />}
         {activeTab === "languages" && <LanguagesPanel />}
+        {activeTab === "credits" && <CreditsPanel />}
       </div>
     </div>
   );

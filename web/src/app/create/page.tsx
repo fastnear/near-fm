@@ -131,8 +131,6 @@ export default function CreatePage() {
     }
   }, [step]);
 
-  const isPremiumOrAdmin = user?.is_premium || user?.is_admin;
-
   const setupAudioListeners = useCallback((audio: HTMLAudioElement, idx: number) => {
     const onTimeUpdate = () => {
       setAudioProgress((prev) => ({
@@ -185,7 +183,7 @@ export default function CreatePage() {
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">AI Music Studio</h1>
           <p className="text-slate-400 mb-8">
-            Sign in to create music with AI. Available for Premium users.
+            Sign in to create music with AI.
           </p>
           <div className="flex flex-col gap-3">
             <button onClick={connectAndSignIn} className="btn-primary px-8 py-3 rounded-xl text-sm">
@@ -200,21 +198,29 @@ export default function CreatePage() {
     );
   }
 
-  // Not premium
-  if (!isPremiumOrAdmin) {
+  // No credits available
+  const totalCredits = (user?.credit_balance ?? 0) + (user?.daily_credits_remaining ?? 0);
+  if (!user?.is_admin && totalCredits < 1) {
     return (
       <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-amber-500/20 flex items-center justify-center">
-            <span className="text-3xl">✦</span>
+            <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white mb-3">Premium Feature</h1>
-          <p className="text-slate-400 mb-8">
-            AI music generation is available for Premium subscribers. Upgrade to create unlimited songs with AI.
+          <h1 className="text-2xl font-bold text-white mb-3">AI Music Studio</h1>
+          <p className="text-slate-400 mb-6">
+            You need credits to generate music. Each song costs 12 credits.
           </p>
-          <Link href="/premium" className="btn-primary px-8 py-3 rounded-xl text-sm inline-block">
-            Get Premium
-          </Link>
+          <div className="flex flex-col gap-3">
+            <Link href="/credits" className="btn-primary px-8 py-3 rounded-xl text-sm inline-block">
+              Buy Credits
+            </Link>
+            <Link href="/premium" className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all inline-block">
+              Get Premium for 40 daily credits
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -503,7 +509,26 @@ export default function CreatePage() {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10">
         <h1 className="text-2xl font-bold text-white mb-2">AI Music Studio</h1>
-        <p className="text-slate-500 text-sm mb-8">Create music with AI, then publish on near.fm</p>
+        <p className="text-slate-500 text-sm mb-4">Create music with AI, then publish on near.fm</p>
+
+        {/* Credit balance */}
+        {!user?.is_admin && (
+          <div className="flex items-center gap-3 mb-8 text-sm">
+            <span className="text-slate-400">
+              Credits: <span className="text-white font-medium">{user?.credit_balance?.toLocaleString() ?? 0}</span>
+            </span>
+            {(user?.daily_credits_remaining ?? 0) > 0 && (
+              <span className="text-cyan-400">
+                + {user?.daily_credits_remaining} daily
+              </span>
+            )}
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-500">Song = 12 credits</span>
+            <Link href="/credits" className="text-purple-400 hover:text-purple-300 transition-colors ml-auto">
+              Buy more
+            </Link>
+          </div>
+        )}
 
         {/* Mode toggle */}
         <div className="flex gap-2 mb-8">

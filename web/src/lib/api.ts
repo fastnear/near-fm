@@ -47,6 +47,7 @@ export interface AuthUser {
   auth_provider: string;
   reputation_score: string;
   credit_balance: number;
+  daily_credits_remaining: number;
 }
 
 export async function verifyAuth(payload: {
@@ -770,4 +771,77 @@ export interface TopupRecord {
 export async function creditHistory(limit?: number): Promise<TopupRecord[]> {
   const params = limit ? `?limit=${limit}` : "";
   return fetchApi(`/api/credits/history${params}`);
+}
+
+export interface UsageRecord {
+  credits_spent: number;
+  from_daily: number;
+  from_purchased: number;
+  action: string;
+  reference_id: string | null;
+  created_at: string;
+}
+
+export async function creditUsage(limit?: number): Promise<UsageRecord[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi(`/api/credits/usage${params}`);
+}
+
+// ── API Keys ──
+
+export interface ApiKeyInfo {
+  id: number;
+  label: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export async function createApiKey(label: string): Promise<{
+  key: string;
+  id: number;
+  label: string;
+  created_at: string;
+}> {
+  return fetchApi("/api/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function listApiKeys(): Promise<ApiKeyInfo[]> {
+  return fetchApi("/api/api-keys");
+}
+
+export async function revokeApiKey(id: number): Promise<void> {
+  return fetchApi(`/api/api-keys/${id}`, { method: "DELETE" });
+}
+
+// ── Admin Credits ──
+
+export interface CreditsSummary {
+  total_topup_credits: number;
+  total_spent_credits: number;
+  total_refunded_credits: number;
+  net_balance: number;
+}
+
+export interface CreditTransaction {
+  type: string;
+  slug: string;
+  amount: number;
+  detail: string;
+  created_at: string;
+}
+
+export async function getAdminCreditsSummary(): Promise<CreditsSummary> {
+  return fetchApi("/api/admin/credits/summary");
+}
+
+export async function getAdminCreditsTransactions(
+  limit = 50,
+  offset = 0
+): Promise<CreditTransaction[]> {
+  return fetchApi(
+    `/api/admin/credits/transactions?limit=${limit}&offset=${offset}`
+  );
 }

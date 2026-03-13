@@ -334,6 +334,29 @@ function BalanceTab() {
         </div>
       )}
 
+      {/* AI Credits */}
+      <div className="glass-card rounded-2xl p-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white font-semibold">AI Credits</h3>
+          <p className="text-2xl font-bold text-white">
+            {user?.credit_balance?.toLocaleString() ?? 0}
+          </p>
+        </div>
+        {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
+          <p className="text-xs text-cyan-400 mb-3">
+            + {user.daily_credits_remaining} daily premium credits remaining
+          </p>
+        )}
+        <div className="flex gap-3">
+          <Link href="/credits" className="flex-1 text-center py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all">
+            Top Up
+          </Link>
+          <Link href="/api-keys" className="flex-1 text-center py-2.5 rounded-xl text-sm font-medium bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] border border-white/[0.08] transition-all">
+            API Keys
+          </Link>
+        </div>
+      </div>
+
       {/* Deposit & Withdraw */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {/* Deposit */}

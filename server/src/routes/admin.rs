@@ -825,3 +825,90 @@ pub async fn delete_language(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ── Credits Financial Tracking ──
+
+#[derive(Debug, Serialize)]
+pub struct CreditsSummary {
+    pub total_topup_credits: i64,
+    pub total_spent_credits: i64,
+    pub total_refunded_credits: i64,
+    pub net_balance: i64,
+}
+
+pub async fn credits_summary(
+    State(state): State<AppState>,
+    extensions: Extensions,
+) -> Result<Json<CreditsSummary>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin access required".to_string()))?;
+
+    let row: (i64, i64, i64) = sqlx::query_as(
+        r#"
+        SELECT
+            (SELECT COALESCE(SUM(credits_added::bigint), 0) FROM credit_topups),
+            (SELECT COALESCE(SUM(from_purchased::bigint), 0) FROM credit_usage WHERE credits_spent > 0),
+            (SELECT COALESCE(SUM(ABS(from_purchased::bigint)), 0) FROM credit_usage WHERE credits_spent < 0)
+        "#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(CreditsSummary {
+        total_topup_credits: row.0,
+        total_spent_credits: row.1,
+        total_refunded_credits: row.2,
+        net_balance: row.0 - row.1 + row.2,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransactionsQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct CreditTransaction {
+    pub r#type: String,
+    pub slug: String,
+    pub amount: i32,
+    pub detail: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn credits_transactions(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Query(q): Query<TransactionsQuery>,
+) -> Result<Json<Vec<CreditTransaction>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin access required".to_string()))?;
+
+    let limit = q.limit.unwrap_or(50).min(200);
+    let offset = q.offset.unwrap_or(0);
+
+    let rows = sqlx::query_as::<_, CreditTransaction>(
+        r#"
+        SELECT * FROM (
+            SELECT 'topup' as type, u.slug, ct.credits_added as amount, ct.token as detail, ct.created_at
+            FROM credit_topups ct JOIN users u ON u.id = ct.user_id
+            UNION ALL
+            SELECT
+                CASE WHEN cu.credits_spent < 0 THEN 'refund' ELSE 'usage' END as type,
+                u.slug, cu.credits_spent as amount, cu.action as detail, cu.created_at
+            FROM credit_usage cu JOIN users u ON u.id = cu.user_id
+        ) combined
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+        "#,
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(rows))
+}

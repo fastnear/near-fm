@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { creditTopup, creditHistory, type TopupRecord } from "@/lib/api";
+import { creditTopup, creditHistory, creditUsage, type TopupRecord, type UsageRecord } from "@/lib/api";
 import { ensureRegistered, getAddress, createCheck } from "@/lib/outlayer";
 
 const USDC_CONTRACT =
@@ -56,11 +56,13 @@ export default function CreditsPage() {
     new_balance: number;
   } | null>(null);
   const [history, setHistory] = useState<TopupRecord[]>([]);
+  const [usageHistory, setUsageHistory] = useState<UsageRecord[]>([]);
 
   // Load history
   useEffect(() => {
     if (isAuthenticated) {
       creditHistory(20).then(setHistory).catch(() => {});
+      creditUsage(20).then(setUsageHistory).catch(() => {});
     }
   }, [isAuthenticated, result]);
 
@@ -212,8 +214,13 @@ export default function CreditsPage() {
               {user.credit_balance.toLocaleString()}
             </div>
             <div className="text-xs text-slate-500 mt-1">
-              credits ({(user.credit_balance / 100).toFixed(2)} USD)
+              purchased credits ({(user.credit_balance / 100).toFixed(2)} USD)
             </div>
+            {user.daily_credits_remaining > 0 && (
+              <div className="text-xs text-cyan-400 mt-1">
+                + {user.daily_credits_remaining} daily premium credits
+              </div>
+            )}
           </div>
         )}
 
@@ -373,6 +380,40 @@ export default function CreditsPage() {
                   </div>
                   <div className="text-green-400">
                     +{h.credits_added.toLocaleString()} credits
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Usage History */}
+        {usageHistory.length > 0 && (
+          <div className="glass-card rounded-2xl p-5 space-y-3">
+            <div className="text-sm font-medium text-slate-300">
+              Usage History
+            </div>
+            <div className="space-y-2">
+              {usageHistory.map((u, i) => (
+                <div
+                  key={i}
+                  className="flex justify-between items-center text-xs"
+                >
+                  <div className="text-slate-400">
+                    {new Date(u.created_at).toLocaleDateString()}
+                  </div>
+                  <div className="text-slate-400">
+                    {u.action.replace(/_/g, " ")}
+                  </div>
+                  <div
+                    className={
+                      u.credits_spent < 0
+                        ? "text-green-400"
+                        : "text-orange-400"
+                    }
+                  >
+                    {u.credits_spent < 0 ? "+" : "-"}
+                    {Math.abs(u.credits_spent)} credits
                   </div>
                 </div>
               ))}

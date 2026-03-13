@@ -59,12 +59,25 @@ pub struct UserResponse {
     pub auth_provider: String,
     pub near_account_id: Option<String>,
     pub credit_balance: i32,
+    pub daily_credits_remaining: i32,
 }
 
 fn compute_premium(user: &crate::db::models::User) -> (bool, Option<String>) {
     let is_premium = user.premium_until.map_or(false, |u| u > chrono::Utc::now());
     let premium_until = user.premium_until.map(|u| u.to_rfc3339());
     (is_premium, premium_until)
+}
+
+fn compute_daily_remaining(user: &crate::db::models::User, is_premium: bool) -> i32 {
+    if !is_premium {
+        return 0;
+    }
+    let used_today = if user.daily_credits_date == chrono::Utc::now().date_naive() {
+        user.daily_credits_used
+    } else {
+        0
+    };
+    (super::suno::DAILY_PREMIUM_ALLOWANCE - used_today).max(0)
 }
 
 pub async fn verify(
@@ -159,6 +172,8 @@ pub async fn verify(
 
     let (is_premium, premium_until) = compute_premium(&user);
 
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
     let body = Json(VerifyResponse {
         token,
         user: UserResponse {
@@ -173,6 +188,7 @@ pub async fn verify(
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
             credit_balance: user.credit_balance,
+            daily_credits_remaining,
         },
     });
 
@@ -453,6 +469,7 @@ pub struct MeResponse {
     pub auth_provider: String,
     pub reputation_score: String,
     pub credit_balance: i32,
+    pub daily_credits_remaining: i32,
 }
 
 /// GET /api/auth/me — get current authenticated user
@@ -473,6 +490,8 @@ pub async fn get_me(
 
     let (is_premium, premium_until) = compute_premium(&user);
 
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
     Ok(Json(MeResponse {
         id: user.id,
         slug: user.slug.clone(),
@@ -487,6 +506,7 @@ pub async fn get_me(
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
         credit_balance: user.credit_balance,
+        daily_credits_remaining,
     }))
 }
 
@@ -579,6 +599,7 @@ pub async fn link_wallet(
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
     let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
 
     let body = Json(VerifyResponse {
         token,
@@ -594,6 +615,7 @@ pub async fn link_wallet(
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),
             credit_balance: user.credit_balance,
+            daily_credits_remaining,
         },
     });
 

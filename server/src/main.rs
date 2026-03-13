@@ -25,8 +25,10 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+    pub suno_client: reqwest::Client,
     pub suno_cache: routes::suno::SunoTaskCache,
     pub suno_lyrics_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, routes::suno::SunoLyricsCallbackData>>>,
+    pub api_key_cache: auth::api_key::ApiKeyCache,
 }
 
 #[tokio::main]
@@ -59,12 +61,18 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(reputation::start_reputation_loop(db.clone()));
     tokio::spawn(validation::revalidate_pending(db.clone()));
 
+    let suno_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600)) // 10 min for Suno generation
+        .build()?;
+
     let state = AppState {
         db,
         config: Arc::new(config.clone()),
         http_client: reqwest::Client::new(),
+        suno_client,
         suno_cache: routes::suno::new_task_cache(),
         suno_lyrics_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        api_key_cache: auth::api_key::ApiKeyCache::new(),
     };
 
     // CORS
@@ -123,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/suno/generate", post(routes::suno::generate))
         .route("/api/suno/generate-lyrics", post(routes::suno::generate_lyrics))
         .route("/api/credits/topup", post(routes::credits::topup))
+        .route("/api/api-keys", post(routes::api_keys::create_api_key))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,
@@ -272,9 +281,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
         // RSS feed
         .route("/feed/:feed_token", get(routes::rss::playlist_feed))
+        // API Keys
+        .route("/api/api-keys", get(routes::api_keys::list_api_keys))
+        .route("/api/api-keys/:id", delete(routes::api_keys::revoke_api_key))
         // Credits
         .route("/api/credits/balance", get(routes::credits::balance))
         .route("/api/credits/history", get(routes::credits::history))
+        .route("/api/credits/usage", get(routes::credits::usage))
         // Suno AI
         .route("/api/suno/status", get(routes::suno::status))
         .route("/api/suno/credits", get(routes::suno::credits))
@@ -285,6 +298,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/languages", get(routes::admin::list_languages))
         .route("/api/admin/languages", post(routes::admin::create_language))
         .route("/api/admin/languages/:id", delete(routes::admin::delete_language))
+        .route("/api/admin/credits/summary", get(routes::admin::credits_summary))
+        .route("/api/admin/credits/transactions", get(routes::admin::credits_transactions))
         // Global middleware
         .layer(middleware::from_fn_with_state(
             state.clone(),
