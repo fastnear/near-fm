@@ -351,9 +351,6 @@ function BalanceTab() {
           <Link href="/credits" className="flex-1 text-center py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all">
             Top Up
           </Link>
-          <Link href="/api-keys" className="flex-1 text-center py-2.5 rounded-xl text-sm font-medium bg-white/[0.06] text-slate-300 hover:bg-white/[0.1] border border-white/[0.08] transition-all">
-            API Keys
-          </Link>
         </div>
       </div>
 

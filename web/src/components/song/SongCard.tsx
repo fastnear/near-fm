@@ -36,6 +36,13 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
           </div>
         )}
 
+        {/* near.fm badge */}
+        {song.created_on_nearfm && (
+          <span className="absolute top-1.5 right-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded-full bg-black/50 text-purple-300 border border-purple-500/30 font-medium backdrop-blur-sm" title="Created on near.fm">
+            near.fm
+          </span>
+        )}
+
         {/* Play button overlay */}
         <button
           onClick={() => isActive ? togglePlay(song) : (feedSongs ? playFromFeed(song, feedSongs) : togglePlay(song))}
@@ -69,11 +76,6 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
               {song.title}
             </h3>
           </Link>
-          {song.created_on_nearfm && (
-            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20 font-medium" title="Created on near.fm">
-              near.fm
-            </span>
-          )}
           {song.language_code && song.language_code !== "en" && langFlags[song.language_code] && (
             <span className="shrink-0 text-xs opacity-[0.65]" title={song.language_name || song.language_code}>
               {langFlags[song.language_code]}

@@ -621,3 +621,187 @@ pub async fn link_wallet(
 
     Ok(([(header::SET_COOKIE, cookie)], body))
 }
+
+// ── Agent auth via NEP-413 signature ──
+
+/// Check if an account_id is a 64-char hex string (implicit NEAR account / Outlayer agent).
+fn is_hex_account(account_id: &str) -> bool {
+    account_id.len() == 64 && account_id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// For hex accounts, derive the expected public key from the account_id itself.
+/// The hex address IS the public key bytes.
+fn hex_account_to_public_key(account_id: &str) -> Result<String, String> {
+    let bytes = hex::decode(account_id)
+        .map_err(|e| format!("Invalid hex account: {}", e))?;
+    Ok(format!("ed25519:{}", bs58::encode(&bytes).into_string()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentAuthRequest {
+    // All fields optional — empty request returns instructions
+    pub account_id: Option<String>,
+    pub public_key: Option<String>,
+    pub signature: Option<String>,
+    pub message: Option<String>,
+    pub nonce: Option<Vec<u8>>,
+    pub recipient: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum AgentAuthResponse {
+    Instructions {
+        instructions: &'static str,
+        message_template: AgentMessageTemplate,
+        example_curl: &'static str,
+    },
+    Success {
+        token: String,
+        user: UserResponse,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentMessageTemplate {
+    pub action: &'static str,
+    pub domain: &'static str,
+    pub version: u32,
+    pub timestamp: &'static str,
+}
+
+/// POST /api/auth/agent — self-service agent registration via NEP-413 signature.
+///
+/// - Empty body → returns instructions on what to sign
+/// - With signature → verifies and returns JWT token
+pub async fn agent_auth(
+    State(state): State<AppState>,
+    Json(req): Json<AgentAuthRequest>,
+) -> Result<Json<AgentAuthResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // If no message provided, return instructions
+    let message = match &req.message {
+        Some(m) if !m.is_empty() => m.clone(),
+        _ => {
+            return Ok(Json(AgentAuthResponse::Instructions {
+                instructions: "Sign a NEP-413 message to authenticate. \
+                    Use Outlayer's /wallet/v1/sign-message or any NEAR wallet. \
+                    Then POST the signed payload back to this endpoint.",
+                message_template: AgentMessageTemplate {
+                    action: "sign_in",
+                    domain: "near.fm",
+                    version: 1,
+                    timestamp: "<current unix timestamp in milliseconds>",
+                },
+                example_curl: r#"curl -X POST https://api.near.fm/api/auth/agent -H "Content-Type: application/json" -d '{"account_id":"<your_account_id>","public_key":"ed25519:...","signature":"ed25519:...","message":"{\"action\":\"sign_in\",\"domain\":\"near.fm\",\"version\":1,\"timestamp\":1710000000000}","nonce":[<32 bytes>],"recipient":"near.fm"}"#,
+            }));
+        }
+    };
+
+    // Require all fields for verification
+    let account_id = req.account_id.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("account_id is required", "Include the account_id from your wallet or Outlayer sign-message response")))?;
+    let public_key = req.public_key.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("public_key is required", "Include the public_key from the sign-message response")))?;
+    let signature = req.signature.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("signature is required", "Include the signature from the sign-message response")))?;
+    let nonce = req.nonce.as_ref().filter(|n| !n.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("nonce is required", "Include the nonce (32 bytes) from the sign-message response")))?;
+    let recipient = req.recipient.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("recipient is required", "Use \"near.fm\" as recipient")))?;
+
+    // Parse and validate message
+    let msg: serde_json::Value = serde_json::from_str(&message)
+        .map_err(|_| (StatusCode::BAD_REQUEST, agent_error("message must be valid JSON", "Format: {\"action\":\"sign_in\",\"domain\":\"near.fm\",\"version\":1,\"timestamp\":<ms>}")))?;
+
+    if msg.get("action").and_then(|v| v.as_str()) != Some("sign_in")
+        || msg.get("domain").and_then(|v| v.as_str()) != Some("near.fm")
+    {
+        return Err((StatusCode::BAD_REQUEST, agent_error(
+            "message must contain action=sign_in and domain=near.fm",
+            "Use the message_template from the instructions response",
+        )));
+    }
+
+    // Validate timestamp
+    let ts = msg.get("timestamp").and_then(|v| v.as_i64())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("missing timestamp in message", "Include current unix timestamp in milliseconds")))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let age_ms = now - ts;
+    if age_ms > 5 * 60 * 1000 || age_ms < -30_000 {
+        return Err((StatusCode::BAD_REQUEST, agent_error(
+            "signature expired (older than 5 minutes)",
+            &format!("Use a fresh timestamp. Current server time: {} ms", now),
+        )));
+    }
+
+    // Verify NEP-413 signature
+    let valid = nep413::verify_nep413_signature(public_key, signature, &message, nonce, recipient)
+        .map_err(|e| (StatusCode::BAD_REQUEST, agent_error(&format!("signature verification failed: {}", e), "Check that public_key, signature, message, nonce, and recipient are all correct")))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, agent_error("invalid signature", "The signature does not match the message and public key")));
+    }
+
+    // For hex accounts (Outlayer agents): verify that public_key matches account_id
+    // For named accounts: verify via NEAR RPC
+    if is_hex_account(account_id) {
+        let expected_pk = hex_account_to_public_key(account_id)
+            .map_err(|e| (StatusCode::BAD_REQUEST, agent_error(&e, "account_id must be a valid 64-char hex string")))?;
+        if public_key != expected_pk {
+            return Err((StatusCode::UNAUTHORIZED, agent_error(
+                "public_key does not match account_id",
+                &format!("For hex accounts, public_key must be derived from account_id. Expected: {}", expected_pk),
+            )));
+        }
+    } else {
+        let key_valid = nep413::verify_access_key(&state.config.near_rpc_url, account_id, public_key)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("RPC error: {}", e), "Try again later")))?;
+        if !key_valid {
+            return Err((StatusCode::UNAUTHORIZED, agent_error("public key does not belong to account", "Verify that the public_key is an access key on the account")));
+        }
+    }
+
+    // Get or create user
+    let is_admin = state.config.is_admin(account_id);
+    let user = queries::get_or_create_user(&state.db, account_id, is_admin)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_or_create_user failed for {}: {:?}", account_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Database error: {}", e), "Try again later"))
+        })?;
+
+    // Issue JWT
+    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Token error: {}", e), "Try again later")))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    tracing::info!(user_id = user.id, account_id = %account_id, "Agent authenticated");
+
+    Ok(Json(AgentAuthResponse::Success {
+        token,
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    }))
+}
+
+fn agent_error(error: &str, hint: &str) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "error": error,
+        "hint": hint,
+    }))
+}

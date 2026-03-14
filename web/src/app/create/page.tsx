@@ -198,38 +198,16 @@ export default function CreatePage() {
     );
   }
 
-  // No credits available
+  // Credit check (form still visible but blocked)
   const totalCredits = (user?.credit_balance ?? 0) + (user?.daily_credits_remaining ?? 0);
-  if (!user?.is_admin && totalCredits < 1) {
-    return (
-      <div className="px-4 py-16 text-center">
-        <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-amber-500/20 flex items-center justify-center">
-            <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-3">AI Music Studio</h1>
-          <p className="text-slate-400 mb-6">
-            You need credits to generate music. Each song costs 12 credits.
-          </p>
-          <div className="flex flex-col gap-3">
-            <Link href="/credits" className="btn-primary px-8 py-3 rounded-xl text-sm inline-block">
-              Buy Credits
-            </Link>
-            <Link href="/premium" className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all inline-block">
-              Get Premium for 40 daily credits
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const hasCredits = user?.is_admin || totalCredits >= 1;
 
   // ── Handlers ──
 
   const handleGenerate = async () => {
     setError("");
+
+    if (!hasCredits) return;
 
     if (customMode) {
       if (!lyrics.trim() && !instrumental) {
@@ -530,8 +508,34 @@ export default function CreatePage() {
           </div>
         )}
 
+        {/* No credits banner */}
+        {!hasCredits && (
+          <div className="glass-card rounded-2xl p-6 mb-8 border border-amber-500/20">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-purple-500/20 to-amber-500/20 flex items-center justify-center">
+                <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-slate-300 text-sm mb-3">
+                  You need credits to generate music. Each song costs 12 credits.
+                </p>
+                <div className="flex gap-2">
+                  <Link href="/credits" className="btn-primary px-5 py-2 rounded-lg text-xs inline-block">
+                    Buy Credits
+                  </Link>
+                  <Link href="/premium" className="px-5 py-2 rounded-lg text-xs text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all inline-block">
+                    Get Premium for 40 daily credits
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Mode toggle */}
-        <div className="flex gap-2 mb-8">
+        <div className={`flex gap-2 mb-8 ${!hasCredits ? "opacity-50 pointer-events-none" : ""}`}>
           <button
             onClick={() => setCustomMode(false)}
             className={`px-4 py-2 rounded-xl text-sm transition-all ${
@@ -554,7 +558,7 @@ export default function CreatePage() {
           </button>
         </div>
 
-        <div className="space-y-6">
+        <div className={`space-y-6 ${!hasCredits ? "opacity-50 pointer-events-none" : ""}`}>
           {!customMode ? (
             /* Simple mode */
             <div>
@@ -695,6 +699,10 @@ export default function CreatePage() {
           >
             Generate Music
           </button>
+
+          <p className="text-xs text-slate-600 text-center">
+            Want to fulfill a bounty request? You can select one later when uploading your song.
+          </p>
         </div>
       </div>
     );
@@ -813,10 +821,10 @@ export default function CreatePage() {
                     alt=""
                     className="w-full h-full object-cover"
                   />
-                  {/* Play overlay */}
+                  {/* Play overlay — always semi-visible */}
                   <button
                     onClick={() => togglePlay(idx)}
-                    className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 hover:opacity-100 transition-opacity"
+                    className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/40 transition-colors"
                   >
                     <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
                       {playingIdx === idx ? (
@@ -874,21 +882,30 @@ export default function CreatePage() {
                   onEnded={() => setPlayingIdx(null)}
                 />
 
-                {/* Seekbar */}
-                {audioProgress[idx] && audioProgress[idx].duration > 0 && isFinite(audioProgress[idx].duration) && (
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-[10px] text-slate-500 tabular-nums w-8 text-right">{formatTime(audioProgress[idx].current)}</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={audioProgress[idx].duration}
-                      step={0.1}
-                      value={audioProgress[idx].current}
-                      onChange={(e) => seekAudio(idx, Number(e.target.value))}
-                      className="flex-1 h-1 accent-purple-500 cursor-pointer"
-                    />
-                    <span className="text-[10px] text-slate-500 tabular-nums w-8">{formatTime(audioProgress[idx].duration)}</span>
-                  </div>
+                {/* Seekbar — always visible for consistent height */}
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[10px] text-slate-500 tabular-nums w-8 text-right">
+                    {audioProgress[idx] ? formatTime(audioProgress[idx].current) : "0:00"}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={audioProgress[idx]?.duration && isFinite(audioProgress[idx].duration) ? audioProgress[idx].duration : song.duration || 100}
+                    step={0.1}
+                    value={audioProgress[idx]?.current || 0}
+                    onChange={(e) => seekAudio(idx, Number(e.target.value))}
+                    className="flex-1 h-1 accent-purple-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-slate-500 tabular-nums w-8">
+                    {audioProgress[idx]?.duration && isFinite(audioProgress[idx].duration)
+                      ? formatTime(audioProgress[idx].duration)
+                      : song.duration ? formatTime(song.duration) : "0:00"}
+                  </span>
+                </div>
+
+                {/* Lyrics */}
+                {song.lyrics && (
+                  <pre className="text-xs text-slate-500 font-mono whitespace-pre-wrap max-h-32 overflow-y-auto mb-4 leading-relaxed">{song.lyrics}</pre>
                 )}
 
                 <button
@@ -922,53 +939,77 @@ export default function CreatePage() {
         </p>
 
         {/* Preview card */}
-        <div className="glass-card rounded-2xl p-4 mb-8 flex items-center gap-4">
-          <div
-            className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 cursor-pointer group bg-white/[0.06]"
-            onClick={() => coverInputRef.current?.click()}
-            title="Click to replace cover image"
-          >
-            {(customCoverPreview || selectedSong.image_url) && (
-              <img src={customCoverPreview || selectedSong.image_url!} alt="" className="w-full h-full object-cover" />
-            )}
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+        <div className="glass-card rounded-2xl overflow-hidden mb-8">
+          <div className="flex">
+            {/* Cover — large, clickable */}
+            <div
+              className="relative w-36 h-36 shrink-0 cursor-pointer group bg-white/[0.06]"
+              onClick={() => coverInputRef.current?.click()}
+            >
+              {(customCoverPreview || selectedSong.image_url) ? (
+                <img src={customCoverPreview || selectedSong.image_url!} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <svg className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5a2.25 2.25 0 002.25-2.25V5.25a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 003.75 21z" />
+                  </svg>
+                </div>
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setCustomCover(file);
+                    setCustomCoverPreview(URL.createObjectURL(file));
+                  }
+                }}
+              />
             </div>
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  setCustomCover(file);
-                  setCustomCoverPreview(URL.createObjectURL(file));
-                }
-              }}
-            />
+
+            {/* Info + player */}
+            <div className="flex-1 min-w-0 p-4 flex flex-col justify-between">
+              <div>
+                <p className="text-white font-semibold truncate">{selectedSong.title}</p>
+                <p className="text-slate-500 text-xs truncate mt-0.5">{selectedSong.tags}</p>
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="text-xs text-purple-400/70 hover:text-purple-400 transition-colors mt-1"
+                >
+                  Change cover
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => togglePlay(0)}
+                  className="w-9 h-9 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 hover:bg-purple-500/30 transition-colors shrink-0"
+                >
+                  {playingIdx === 0 ? (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </button>
+                <span className="text-[10px] text-slate-500 tabular-nums">
+                  {selectedSong.duration ? formatTime(selectedSong.duration) : ""}
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-white font-medium truncate">{selectedSong.title}</p>
-            <p className="text-slate-500 text-xs truncate">{selectedSong.tags}</p>
-          </div>
-          <button
-            onClick={() => togglePlay(0)}
-            className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 hover:bg-purple-500/30 transition-colors shrink-0"
-          >
-            {playingIdx === 0 ? (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            )}
-          </button>
           <audio
             ref={(el) => { audioRefs.current[0] = el; }}
             src={selectedSong.audio_url || selectedSong.stream_audio_url || undefined}

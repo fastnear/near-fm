@@ -787,35 +787,6 @@ export async function creditUsage(limit?: number): Promise<UsageRecord[]> {
   return fetchApi(`/api/credits/usage${params}`);
 }
 
-// ── API Keys ──
-
-export interface ApiKeyInfo {
-  id: number;
-  label: string;
-  created_at: string;
-  revoked_at: string | null;
-}
-
-export async function createApiKey(label: string): Promise<{
-  key: string;
-  id: number;
-  label: string;
-  created_at: string;
-}> {
-  return fetchApi("/api/api-keys", {
-    method: "POST",
-    body: JSON.stringify({ label }),
-  });
-}
-
-export async function listApiKeys(): Promise<ApiKeyInfo[]> {
-  return fetchApi("/api/api-keys");
-}
-
-export async function revokeApiKey(id: number): Promise<void> {
-  return fetchApi(`/api/api-keys/${id}`, { method: "DELETE" });
-}
-
 // ── Admin Credits ──
 
 export interface CreditsSummary {

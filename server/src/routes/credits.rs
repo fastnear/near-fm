@@ -270,3 +270,42 @@ pub async fn usage(
 
     Ok(Json(records))
 }
+
+// ── Pricing (public) ──
+
+#[derive(Debug, Serialize)]
+pub struct PricingResponse {
+    pub credits_per_usd: i32,
+    pub min_topup_usd: &'static str,
+    pub costs: Vec<PricingItem>,
+    pub accepted_tokens: Vec<AcceptedToken>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PricingItem {
+    pub action: &'static str,
+    pub credits: i32,
+    pub usd: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AcceptedToken {
+    pub name: &'static str,
+    pub contract: &'static str,
+    pub decimals: u8,
+}
+
+pub async fn pricing() -> Json<PricingResponse> {
+    Json(PricingResponse {
+        credits_per_usd: 100,
+        min_topup_usd: "0.01",
+        costs: vec![
+            PricingItem { action: "generate_song", credits: 12, usd: "0.12" },
+            PricingItem { action: "generate_lyrics", credits: 1, usd: "0.01" },
+        ],
+        accepted_tokens: vec![
+            AcceptedToken { name: "USDC", contract: USDC_TOKEN, decimals: 6 },
+            AcceptedToken { name: "USDT", contract: USDT_TOKEN, decimals: 6 },
+        ],
+    })
+}
