@@ -925,11 +925,14 @@ pub async fn download(
         urls
     };
 
-    // Try each URL until one succeeds
+    // Try each URL until one succeeds (Suno CDN may require Referer to avoid 403)
     let mut last_err = String::new();
     let mut resp = None;
     for url in &urls {
-        match state.http_client.get(url).send().await {
+        match state.http_client.get(url)
+            .header("Referer", "https://suno.com/")
+            .send().await
+        {
             Ok(r) if r.status().is_success() => { resp = Some(r); break; }
             Ok(r) => { last_err = format!("{} returned {}", url, r.status()); }
             Err(e) => { last_err = format!("{}: {}", url, e); }

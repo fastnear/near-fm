@@ -336,22 +336,21 @@ function BalanceTab() {
 
       {/* AI Credits */}
       <div className="glass-card rounded-2xl p-6">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-1">
           <h3 className="text-white font-semibold">AI Credits</h3>
           <p className="text-2xl font-bold text-white">
             {user?.credit_balance?.toLocaleString() ?? 0}
           </p>
         </div>
+        <p className="text-xs text-slate-400 mb-3">Used for AI music generation (12 credits per song)</p>
         {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
           <p className="text-xs text-cyan-400 mb-3">
             + {user.daily_credits_remaining} daily premium credits remaining
           </p>
         )}
-        <div className="flex gap-3">
-          <Link href="/credits" className="flex-1 text-center py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all">
-            Top Up
-          </Link>
-        </div>
+        <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
+          Top Up
+        </Link>
       </div>
 
       {/* Deposit & Withdraw */}
