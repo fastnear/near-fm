@@ -341,7 +341,7 @@ export default function ProfilePage() {
             <div className="min-w-0 flex-1">
               {displayName && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className={`text-xl sm:text-2xl font-bold truncate ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
+                  <h1 className={`text-xl sm:text-2xl font-bold truncate min-w-0 ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
                     {displayName}
                   </h1>
                   {isProfileAgent && (
