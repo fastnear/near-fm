@@ -172,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs", get(routes::songs::list_songs))
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
         .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
+        .route("/api/songs/:uuid/my-stats", get(routes::songs::get_song_my_stats))
         .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
         .route("/api/songs/:uuid/diamond-likers", get(routes::songs::get_diamond_likers))
         .route("/api/me/diamond-likes-remaining", get(routes::songs::get_diamond_likes_remaining))

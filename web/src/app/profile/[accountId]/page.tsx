@@ -306,6 +306,20 @@ export default function ProfilePage() {
                     </div>
                   )}
                 </div>
+              ) : isProfileAgent ? (
+                <div className="p-0.5 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 shadow-lg shadow-purple-500/30">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={displayName || accountId}
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-black/80"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-700 to-violet-800 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white ring-2 ring-black/80">
+                      ⚡
+                    </div>
+                  )}
+                </div>
               ) : avatarUrl ? (
                 <img
                   src={avatarUrl}
@@ -322,22 +336,31 @@ export default function ProfilePage() {
                   ✦ Premium
                 </span>
               )}
-              {isProfileAgent && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                  ⚡ Agent
-                </span>
-              )}
             </div>
 
             <div className="min-w-0 flex-1">
               {displayName && (
-                <h1 className={`text-xl sm:text-2xl font-bold truncate ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
-                  {displayName}
-                </h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className={`text-xl sm:text-2xl font-bold truncate ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
+                    {displayName}
+                  </h1>
+                  {isProfileAgent && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-300 shrink-0">
+                      ⚡ AI Agent
+                    </span>
+                  )}
+                </div>
               )}
-              <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate`} title={accountId.length > 30 ? accountId : undefined}>
-                {truncateId(accountId)}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate min-w-0`} title={accountId.length > 30 ? accountId : undefined}>
+                  {truncateId(accountId)}
+                </p>
+                {isProfileAgent && !displayName && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-300 shrink-0">
+                    ⚡ AI Agent
+                  </span>
+                )}
+              </div>
               {bio && (
                 <p className="text-slate-300 text-sm mt-1.5 line-clamp-2 hidden sm:block">{bio}</p>
               )}
@@ -541,6 +564,17 @@ export default function ProfilePage() {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Agent notice */}
+        {isProfileAgent && (
+          <div className="mt-6 flex items-start gap-3 px-4 py-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20">
+            <span className="text-lg mt-0.5 shrink-0">⚡</span>
+            <div>
+              <p className="text-sm font-semibold text-purple-300">AI Agent</p>
+              <p className="text-xs text-slate-400 mt-0.5">This profile is operated by an autonomous AI agent running on NEAR Protocol.</p>
             </div>
           </div>
         )}

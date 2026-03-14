@@ -872,6 +872,153 @@ pub async fn get_diamond_likers(
     Ok(Json(likers))
 }
 
+// ── Song stats for owner ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct TipItem {
+    pub tipper_account_id: String,
+    pub amount_yocto: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TipStats {
+    pub total_yocto: String,
+    pub count: i64,
+    pub items: Vec<TipItem>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct CommentItem {
+    pub id: i32,
+    pub body: String,
+    pub is_hidden: bool,
+    pub author_account_id: String,
+    pub author_display_name: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CommentStats {
+    pub count: i64,
+    pub items: Vec<CommentItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LikeStats {
+    pub upvotes: i32,
+    pub downvotes: i32,
+    pub diamond_likes: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SongMyStatsResponse {
+    pub song_uuid: String,
+    pub tips: TipStats,
+    pub comments: CommentStats,
+    pub likes: LikeStats,
+}
+
+#[derive(sqlx::FromRow)]
+struct SongStatsRow {
+    id: i32,
+    uploader_id: i32,
+    upvotes: i32,
+    downvotes: i32,
+    diamond_like_count: i32,
+    total_tips_yocto: String,
+}
+
+pub async fn get_song_my_stats(
+    State(state): State<AppState>,
+    Path(uuid): Path<String>,
+    extensions: Extensions,
+) -> Result<Json<SongMyStatsResponse>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // Lightweight query — no JOINs needed, just ownership + stats fields
+    let song: SongStatsRow = sqlx::query_as(
+        "SELECT id, uploader_id, upvotes, downvotes, diamond_like_count, total_tips_yocto \
+         FROM songs WHERE uuid = $1 AND NOT is_deleted",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+
+    if song.uploader_id != claims.user_id {
+        return Err((StatusCode::FORBIDDEN, "Not your song".to_string()));
+    }
+
+    // All 4 data queries run concurrently
+    let (tips_count, tip_items, comments_count, comment_items) = tokio::try_join!(
+        async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tips WHERE song_id = $1")
+                .bind(song.id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        },
+        async {
+            sqlx::query_as::<_, TipItem>(
+                r#"SELECT u.slug AS tipper_account_id, t.amount_yocto, t.created_at
+                   FROM tips t
+                   JOIN users u ON u.id = t.tipper_id
+                   WHERE t.song_id = $1
+                   ORDER BY t.created_at DESC
+                   LIMIT 100"#,
+            )
+            .bind(song.id)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        },
+        async {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM comments WHERE song_id = $1")
+                .bind(song.id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        },
+        async {
+            sqlx::query_as::<_, CommentItem>(
+                r#"SELECT c.id, c.body, c.is_hidden,
+                          u.slug AS author_account_id, u.display_name AS author_display_name,
+                          c.created_at
+                   FROM comments c
+                   JOIN users u ON u.id = c.user_id
+                   WHERE c.song_id = $1
+                   ORDER BY c.created_at DESC
+                   LIMIT 100"#,
+            )
+            .bind(song.id)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        },
+    )?;
+
+    Ok(Json(SongMyStatsResponse {
+        song_uuid: uuid,
+        tips: TipStats {
+            total_yocto: song.total_tips_yocto,
+            count: tips_count,
+            items: tip_items,
+        },
+        comments: CommentStats {
+            count: comments_count,
+            items: comment_items,
+        },
+        likes: LikeStats {
+            upvotes: song.upvotes,
+            downvotes: song.downvotes,
+            diamond_likes: song.diamond_like_count,
+        },
+    }))
+}
+
 pub async fn report_song(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
