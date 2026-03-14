@@ -25,6 +25,11 @@ function formatNear(yocto: string): string {
   return n.toFixed(1).replace(/\.0$/, "");
 }
 
+function truncateId(id: string, max = 30): string {
+  if (id.length <= max) return id;
+  return `${id.slice(0, 12)}...${id.slice(-8)}`;
+}
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     year: "numeric",
@@ -262,6 +267,7 @@ export default function ProfilePage() {
 
   const displayName = profileData.display_name as string | null;
   const isProfilePremium = profileData.is_premium as boolean;
+  const isProfileAgent = profileData.is_agent as boolean;
   const nearAccountId = profileData.near_account_id as string | null;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
@@ -316,6 +322,11 @@ export default function ProfilePage() {
                   ✦ Premium
                 </span>
               )}
+              {isProfileAgent && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                  ⚡ Agent
+                </span>
+              )}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -324,15 +335,15 @@ export default function ProfilePage() {
                   {displayName}
                 </h1>
               )}
-              <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate`}>
-                {accountId}
+              <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate`} title={accountId.length > 30 ? accountId : undefined}>
+                {truncateId(accountId)}
               </p>
               {bio && (
                 <p className="text-slate-300 text-sm mt-1.5 line-clamp-2 hidden sm:block">{bio}</p>
               )}
               <div className="flex items-center gap-3 mt-1 flex-wrap">
                 {nearAccountId && nearAccountId !== accountId && (
-                  <span className="text-xs text-slate-500 font-mono">{nearAccountId}</span>
+                  <span className="text-xs text-slate-500 font-mono" title={nearAccountId}>{truncateId(nearAccountId)}</span>
                 )}
                 <p className="text-slate-500 text-xs">
                   Member since {formatDate(memberSince)}

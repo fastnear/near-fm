@@ -32,6 +32,7 @@ pub struct UserProfileResponse {
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
     pub is_premium: bool,
+    pub is_agent: bool,
     pub created_at: String,
     pub songs: Vec<SongWithUploader>,
 }
@@ -52,6 +53,7 @@ pub async fn get_profile(
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,
+            u.is_agent AS uploader_is_agent,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,
@@ -130,6 +132,7 @@ pub async fn get_profile(
         bio: user.bio,
         twitter_handle: user.twitter_handle,
         is_premium: user.premium_until.map_or(false, |u| u > chrono::Utc::now()),
+        is_agent: user.is_agent,
         created_at: user.created_at.to_rfc3339(),
         songs,
     }))
@@ -215,6 +218,7 @@ pub async fn list_bookmarks(
             u.display_name AS uploader_display_name,
             u.reputation_score AS uploader_reputation,
             u.twitter_handle AS uploader_twitter_handle,
+            u.is_agent AS uploader_is_agent,
             c.name AS category_name,
             c.slug AS category_slug,
             l.code AS language_code,

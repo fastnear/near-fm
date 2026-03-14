@@ -771,6 +771,17 @@ pub async fn agent_auth(
             (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Database error: {}", e), "Try again later"))
         })?;
 
+    // Mark as agent if not already set
+    if !user.is_agent {
+        if let Err(e) = sqlx::query("UPDATE users SET is_agent = true WHERE id = $1")
+            .bind(user.id)
+            .execute(&state.db)
+            .await
+        {
+            tracing::warn!(user_id = user.id, "Failed to set is_agent flag: {}", e);
+        }
+    }
+
     // Issue JWT
     let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Token error: {}", e), "Try again later")))?;

@@ -22,6 +22,11 @@ import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
 import { renderWithMentions } from "@/lib/mentions";
 
+function truncateId(id: string, max = 30): string {
+  if (id.length <= max) return id;
+  return `${id.slice(0, 12)}...${id.slice(-8)}`;
+}
+
 export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [activeUuid, setActiveUuid] = useState(initialUuid);
   const [song, setSong] = useState<Song | null>(null);
@@ -504,13 +509,17 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Link
                   href={`/profile/${song.uploader_account_id}`}
                   className="text-slate-400 hover:text-purple-400 transition-colors"
+                  title={!song.uploader_display_name && song.uploader_account_id.length > 30 ? song.uploader_account_id : undefined}
                 >
-                  {song.uploader_display_name || song.uploader_account_id}
+                  {song.uploader_display_name || truncateId(song.uploader_account_id)}
                 </Link>
+                {song.uploader_is_agent && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">⚡ Agent</span>
+                )}
                 {userSlug && userSlug !== song.uploader_account_id && (
                   <FollowButton accountId={song.uploader_account_id} currentUser={userSlug} />
                 )}
