@@ -17,7 +17,7 @@ const MAX_PROMPT_LEN: usize = 2000;
 const MAX_LYRICS_LEN: usize = 10_000;
 const MAX_STYLE_LEN: usize = 500;
 const MAX_TITLE_LEN: usize = 200;
-const CACHE_TTL_SECS: u64 = 30 * 60; // 30 minutes
+const CACHE_TTL_SECS: u64 = 4 * 60 * 60; // 4 hours
 
 // ── In-memory task cache (populated by callback) ──
 
@@ -728,6 +728,63 @@ pub async fn callback(
         status_str,
         suno_data.as_ref().map(|v| v.len()).unwrap_or(0)
     );
+
+    // Refund credits if Suno returned an error
+    if suno_code != 200 {
+        let db = state.db.clone();
+        let tid = task_id.clone();
+        tokio::spawn(async move {
+            // Find the credit_usage record for this task and refund
+            let row: Option<(i32, i32, i32)> = sqlx::query_as(
+                "SELECT user_id, from_daily, from_purchased FROM credit_usage WHERE reference_id = $1 AND action = 'song_generation' LIMIT 1"
+            )
+            .bind(&tid)
+            .fetch_optional(&db)
+            .await
+            .ok()
+            .flatten();
+
+            if let Some((user_id, from_daily, from_purchased)) = row {
+                // Atomically insert refund record (skip if already refunded)
+                let inserted = sqlx::query(
+                    "INSERT INTO credit_usage (user_id, credits_spent, from_daily, from_purchased, action, reference_id) \
+                     SELECT $1, $2, $3, $4, $5, $6 \
+                     WHERE NOT EXISTS (SELECT 1 FROM credit_usage WHERE reference_id = $6 AND action = 'refund_song_generation')"
+                )
+                .bind(user_id)
+                .bind(-(from_daily + from_purchased))
+                .bind(-from_daily)
+                .bind(-from_purchased)
+                .bind("refund_song_generation")
+                .bind(&tid)
+                .execute(&db)
+                .await;
+
+                if inserted.as_ref().map(|r| r.rows_affected()).unwrap_or(0) > 0 {
+                    // Refund daily and purchased credits
+                    if from_daily > 0 {
+                        let _ = sqlx::query(
+                            "UPDATE users SET daily_credits_used = GREATEST(daily_credits_used - $1, 0) WHERE id = $2"
+                        )
+                        .bind(from_daily)
+                        .bind(user_id)
+                        .execute(&db)
+                        .await;
+                    }
+                    if from_purchased > 0 {
+                        let _ = sqlx::query(
+                            "UPDATE users SET credit_balance = credit_balance + $1 WHERE id = $2"
+                        )
+                        .bind(from_purchased)
+                        .bind(user_id)
+                        .execute(&db)
+                        .await;
+                    }
+                    tracing::info!("Refunded {} credits for failed task {}", from_daily + from_purchased, tid);
+                }
+            }
+        });
+    }
 
     cache.insert(
         task_id,

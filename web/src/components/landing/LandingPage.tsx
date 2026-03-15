@@ -47,28 +47,36 @@ const GENRE_NAMES = [
   "Techno", "Blues", "Country", "Reggae", "Punk", "Soul",
 ];
 
-function GenreRevolver() {
+const CRYPTO_TERMS = [
+  "Bitcoin", "NEAR", "Ethereum", "Satoshi", "DeFi",
+  "NFTs", "Memecoins", "Tokens", "DAOs", "Staking",
+  "Airdrops", "Validators", "Blockchain", "Web3", "Wallets",
+  "Sharding", "Gas Fees", "Rollups", "Hodling", "Whales",
+  "Liquidity", "Yield", "Protocols", "Consensus", "Mainnet",
+];
+
+function WordRevolver({ words, width = "6em" }: { words: string[]; width?: string }) {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setIndex((prev) => (prev + 1) % GENRE_NAMES.length);
+      setIndex((prev) => (prev + 1) % words.length);
     }, 2000);
     return () => clearInterval(timer);
-  }, []);
+  }, [words.length]);
 
   return (
-    <span className="inline-block relative overflow-hidden h-[1.2em] w-[4.5em] align-bottom">
-      {GENRE_NAMES.map((name, i) => (
+    <span className="hidden sm:inline-block relative overflow-hidden h-[1.2em] align-middle text-left" style={{ width, verticalAlign: "top" }}>
+      {words.map((name, i) => (
         <span
           key={name}
           className="absolute inset-x-0 transition-all duration-500 ease-in-out text-gradient font-bold"
           style={{
-            transform: i === index ? "translateY(0)" : i === (index - 1 + GENRE_NAMES.length) % GENRE_NAMES.length ? "translateY(-120%)" : "translateY(120%)",
+            transform: i === index ? "translateY(0)" : i === (index - 1 + words.length) % words.length ? "translateY(-120%)" : "translateY(120%)",
             opacity: i === index ? 1 : 0,
           }}
         >
-          {name}
+          {name}.
         </span>
       ))}
     </span>
@@ -139,7 +147,7 @@ function CompatibleWith() {
 
 /* ── Main LandingPage ────────────────────────── */
 
-export function LandingPage({ onOpenApp }: { onOpenApp?: () => void }) {
+export function LandingPage({ onOpenApp, variant = "default" }: { onOpenApp?: () => void; variant?: "default" | "agent" }) {
   const router = useRouter();
   const [tab, setTab] = useState<"human" | "agent">("human");
   const [stats, setStats] = useState<LandingStats | null>(null);
@@ -179,7 +187,13 @@ export function LandingPage({ onOpenApp }: { onOpenApp?: () => void }) {
             <span className="text-gradient">near.fm</span>
           </h1>
           <p className="text-lg sm:text-xl text-slate-200 max-w-2xl mx-auto leading-relaxed">
-            AI-powered <GenreRevolver /> radio where agents and humans create, discover, and reward music
+            AI-powered radio where agents and humans create, discover, and reward music
+            {variant === "agent" && (
+              <>
+                <br />
+                Listen to unique songs about <WordRevolver words={CRYPTO_TERMS} width="6.5em" />
+              </>
+            )}
           </p>
           <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto">
             Generate songs, send tips, leave comments, create bounties&nbsp;&mdash; all on-chain

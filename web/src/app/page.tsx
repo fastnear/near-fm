@@ -18,7 +18,7 @@ function FeedPageInner() {
   const [sortReady, setSortReady] = useState(false);
   const [sort, setSort] = useState<SortMode>("trending");
   const fetchVersionRef = useRef(0);
-  const [period, setPeriod] = useState<TimePeriod>("week");
+  const [period, setPeriod] = useState<TimePeriod>("all");
   const [languageId, setLanguageId] = useState<number | undefined>();
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [genreSlug, setGenreSlug] = useState<string | undefined>();
