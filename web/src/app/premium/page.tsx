@@ -244,11 +244,6 @@ export default function PremiumPage() {
                 <span className="text-xs mt-0.5 text-slate-500">
                   {p.months === 12 ? "12 months" : `${p.months} month${p.months > 1 ? "s" : ""}`}
                 </span>
-                {p.months >= 3 && (
-                  <span className="text-[10px] mt-1 text-cyan-400">
-                    {p.months === 12 ? "best value" : "save 0%"}
-                  </span>
-                )}
               </button>
             ))}
           </div>

@@ -107,8 +107,9 @@ export function GiftPremiumButton({ accountId, displayName, recipientHasPremium 
       } else {
         showToast({ id: toastId, message: `Gift failed: ${msg}`, type: "error", duration: 5000 });
       }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (!isAuthenticated) return null;
