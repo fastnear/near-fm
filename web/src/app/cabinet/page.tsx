@@ -150,31 +150,60 @@ export default function CabinetPage() {
       </div>
 
       {/* Premium status */}
-      {isPremium && (
+      {isPremium ? (
         <div className="glass-card rounded-2xl p-5 mb-6 border border-cyan-500/10">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-2xl">✦</span>
-            <h2 className="text-lg font-bold diamond-shimmer">Premium</h2>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">✦</span>
+              <h2 className="text-lg font-bold diamond-shimmer">Premium</h2>
+            </div>
+            <Link href="/premium" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+              Extend →
+            </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <div className="space-y-1">
+              <div className="text-slate-400">Daily AI credits</div>
+              <div className="text-cyan-400 font-semibold">
+                {user?.daily_credits_remaining ?? 0} / 40
+              </div>
+              <div className="text-xs text-slate-500">Resets midnight UTC</div>
+            </div>
             <div className="space-y-1">
               <div className="text-slate-400">Diamond Likes today</div>
-              <div className="text-white font-semibold text-lg">
+              <div className="text-white font-semibold">
                 {diamondRemaining !== null ? `${diamondRemaining} / 5` : "..."}
               </div>
-              <div className="text-xs text-slate-500">Diamond likes boost songs much higher in the feed</div>
+              <div className="text-xs text-slate-500">Boosts songs in feed</div>
             </div>
             <div className="space-y-1">
               <div className="text-slate-400">Playlists</div>
               <div className="text-[#00ec97] font-semibold">Available</div>
-              <div className="text-xs text-slate-500">Create playlists and share them</div>
+              <div className="text-xs text-slate-500">Create & share playlists</div>
             </div>
             <div className="space-y-1">
-              <div className="text-slate-400">Premium until</div>
+              <div className="text-slate-400">Active until</div>
               <div className="text-white font-semibold">
                 {user?.premium_until ? new Date(user.premium_until).toLocaleDateString() : "Active"}
               </div>
             </div>
+          </div>
+        </div>
+      ) : (
+        <div className="glass-card rounded-2xl p-5 mb-6 border border-white/[0.06]">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-300 mb-1">Get Premium — $10/month</h2>
+              <p className="text-sm text-slate-500">
+                40 free AI credits/day · 3 songs/day · Diamond Likes · Playlists
+              </p>
+            </div>
+            <Link
+              href="/premium"
+              className="shrink-0 ml-4 px-4 py-2 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all"
+            >
+              Upgrade
+            </Link>
           </div>
         </div>
       )}
@@ -345,12 +374,19 @@ function BalanceTab() {
         <p className="text-xs text-slate-400 mb-3">Used for AI music generation (12 credits per song)</p>
         {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
           <p className="text-xs text-cyan-400 mb-3">
-            + {user.daily_credits_remaining} daily premium credits remaining
+            + {user.daily_credits_remaining} free daily credits remaining (premium)
           </p>
         )}
-        <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
-          Top Up
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
+            Top Up
+          </Link>
+          {!isPremium && (
+            <Link href="/premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/20 transition-all">
+              Get 40 free/day with Premium →
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Deposit & Withdraw */}
@@ -666,6 +702,38 @@ function notificationText(notif: Notification): React.ReactNode {
           {songTitle && songUuid ? (
             <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link>
           ) : ""}
+        </>
+      );
+    }
+    case "profile_comment": {
+      const commenter = data.commenter_account_id as string | undefined;
+      return (
+        <>
+          {commenter ? <Link href={`/profile/${commenter}`} className="text-purple-400 hover:underline">{commenter}</Link> : "Someone"}
+          {" left a comment on your profile"}
+        </>
+      );
+    }
+    case "profile_tip": {
+      const fromAccount = data.from_account as string | undefined;
+      const amountYocto = data.amount_yocto as string | undefined;
+      const nearStr = amountYocto ? yoctoToNear(amountYocto) : "?";
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-amber-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` sent you ${nearStr} NEAR`}
+        </>
+      );
+    }
+    case "premium_gifted": {
+      const fromAccount = data.from_account_id as string | undefined;
+      const daysAdded = data.days_added as number | undefined;
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-cyan-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` gifted you ${daysAdded ?? "?"} days of `}
+          <span className="diamond-shimmer font-medium">Premium</span>
+          {" ✦"}
         </>
       );
     }

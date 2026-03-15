@@ -357,6 +357,19 @@ export async function updateUserProfile(accountId: string, data: {
   });
 }
 
+// ── Premium ──
+
+export async function premiumSubscribe(checkKey: string, accountId: string): Promise<{
+  premium_until: string;
+  days_added: number;
+  is_gift: boolean;
+}> {
+  return fetchApi("/api/premium/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ check_key: checkKey, account_id: accountId }),
+  });
+}
+
 // ── Profile Comments ──
 
 export interface ProfileComment {

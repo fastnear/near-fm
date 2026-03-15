@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser, getProfileComments, createProfileComment, deleteProfileComment } from "@/lib/api";
 import type { FollowerEntry, ProfileComment } from "@/lib/api";
 import { ProfileTipButton } from "@/components/profile/ProfileTipButton";
+import { GiftPremiumButton } from "@/components/profile/GiftPremiumButton";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
@@ -446,6 +447,13 @@ export default function ProfilePage() {
                     accountId={accountId}
                     nearAccountId={nearAccountId}
                     onTipSuccess={(comment) => setProfileComments((prev) => [comment, ...prev])}
+                  />
+                )}
+                {currentUser && (
+                  <GiftPremiumButton
+                    accountId={accountId}
+                    displayName={displayName}
+                    recipientHasPremium={isProfilePremium}
                   />
                 )}
                 {currentUser && !isFollowing && (

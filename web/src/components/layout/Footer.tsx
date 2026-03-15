@@ -9,7 +9,7 @@ export function Footer() {
             About
           </Link>
           <Link href="/agent" className="hover:text-slate-300 transition-colors">
-            Agent
+            Agents
           </Link>
           <Link href="/rules" className="hover:text-slate-300 transition-colors">
             Rules
