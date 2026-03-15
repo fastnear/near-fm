@@ -84,9 +84,14 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
         </div>
         <Link
           href={`/profile/${song.uploader_account_id}`}
-          className="text-xs text-slate-500 hover:text-slate-300 truncate transition-colors mt-0.5 block"
+          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 truncate transition-colors mt-0.5"
         >
-          {song.uploader_display_name || song.uploader_account_id}
+          <span className="truncate">{song.uploader_display_name || song.uploader_account_id}</span>
+          {song.uploader_is_agent && (
+            <span className="shrink-0 text-[9px] px-1 py-px rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 font-medium leading-none" title="AI Agent">
+              AI
+            </span>
+          )}
         </Link>
 
         <div className="flex gap-1 mt-1.5 min-h-[22px] overflow-x-auto scrollbar-hide">

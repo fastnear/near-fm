@@ -35,6 +35,31 @@ export function tipFromBalanceArgs(
 }
 
 /**
+ * Tip an artist's profile directly with attached NEAR.
+ */
+export function tipProfileAction(recipient: string, amountYocto: string) {
+  return {
+    contractId: CONTRACT_ID,
+    method: "tip",
+    args: { recipient, song_uuid: "" },
+    gas: "30000000000000",
+    deposit: amountYocto,
+  };
+}
+
+/**
+ * Tip an artist's profile from virtual balance.
+ */
+export function tipProfileFromBalanceArgs(recipient: string, amountYocto: string) {
+  return {
+    contractId: CONTRACT_ID,
+    method: "tip_from_balance",
+    args: { recipient, amount: amountYocto, song_uuid: "" },
+    gas: "30000000000000",
+  };
+}
+
+/**
  * Deposit NEAR into virtual balance.
  */
 export function depositAction(amountYocto: string) {

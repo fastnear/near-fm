@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser } from "@/lib/api";
-import type { FollowerEntry } from "@/lib/api";
+import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser, getProfileComments, createProfileComment, deleteProfileComment } from "@/lib/api";
+import type { FollowerEntry, ProfileComment } from "@/lib/api";
+import { ProfileTipButton } from "@/components/profile/ProfileTipButton";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useToast } from "@/components/ui/Toast";
 import { SongCard } from "@/components/song/SongCard";
 import { FollowButton } from "@/components/song/FollowButton";
 import type { Song } from "@/types";
@@ -44,6 +46,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const { user: authUser, signOut: authSignOut, refreshUser } = useAuth();
   const { accountId: walletAccountId, callFunction, linkWallet } = useNearWallet();
+  const { showToast } = useToast();
   const currentUser = authUser?.slug ?? null;
   const isOwnProfile = currentUser === accountId;
 
@@ -52,6 +55,10 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followers, setFollowers] = useState<FollowerEntry[]>([]);
+  const [profileComments, setProfileComments] = useState<ProfileComment[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [fanFeedTab, setFanFeedTab] = useState<"all" | "tips">("all");
 
   // Block & follow state
   const [isBlocked, setIsBlocked] = useState(false);
@@ -99,6 +106,42 @@ export default function ProfilePage() {
       getFollowers(accountId).then(setFollowers).catch(console.error);
     }
   }, [accountId]);
+
+  // Load profile comments
+  useEffect(() => {
+    if (!accountId) return;
+    getProfileComments(accountId).then(setProfileComments).catch(console.error);
+    return () => {
+      setProfileComments([]);
+      setFanFeedTab("all");
+    };
+  }, [accountId]);
+
+  const handleSubmitComment = async () => {
+    if (!commentBody.trim() || commentSubmitting) return;
+    setCommentSubmitting(true);
+    try {
+      const comment = await createProfileComment(accountId, commentBody.trim());
+      setProfileComments((prev) => [comment, ...prev]);
+      setCommentBody("");
+      showToast({ message: "Comment posted!", type: "success", id: "pc-ok", duration: 2000 });
+    } catch (e) {
+      console.error("Failed to post comment:", e);
+      showToast({ message: "Failed to post comment. Please try again.", type: "error", id: "pc-err" });
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const handleDeleteProfileComment = async (id: number) => {
+    try {
+      await deleteProfileComment(accountId, id);
+      setProfileComments((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      console.error("Failed to delete comment:", e);
+      showToast({ message: "Failed to delete comment.", type: "error", id: "pc-del-err" });
+    }
+  };
 
   // Check block status
   useEffect(() => {
@@ -398,6 +441,13 @@ export default function ProfilePage() {
             {!isOwnProfile && (
               <>
                 <FollowButton key={followKey} accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
+                {currentUser && (
+                  <ProfileTipButton
+                    accountId={accountId}
+                    nearAccountId={nearAccountId}
+                    onTipSuccess={(comment) => setProfileComments((prev) => [comment, ...prev])}
+                  />
+                )}
                 {currentUser && !isFollowing && (
                   <button
                     onClick={handleBlock}
@@ -574,7 +624,7 @@ export default function ProfilePage() {
             <span className="text-lg mt-0.5 shrink-0">⚡</span>
             <div>
               <p className="text-sm font-semibold text-purple-300">AI Agent</p>
-              <p className="text-xs text-slate-400 mt-0.5">This profile is operated by an autonomous AI agent running on NEAR Protocol.</p>
+              <p className="text-xs text-slate-400 mt-0.5">This profile is operated by an autonomous AI agent.</p>
             </div>
           </div>
         )}
@@ -670,6 +720,123 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* Fan Feed */}
+      <div className="mt-10">
+        {/* Header + tabs */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-white">Fan Feed</h2>
+            <div className="flex gap-1 p-0.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
+              {(["all", "tips"] as const).map((tab) => {
+                const count = tab === "tips"
+                  ? profileComments.filter((c) => c.amount_yocto).length
+                  : profileComments.length;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setFanFeedTab(tab)}
+                    className={`px-3 py-1 text-xs rounded-md transition-all capitalize ${
+                      fanFeedTab === tab
+                        ? "bg-white/[0.08] text-white font-medium"
+                        : "text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    {tab === "all" ? "All" : "Tips"}
+                    {count > 0 && (
+                      <span className="ml-1.5 text-[10px] text-slate-500">{count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Comment form — only on All tab */}
+        {fanFeedTab === "all" && currentUser && !isOwnProfile && (
+          <div className="mb-5 flex gap-3">
+            <textarea
+              value={commentBody}
+              onChange={(e) => setCommentBody(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmitComment();
+              }}
+              placeholder={`Leave a message for ${displayName || accountId}...`}
+              maxLength={1000}
+              rows={2}
+              className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-purple-500 focus:outline-none resize-none"
+            />
+            <button
+              onClick={handleSubmitComment}
+              disabled={commentSubmitting || !commentBody.trim()}
+              className="self-end px-4 py-2.5 btn-primary rounded-xl text-sm disabled:opacity-40"
+            >
+              {commentSubmitting ? "..." : "Post"}
+            </button>
+          </div>
+        )}
+
+        {(() => {
+          const displayed = fanFeedTab === "tips"
+            ? profileComments.filter((c) => c.amount_yocto)
+            : profileComments;
+          if (displayed.length === 0) return (
+            <p className="text-slate-500 text-sm">
+              {fanFeedTab === "tips"
+                ? "No tips yet."
+                : isOwnProfile
+                  ? "No messages yet."
+                  : "No messages yet. Be the first to leave one!"}
+            </p>
+          );
+          return (
+            <div className="space-y-3">
+              {displayed.map((c) => (
+                <div key={c.id} className="flex gap-3 group">
+                  <Link href={`/profile/${c.author_account_id}`} className="shrink-0">
+                    {c.author_avatar_url ? (
+                      <img src={c.author_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white">
+                        {(c.author_display_name || c.author_account_id).charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </Link>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <Link href={`/profile/${c.author_account_id}`} className="text-xs font-medium text-slate-300 hover:text-white transition-colors truncate">
+                        {c.author_display_name || c.author_account_id}
+                      </Link>
+                      {c.author_is_agent && (
+                        <span className="text-[9px] px-1 py-px rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 font-medium leading-none shrink-0">AI</span>
+                      )}
+                      {c.author_is_premium && (
+                        <span className="text-[9px] px-1 py-px rounded bg-purple-500/15 text-purple-400 border border-purple-500/20 font-medium leading-none shrink-0">✦</span>
+                      )}
+                      {c.amount_yocto && (
+                        <span className="text-[11px] font-semibold text-amber-400 shrink-0">
+                          +{formatNear(c.amount_yocto)} NEAR
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-600 shrink-0">{new Date(c.created_at).toLocaleDateString()}</span>
+                      {(currentUser === c.author_account_id || currentUser === accountId || authUser?.is_admin) && (
+                        <button
+                          onClick={() => handleDeleteProfileComment(c.id)}
+                          className="ml-auto text-[11px] text-slate-600 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                        >
+                          delete
+                        </button>
+                      )}
+                    </div>
+                    {c.body && <p className="text-sm text-slate-300 break-words">{c.body}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 }

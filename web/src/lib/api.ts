@@ -357,6 +357,48 @@ export async function updateUserProfile(accountId: string, data: {
   });
 }
 
+// ── Profile Comments ──
+
+export interface ProfileComment {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  amount_yocto: string | null;
+}
+
+export async function getProfileComments(accountId: string): Promise<ProfileComment[]> {
+  return fetchApi(`/api/users/${accountId}/comments`);
+}
+
+export async function createProfileComment(accountId: string, body: string): Promise<ProfileComment> {
+  return fetchApi(`/api/users/${accountId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteProfileComment(accountId: string, id: number): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/comments/${id}`, { method: "DELETE" });
+}
+
+export async function recordProfileTip(accountId: string, data: {
+  tx_hash: string;
+  amount_yocto: string;
+  from_balance: boolean;
+  body?: string;
+}): Promise<ProfileComment> {
+  return fetchApi(`/api/users/${accountId}/tip`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 // ── User Blocks ──
 
 export async function blockUser(accountId: string): Promise<void> {

@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(feed::start_feed_scoring_loop(db.clone()));
     tokio::spawn(reputation::start_reputation_loop(db.clone()));
     tokio::spawn(validation::revalidate_pending(db.clone()));
+    tokio::spawn(reset_daily_credits_at_midnight(db.clone()));
 
     let suno_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(600)) // 10 min for Suno generation
@@ -105,6 +106,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tips", post(routes::tips::record_tip))
         .route("/api/songs/:uuid/comments", post(routes::comments::create_comment))
         .route("/api/comments/:id", delete(routes::comments::delete_comment))
+        .route("/api/users/:account_id/comments", post(routes::users::create_profile_comment))
+        .route("/api/users/:account_id/comments/:id", delete(routes::users::delete_profile_comment))
+        .route("/api/users/:account_id/tip", post(routes::users::record_profile_tip))
         .route("/api/requests/:uuid", patch(routes::requests::update_request))
         .layer(middleware::from_fn_with_state(
             strict_limiter,
@@ -129,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/suno/generate", post(routes::suno::generate))
         .route("/api/suno/generate-lyrics", post(routes::suno::generate_lyrics))
         .route("/api/credits/topup", post(routes::credits::topup))
+        .route("/api/premium/subscribe", post(routes::premium::subscribe))
         .route("/api/auth/agent", post(routes::auth::agent_auth))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
@@ -184,6 +189,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/requests/:uuid/submissions", get(routes::requests::list_submissions).post(routes::requests::submit_to_request))
         // Comments (GET not rate-limited)
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
+        .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route("/api/users/:account_id/profile", patch(routes::users::update_profile))
@@ -280,8 +286,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
         // RSS feed
         .route("/feed/:feed_token", get(routes::rss::playlist_feed))
-        // Credits
+        // Credits & Premium
         .route("/api/credits/balance", get(routes::credits::balance))
+        .route("/api/premium/gifts/:account_id", get(routes::premium::get_gifts))
         .route("/api/credits/history", get(routes::credits::history))
         .route("/api/credits/usage", get(routes::credits::usage))
         .route("/api/credits/pricing", get(routes::credits::pricing))
@@ -313,4 +320,41 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Resets `daily_credits_used` to 0 for all users at UTC midnight each day.
+/// This ensures premium users see their credits refresh at a predictable time
+/// rather than lazily on their first generation of the new day.
+async fn reset_daily_credits_at_midnight(db: sqlx::PgPool) {
+    loop {
+        // Sleep until next UTC midnight
+        let now = chrono::Utc::now();
+        let next_midnight = (now + chrono::Duration::days(1))
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .expect("valid midnight time")
+            .and_utc();
+        let secs = (next_midnight - now).num_seconds().max(0) as u64;
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+
+        for attempt in 0u32..3 {
+            match sqlx::query(
+                "UPDATE users SET daily_credits_used = 0, daily_credits_date = CURRENT_DATE \
+                 WHERE daily_credits_date < CURRENT_DATE AND daily_credits_used > 0",
+            )
+            .execute(&db)
+            .await
+            {
+                Ok(r) => {
+                    tracing::info!(rows = r.rows_affected(), "Daily premium credits reset");
+                    break;
+                }
+                Err(e) if attempt < 2 => {
+                    tracing::warn!(attempt, error = %e, "Credits reset failed, retrying in 10s");
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                }
+                Err(e) => tracing::error!(error = %e, "Daily credits reset failed after retries"),
+            }
+        }
+    }
 }

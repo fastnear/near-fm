@@ -11,6 +11,7 @@ pub mod auth;
 pub mod comments;
 pub mod credits;
 pub mod playlists;
+pub mod premium;
 pub mod reports;
 pub mod requests;
 pub mod rss;
