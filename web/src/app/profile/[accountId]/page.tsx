@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser, getProfileComments, createProfileComment, deleteProfileComment, getSongTips, recordProfileTip } from "@/lib/api";
-import type { FollowerEntry, ProfileComment, SongTipEntry } from "@/lib/api";
+import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser, getProfileComments, createProfileComment, deleteProfileComment, getSongTips, getPremiumGifts, recordProfileTip } from "@/lib/api";
+import type { FollowerEntry, ProfileComment, SongTipEntry, PremiumGiftEntry } from "@/lib/api";
 import { tipProfileAction, tipProfileFromBalanceArgs, getBalance } from "@/lib/near/contract";
 import { GiftPremiumButton } from "@/components/profile/GiftPremiumButton";
 import Link from "next/link";
@@ -65,6 +65,7 @@ export default function ProfilePage() {
   const [followers, setFollowers] = useState<FollowerEntry[]>([]);
   const [profileComments, setProfileComments] = useState<ProfileComment[]>([]);
   const [songTips, setSongTips] = useState<SongTipEntry[]>([]);
+  const [premiumGifts, setPremiumGifts] = useState<PremiumGiftEntry[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [tipAmount, setTipAmount] = useState<string | null>(null);
@@ -122,9 +123,11 @@ export default function ProfilePage() {
     if (!accountId) return;
     getProfileComments(accountId).then(setProfileComments).catch(console.error);
     getSongTips(accountId).then(setSongTips).catch(console.error);
+    getPremiumGifts(accountId).then(setPremiumGifts).catch(console.error);
     return () => {
       setProfileComments([]);
       setSongTips([]);
+      setPremiumGifts([]);
       setFanFeedTab("all");
     };
   }, [accountId]);
@@ -370,6 +373,7 @@ export default function ProfilePage() {
   const displayName = profileData.display_name as string | null;
   const isProfilePremium = profileData.is_premium as boolean;
   const isProfileAgent = profileData.is_agent as boolean;
+  const premiumGift = profileData.premium_gifted_by as { gifted_by_slug: string; gifted_by_display_name: string | null; days_added: number; created_at: string } | null;
   const nearAccountId = profileData.near_account_id as string | null;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
@@ -434,9 +438,19 @@ export default function ProfilePage() {
                 </div>
               )}
               {isProfilePremium && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 border border-cyan-500/20 diamond-shimmer">
-                  ✦ Premium
-                </span>
+                <div className="flex flex-col items-start">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 border border-cyan-500/20 diamond-shimmer">
+                    ✦ Premium
+                  </span>
+                  {premiumGift && (
+                    <span className="text-[9px] text-slate-500 mt-0.5 ml-0.5">
+                      gifted by{" "}
+                      <Link href={`/profile/${premiumGift.gifted_by_slug}`} className="text-purple-400 hover:underline">
+                        {premiumGift.gifted_by_display_name || premiumGift.gifted_by_slug}
+                      </Link>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -789,7 +803,7 @@ export default function ProfilePage() {
             <div className="flex gap-1 p-0.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
               {(["all", "tips"] as const).map((tab) => {
                 const count = tab === "tips"
-                  ? songTips.length
+                  ? songTips.length + premiumGifts.length
                   : profileComments.length;
                 return (
                   <button
@@ -857,10 +871,32 @@ export default function ProfilePage() {
         )}
 
         {fanFeedTab === "tips" ? (
-          songTips.length === 0 ? (
+          songTips.length === 0 && premiumGifts.length === 0 ? (
             <p className="text-slate-500 text-sm">No tips yet.</p>
           ) : (
             <div className="space-y-3">
+              {premiumGifts.map((gift) => (
+                <div key={`gift-${gift.id}`} className="flex gap-3 items-center">
+                  <Link href={`/profile/${gift.gifted_by_slug}`} className="shrink-0">
+                    {gift.gifted_by_avatar_url ? (
+                      <img src={gift.gifted_by_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white">
+                        {(gift.gifted_by_display_name || gift.gifted_by_slug)?.[0]?.toUpperCase()}
+                      </div>
+                    )}
+                  </Link>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-300">
+                      <Link href={`/profile/${gift.gifted_by_slug}`} className="font-medium text-white hover:underline">
+                        {gift.gifted_by_display_name || truncateId(gift.gifted_by_slug)}
+                      </Link>
+                      {" gifted "}
+                      <span className="text-cyan-400 font-medium diamond-shimmer">✦ {gift.days_added} days of Premium</span>
+                    </p>
+                  </div>
+                </div>
+              ))}
               {songTips.map((tip) => (
                 <div key={tip.id} className="flex gap-3 items-center">
                   <Link href={`/profile/${tip.tipper_slug}`} className="shrink-0">

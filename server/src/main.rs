@@ -197,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
         .route("/api/users/:account_id/song-tips", get(routes::users::list_song_tips))
+        .route("/api/users/:account_id/premium-gifts", get(routes::users::list_premium_gifts))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route("/api/users/:account_id/profile", patch(routes::users::update_profile))

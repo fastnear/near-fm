@@ -601,7 +601,7 @@ export default function CreatePage() {
                         value={lyricsPrompt}
                         onChange={(e) => setLyricsPrompt(e.target.value)}
                         placeholder="Describe lyrics to generate..."
-                        className="rounded-lg px-3 py-1.5 text-xs border border-white/[0.08] bg-white/[0.04] text-slate-300 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none w-56"
+                        className="rounded-lg px-3 py-1.5 text-xs border border-white/[0.08] bg-white/[0.04] text-slate-300 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none w-full sm:w-56"
                       />
                       <button
                         onClick={handleGenerateLyrics}

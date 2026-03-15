@@ -194,28 +194,36 @@ export function Header() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-2.5 text-xs">
-        <Link href="/" className="text-slate-400 hover:text-white transition-colors py-1">
-          Feed
+      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-1.5">
+        <Link href="/" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/" || pathname === "/trending" || pathname === "/latest" || pathname === "/top" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955a1.126 1.126 0 0 1 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+          </svg>
+          <span className="text-[10px]">Feed</span>
         </Link>
-        <Link href="/requests" className="text-slate-400 hover:text-white transition-colors py-1">
-          Requests
+        <Link href="/requests" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/requests" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+          </svg>
+          <span className="text-[10px]">Requests</span>
         </Link>
-        {(isPremium || user?.is_admin) && (
-          <Link href="/create" className="text-slate-400 hover:text-white transition-colors py-1">
-            Create
-          </Link>
-        )}
-        <Link href="/upload" className="text-slate-400 hover:text-white transition-colors py-1">
-          Upload
+        <Link href="/upload" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/upload" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+          </svg>
+          <span className="text-[10px]">Upload</span>
         </Link>
-        <Link href="/premium" className="diamond-shimmer transition-colors py-1">
-          ✦
+        <Link href="/premium" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/premium" ? "text-white diamond-shimmer" : "text-slate-500 hover:text-slate-300"}`}>
+          <span className="text-lg leading-5">✦</span>
+          <span className="text-[10px]">Premium</span>
         </Link>
-        <Link href="/cabinet" className="relative text-slate-400 hover:text-white transition-colors py-1">
-          Cabinet
+        <Link href="/cabinet" className={`relative flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/cabinet" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+          </svg>
+          <span className="text-[10px]">Cabinet</span>
           {unreadCount > 0 && (
-            <span className="absolute -top-2 -right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 shadow-lg shadow-purple-500/30">
+            <span className="absolute -top-0.5 right-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}

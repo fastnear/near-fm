@@ -834,6 +834,8 @@ pub struct CreditsSummary {
     pub total_spent_credits: i64,
     pub total_refunded_credits: i64,
     pub net_balance: i64,
+    pub total_premium_purchases: i64,
+    pub total_premium_days: i64,
 }
 
 pub async fn credits_summary(
@@ -846,10 +848,17 @@ pub async fn credits_summary(
     let row: (i64, i64, i64) = sqlx::query_as(
         r#"
         SELECT
-            (SELECT COALESCE(SUM(credits_added::bigint), 0) FROM credit_topups),
-            (SELECT COALESCE(SUM(from_purchased::bigint), 0) FROM credit_usage WHERE credits_spent > 0),
-            (SELECT COALESCE(SUM(ABS(from_purchased::bigint)), 0) FROM credit_usage WHERE credits_spent < 0)
+            (SELECT COALESCE(SUM(credits_added::bigint), 0)::bigint FROM credit_topups),
+            (SELECT COALESCE(SUM(from_purchased::bigint), 0)::bigint FROM credit_usage WHERE credits_spent > 0),
+            (SELECT COALESCE(SUM(ABS(from_purchased::bigint)), 0)::bigint FROM credit_usage WHERE credits_spent < 0)
         "#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let prem: (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*)::bigint, COALESCE(SUM(days_added::bigint), 0)::bigint FROM premium_purchases",
     )
     .fetch_one(&state.db)
     .await
@@ -860,6 +869,8 @@ pub async fn credits_summary(
         total_spent_credits: row.1,
         total_refunded_credits: row.2,
         net_balance: row.0 - row.1 + row.2,
+        total_premium_purchases: prem.0,
+        total_premium_days: prem.1,
     }))
 }
 
@@ -899,6 +910,16 @@ pub async fn credits_transactions(
                 CASE WHEN cu.credits_spent < 0 THEN 'refund' ELSE 'usage' END as type,
                 u.slug, cu.credits_spent as amount, cu.action as detail, cu.created_at
             FROM credit_usage cu JOIN users u ON u.id = cu.user_id
+            UNION ALL
+            SELECT 'premium' as type, u.slug, pp.days_added as amount,
+                CASE WHEN pp.gifted_by_user_id IS NOT NULL
+                    THEN 'gift from ' || COALESCE(g.display_name, g.slug)
+                    ELSE pp.token
+                END as detail,
+                pp.created_at
+            FROM premium_purchases pp
+            JOIN users u ON u.id = pp.user_id
+            LEFT JOIN users g ON g.id = pp.gifted_by_user_id
         ) combined
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2

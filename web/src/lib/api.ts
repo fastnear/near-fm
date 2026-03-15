@@ -405,6 +405,19 @@ export async function getSongTips(accountId: string): Promise<SongTipEntry[]> {
   return fetchApi(`/api/users/${accountId}/song-tips`);
 }
 
+export interface PremiumGiftEntry {
+  id: number;
+  gifted_by_slug: string;
+  gifted_by_display_name: string | null;
+  gifted_by_avatar_url: string | null;
+  days_added: number;
+  created_at: string;
+}
+
+export async function getPremiumGifts(accountId: string): Promise<PremiumGiftEntry[]> {
+  return fetchApi(`/api/users/${accountId}/premium-gifts`);
+}
+
 export async function createProfileComment(accountId: string, body: string): Promise<ProfileComment> {
   return fetchApi(`/api/users/${accountId}/comments`, {
     method: "POST",
@@ -871,6 +884,8 @@ export interface CreditsSummary {
   total_spent_credits: number;
   total_refunded_credits: number;
   net_balance: number;
+  total_premium_purchases: number;
+  total_premium_days: number;
 }
 
 export interface CreditTransaction {

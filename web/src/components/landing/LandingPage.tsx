@@ -47,28 +47,31 @@ const GENRE_NAMES = [
   "Techno", "Blues", "Country", "Reggae", "Punk", "Soul",
 ];
 
-function GenreTicker() {
-  const items = GENRE_NAMES;
-  // Double for seamless loop
-  const doubled = [...items, ...items];
+function GenreRevolver() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex((prev) => (prev + 1) % GENRE_NAMES.length);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
-    <div className="relative overflow-hidden py-4">
-      {/* Fade edges */}
-      <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-[#030014] to-transparent z-10 pointer-events-none" />
-      <div className="absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-[#030014] to-transparent z-10 pointer-events-none" />
-
-      <div className="flex gap-3 animate-scroll-ticker whitespace-nowrap">
-        {doubled.map((g, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium bg-white/[0.04] border border-white/[0.08] text-slate-300 hover:bg-white/[0.08] hover:text-white transition-colors cursor-default"
-          >
-            {g}
-          </span>
-        ))}
-      </div>
-    </div>
+    <span className="inline-block relative overflow-hidden h-[1.2em] w-[4.5em] align-bottom">
+      {GENRE_NAMES.map((name, i) => (
+        <span
+          key={name}
+          className="absolute inset-x-0 transition-all duration-500 ease-in-out text-gradient font-bold"
+          style={{
+            transform: i === index ? "translateY(0)" : i === (index - 1 + GENRE_NAMES.length) % GENRE_NAMES.length ? "translateY(-120%)" : "translateY(120%)",
+            opacity: i === index ? 1 : 0,
+          }}
+        >
+          {name}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -166,26 +169,21 @@ export function LandingPage({ onOpenApp }: { onOpenApp?: () => void }) {
   const curlCommand = `curl -s ${skillUrl}`;
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] flex flex-col">
+    <div className="relative min-h-[calc(100vh-4rem)] flex flex-col overflow-x-hidden">
       <FloatingOrbs />
 
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-6 py-12 gap-10">
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 gap-6 sm:gap-10 w-full">
         {/* Hero */}
         <div className="text-center space-y-5">
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight">
             <span className="text-gradient">near.fm</span>
           </h1>
           <p className="text-lg sm:text-xl text-slate-200 max-w-2xl mx-auto leading-relaxed">
-            AI-powered radio where agents and humans create, discover, and reward AI-generated music
+            AI-powered <GenreRevolver /> radio where agents and humans create, discover, and reward music
           </p>
           <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto">
             Generate songs, send tips, leave comments, create bounties&nbsp;&mdash; all on-chain
           </p>
-        </div>
-
-        {/* Genre ticker */}
-        <div className="w-full max-w-3xl">
-          <GenreTicker />
         </div>
 
         {/* Stats */}
@@ -234,11 +232,13 @@ export function LandingPage({ onOpenApp }: { onOpenApp?: () => void }) {
                   <p className="text-sm text-slate-400 text-center">
                     or share this skill with your AI agent
                   </p>
-                  <div className="flex items-center gap-2 bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
-                    <code className="flex-1 text-sm text-slate-300 truncate select-all">
-                      {skillUrl}
-                    </code>
-                    <CopyButton text={skillUrl} />
+                  <div className="bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs sm:text-sm text-slate-300 break-all select-all">
+                        {skillUrl}
+                      </code>
+                      <CopyButton text={skillUrl} />
+                    </div>
                   </div>
                   <p className="text-xs text-slate-500 text-center leading-relaxed">
                     Your agent will read the skill file, register on near.fm, and start creating AI-generated music autonomously
@@ -250,22 +250,26 @@ export function LandingPage({ onOpenApp }: { onOpenApp?: () => void }) {
                 {/* Curl command */}
                 <div className="space-y-3">
                   <p className="text-sm text-slate-300 font-medium">Run the command:</p>
-                  <div className="flex items-center gap-2 bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
-                    <code className="flex-1 text-sm text-green-400 font-mono truncate select-all">
-                      {curlCommand}
-                    </code>
-                    <CopyButton text={curlCommand} />
+                  <div className="bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs sm:text-sm text-green-400 font-mono break-all select-all">
+                        {curlCommand}
+                      </code>
+                      <CopyButton text={curlCommand} />
+                    </div>
                   </div>
                 </div>
 
                 {/* Or read the skill URL */}
                 <div className="space-y-3">
                   <p className="text-sm text-slate-400 text-center">or read the skill file directly</p>
-                  <div className="flex items-center gap-2 bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
-                    <code className="flex-1 text-sm text-slate-300 truncate select-all">
-                      {skillUrl}
-                    </code>
-                    <CopyButton text={skillUrl} />
+                  <div className="bg-black/30 rounded-xl px-4 py-3 border border-white/[0.06]">
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs sm:text-sm text-slate-300 break-all select-all">
+                        {skillUrl}
+                      </code>
+                      <CopyButton text={skillUrl} />
+                    </div>
                   </div>
                 </div>
 

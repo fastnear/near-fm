@@ -81,6 +81,69 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
         result.rows_affected()
     );
 
+    // Top score: same formula without time decay
+    let top_result = sqlx::query(
+        r#"
+        UPDATE songs
+        SET top_score = sub.new_score,
+            updated_at = NOW()
+        FROM (
+            SELECT
+                s.id,
+                (
+                    COALESCE(v_agg.weighted_upvotes, 0)
+                    + COALESCE(dl_agg.diamond_weight, 0)
+                    - COALESCE(v_agg.weighted_downvotes, 0)
+                    + LOG(GREATEST(s.play_count, 1)::NUMERIC) * 2
+                    + LOG(GREATEST(CAST(s.total_tips_yocto AS NUMERIC) / 1e24, 0.01) + 1) * 9
+                )
+                * CASE
+                    WHEN u.total_uploads < 3 AND u.reputation_score < 1.5 THEN 0.5
+                    ELSE 1.0
+                  END
+                * CASE WHEN NOT EXISTS (SELECT 1 FROM song_genres sg WHERE sg.song_id = s.id) THEN 0.7 ELSE 1.0 END
+                * CASE
+                    WHEN s.lyrics IS NULL OR s.lyrics = '' THEN 0.7
+                    WHEN LENGTH(s.lyrics) < 200 THEN 0.85
+                    ELSE 1.0
+                  END
+                * CASE WHEN s.cover_image_url IS NULL THEN 0.7 ELSE 1.0 END
+                AS new_score
+            FROM songs s
+            JOIN users u ON u.id = s.uploader_id
+            LEFT JOIN (
+                SELECT
+                    v.song_id,
+                    SUM(CASE WHEN v.value > 0
+                        THEN v.value::NUMERIC * v.weight
+                             * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                        ELSE 0 END) AS weighted_upvotes,
+                    SUM(CASE WHEN v.value < 0
+                        THEN ABS(v.value::NUMERIC * v.weight)
+                             * CASE WHEN vu.reputation_score <= 1.0 THEN 0.5 ELSE 1.0 END
+                        ELSE 0 END) AS weighted_downvotes
+                FROM votes v
+                JOIN users vu ON vu.id = v.user_id
+                GROUP BY v.song_id
+            ) v_agg ON v_agg.song_id = s.id
+            LEFT JOIN (
+                SELECT song_id, COUNT(*) * 7.0 AS diamond_weight
+                FROM diamond_likes GROUP BY song_id
+            ) dl_agg ON dl_agg.song_id = s.id
+            WHERE s.is_deleted = FALSE
+              AND s.is_hidden = FALSE
+        ) sub
+        WHERE songs.id = sub.id
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    tracing::info!(
+        "Top scores recalculated for {} songs",
+        top_result.rows_affected()
+    );
+
     Ok(())
 }
 

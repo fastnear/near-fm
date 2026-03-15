@@ -33,8 +33,17 @@ pub struct UserProfileResponse {
     pub twitter_handle: Option<String>,
     pub is_premium: bool,
     pub is_agent: bool,
+    pub premium_gifted_by: Option<PremiumGiftInfo>,
     pub created_at: String,
     pub songs: Vec<SongWithUploader>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PremiumGiftInfo {
+    pub gifted_by_slug: String,
+    pub gifted_by_display_name: Option<String>,
+    pub days_added: i32,
+    pub created_at: String,
 }
 
 pub async fn get_profile(
@@ -114,6 +123,26 @@ pub async fn get_profile(
     .await
     .unwrap_or((0, "0".to_string()));
 
+    // Last premium gift
+    let premium_gifted_by: Option<PremiumGiftInfo> = sqlx::query_as::<_, (String, Option<String>, i32, chrono::DateTime<chrono::Utc>)>(
+        r#"SELECT u.slug, u.display_name, pp.days_added, pp.created_at
+           FROM premium_purchases pp
+           JOIN users u ON pp.gifted_by_user_id = u.id
+           WHERE pp.user_id = $1 AND pp.gifted_by_user_id IS NOT NULL
+           ORDER BY pp.created_at DESC LIMIT 1"#,
+    )
+    .bind(user.id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|(slug, name, days, created)| PremiumGiftInfo {
+        gifted_by_slug: slug,
+        gifted_by_display_name: name,
+        days_added: days,
+        created_at: created.to_rfc3339(),
+    });
+
     Ok(Json(UserProfileResponse {
         account_id: user.slug.clone(),
         near_account_id: user.account_id,
@@ -133,6 +162,7 @@ pub async fn get_profile(
         twitter_handle: user.twitter_handle,
         is_premium: user.premium_until.map_or(false, |u| u > chrono::Utc::now()),
         is_agent: user.is_agent,
+        premium_gifted_by,
         created_at: user.created_at.to_rfc3339(),
         songs,
     }))
@@ -1106,6 +1136,44 @@ pub async fn record_profile_tip(
     }
 
     Ok(Json(comment))
+}
+
+// ── Premium gifts received by user ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PremiumGiftEntry {
+    pub id: i32,
+    pub gifted_by_slug: String,
+    pub gifted_by_display_name: Option<String>,
+    pub gifted_by_avatar_url: Option<String>,
+    pub days_added: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_premium_gifts(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+) -> Result<Json<Vec<PremiumGiftEntry>>, (StatusCode, String)> {
+    let target = queries::get_user_by_slug(&state.db, &account_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    let gifts: Vec<PremiumGiftEntry> = sqlx::query_as(
+        r#"SELECT pp.id, u.slug AS gifted_by_slug, u.display_name AS gifted_by_display_name,
+                  u.avatar_url AS gifted_by_avatar_url, pp.days_added, pp.created_at
+           FROM premium_purchases pp
+           JOIN users u ON pp.gifted_by_user_id = u.id
+           WHERE pp.user_id = $1 AND pp.gifted_by_user_id IS NOT NULL
+           ORDER BY pp.created_at DESC
+           LIMIT 50"#,
+    )
+    .bind(target.id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(gifts))
 }
 
 // ── Song tips received by user ──

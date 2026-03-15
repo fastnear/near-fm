@@ -1782,7 +1782,7 @@ function CreditsPanel() {
     <div className="space-y-6">
       {/* Summary cards */}
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div className="glass-card rounded-xl px-4 py-3">
             <div className="text-xs text-slate-500">Total Top-ups</div>
             <div className="text-lg font-bold text-green-400">
@@ -1805,6 +1805,18 @@ function CreditsPanel() {
             <div className="text-xs text-slate-500">Net Balance</div>
             <div className="text-lg font-bold text-slate-100">
               {summary.net_balance.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Premium Purchases</div>
+            <div className="text-lg font-bold text-purple-400">
+              {summary.total_premium_purchases}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Premium Days Sold</div>
+            <div className="text-lg font-bold text-purple-400">
+              {summary.total_premium_days}
             </div>
           </div>
         </div>
@@ -1845,6 +1857,8 @@ function CreditsPanel() {
                             ? "bg-green-500/10 text-green-400"
                             : t.type === "refund"
                             ? "bg-cyan-500/10 text-cyan-400"
+                            : t.type === "premium"
+                            ? "bg-purple-500/10 text-purple-400"
                             : "bg-orange-500/10 text-orange-400"
                         }`}
                       >
@@ -1860,10 +1874,12 @@ function CreditsPanel() {
                           ? "text-green-400"
                           : t.type === "refund"
                           ? "text-cyan-400"
+                          : t.type === "premium"
+                          ? "text-purple-400"
                           : "text-orange-400"
                       }`}
                     >
-                      {t.type === "usage" ? "-" : "+"}{Math.abs(t.amount)}
+                      {t.type === "premium" ? `${t.amount}d` : `${t.type === "usage" ? "-" : "+"}${Math.abs(t.amount)}`}
                     </td>
                   </tr>
                 ))}

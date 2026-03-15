@@ -237,7 +237,7 @@ pub async fn list_songs(
              AND (CARDINALITY($15::int[]) = 0 OR s.uploader_id != ALL($15))
            ORDER BY
              CASE WHEN $7 = 'latest' THEN EXTRACT(EPOCH FROM s.created_at) END DESC,
-             CASE WHEN $7 = 'top' THEN (s.upvotes + s.diamond_like_count - s.downvotes)::FLOAT END DESC,
+             CASE WHEN $7 = 'top' THEN s.top_score END DESC,
              CASE WHEN $7 = 'trending' OR $7 IS NULL THEN s.score END DESC,
              s.created_at DESC
            LIMIT $1 OFFSET $2"#;
