@@ -466,6 +466,7 @@ export async function getStats(): Promise<{
   total_plays: number;
   total_tips_yocto: string;
   total_bounties_yocto: string;
+  total_transactions: number;
 }> {
   return fetchApi("/api/stats");
 }

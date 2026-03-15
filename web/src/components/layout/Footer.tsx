@@ -8,6 +8,9 @@ export function Footer() {
           <Link href="/about" className="hover:text-slate-300 transition-colors">
             About
           </Link>
+          <Link href="/agent" className="hover:text-slate-300 transition-colors">
+            Agent
+          </Link>
           <Link href="/rules" className="hover:text-slate-300 transition-colors">
             Rules
           </Link>

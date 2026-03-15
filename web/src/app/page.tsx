@@ -9,6 +9,7 @@ import { FeedTabs } from "@/components/feed/FeedTabs";
 import { FeedFilters } from "@/components/feed/FeedFilters";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { LandingPage } from "@/components/landing/LandingPage";
 
 function FeedPageInner() {
   const searchParams = useSearchParams();
@@ -243,10 +244,34 @@ function FeedPageInner() {
   );
 }
 
+function FeedPageWrapper() {
+  const [showLanding, setShowLanding] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Only show landing on the root path (not /trending, /latest, etc.)
+    const isRoot = window.location.pathname === "/";
+    const visited = localStorage.getItem("nearfm_visited");
+    setShowLanding(isRoot && !visited);
+  }, []);
+
+  // Avoid flash while checking localStorage
+  if (showLanding === null) return null;
+
+  if (showLanding) {
+    return (
+      <LandingPage
+        onOpenApp={() => setShowLanding(false)}
+      />
+    );
+  }
+
+  return <FeedPageInner />;
+}
+
 export default function FeedPage() {
   return (
     <Suspense>
-      <FeedPageInner />
+      <FeedPageWrapper />
     </Suspense>
   );
 }
