@@ -104,6 +104,8 @@ pub async fn create_request(
     }
 
     let uuid = req.uuid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let title = super::truncate_str(&req.title, 200);
+    let description = super::truncate_str(&req.description, 5000);
 
     let request = sqlx::query_as::<_, SongRequest>(
         r#"INSERT INTO song_requests
@@ -113,8 +115,8 @@ pub async fn create_request(
     )
     .bind(&uuid)
     .bind(claims.user_id)
-    .bind(&req.title)
-    .bind(&req.description)
+    .bind(&title)
+    .bind(&description)
     .bind(&req.bounty_amount_yocto)
     .bind(&req.bounty_tx_hash)
     .bind(req.language_id)

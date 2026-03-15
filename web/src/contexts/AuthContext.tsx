@@ -12,17 +12,6 @@ import { getCurrentUser, type AuthUser } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-function getCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? match[1] : null;
-}
-
-function clearCookie(name: string) {
-  document.cookie = `${name}=; Domain=.near.fm; Path=/; Max-Age=0`;
-  document.cookie = `${name}=; Path=/; Max-Age=0`;
-}
-
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
@@ -58,17 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isPremium = !!user?.is_premium;
 
   const fetchUser = useCallback(async () => {
-    if (!getCookie("nearfm_session")) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     try {
       const u = await getCurrentUser();
       setUser(u);
     } catch {
       setUser(null);
-      clearCookie("nearfm_session");
     }
     setLoading(false);
   }, []);
@@ -84,7 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       fetchUser();
     };
     const onExpired = () => {
-      clearCookie("nearfm_session");
       setUser(null);
     };
     window.addEventListener("nearfm_session_changed", onSessionChanged);
@@ -115,7 +97,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         credentials: "include",
       });
     } catch {}
-    clearCookie("nearfm_session");
     setUser(null);
     window.dispatchEvent(new Event("nearfm_signed_out"));
   }, []);

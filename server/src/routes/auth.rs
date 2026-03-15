@@ -19,12 +19,12 @@ pub fn build_session_cookie(token: &str, frontend_url: &str) -> String {
     let is_prod = frontend_url.contains("near.fm");
     if is_prod {
         format!(
-            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; Max-Age=31536000",
+            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; HttpOnly; Max-Age=31536000",
             token
         )
     } else {
         format!(
-            "nearfm_session={}; Path=/; SameSite=Lax; Max-Age=31536000",
+            "nearfm_session={}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000",
             token
         )
     }
@@ -80,22 +80,29 @@ fn compute_daily_remaining(user: &crate::db::models::User, is_premium: bool) -> 
     (super::suno::DAILY_PREMIUM_ALLOWANCE - used_today).max(0)
 }
 
-pub async fn verify(
-    State(state): State<AppState>,
-    Json(req): Json<VerifyRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 0. Parse and validate JSON message
-    let msg: serde_json::Value = serde_json::from_str(&req.message).map_err(|_| {
+/// Verify wallet ownership via NEP-413 signature + RPC key check.
+/// `expected_action` is the required "action" field in the signed message (e.g. "sign_in", "link_wallet").
+async fn verify_wallet_ownership(
+    rpc_url: &str,
+    account_id: &str,
+    public_key: &str,
+    signature: &str,
+    message: &str,
+    nonce: &[u8],
+    recipient: &str,
+    expected_action: &str,
+) -> Result<(), (StatusCode, String)> {
+    // Parse and validate JSON message
+    let msg: serde_json::Value = serde_json::from_str(message).map_err(|_| {
         (StatusCode::BAD_REQUEST, "Message must be JSON".to_string())
     })?;
 
-    if msg.get("action").and_then(|v| v.as_str()) != Some("sign_in")
+    if msg.get("action").and_then(|v| v.as_str()) != Some(expected_action)
         || msg.get("domain").and_then(|v| v.as_str()) != Some("near.fm")
     {
         return Err((StatusCode::BAD_REQUEST, "Invalid message format".to_string()));
     }
 
-    // Version check — only accept v1+
     let version = msg.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
     if version < 1 {
         return Err((StatusCode::BAD_REQUEST, "Unsupported message version".to_string()));
@@ -111,28 +118,18 @@ pub async fn verify(
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
 
-    // 1. Verify NEP-413 signature
-    let valid = nep413::verify_nep413_signature(
-        &req.public_key,
-        &req.signature,
-        &req.message,
-        &req.nonce,
-        &req.recipient,
-    )
-    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Signature error: {}", e)))?;
+    // Verify NEP-413 signature
+    let valid = nep413::verify_nep413_signature(public_key, signature, message, nonce, recipient)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Signature error: {}", e)))?;
 
     if !valid {
         return Err((StatusCode::UNAUTHORIZED, "Invalid signature".to_string()));
     }
 
-    // 2. Verify public key belongs to account via NEAR RPC
-    let key_valid = nep413::verify_access_key(
-        &state.config.near_rpc_url,
-        &req.account_id,
-        &req.public_key,
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // Verify public key belongs to account via NEAR RPC
+    let key_valid = nep413::verify_access_key(rpc_url, account_id, public_key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     if !key_valid {
         return Err((
@@ -140,6 +137,25 @@ pub async fn verify(
             "Public key does not belong to account".to_string(),
         ));
     }
+
+    Ok(())
+}
+
+pub async fn verify(
+    State(state): State<AppState>,
+    Json(req): Json<VerifyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    verify_wallet_ownership(
+        &state.config.near_rpc_url,
+        &req.account_id,
+        &req.public_key,
+        &req.signature,
+        &req.message,
+        &req.nonce,
+        &req.recipient,
+        "sign_in",
+    )
+    .await?;
 
     // 3. Get or create user
     let is_admin = state.config.is_admin(&req.account_id);
@@ -527,8 +543,8 @@ pub async fn logout(
     }
 
     // Clear session cookie
-    let clear_cookie = "nearfm_session=; Domain=.near.fm; Path=/; Max-Age=0";
-    let clear_cookie_local = "nearfm_session=; Path=/; Max-Age=0";
+    let clear_cookie = "nearfm_session=; Domain=.near.fm; Path=/; HttpOnly; Max-Age=0";
+    let clear_cookie_local = "nearfm_session=; Path=/; HttpOnly; Max-Age=0";
 
     Ok((
         [
@@ -544,11 +560,15 @@ pub async fn logout(
 #[derive(Debug, Deserialize)]
 pub struct LinkWalletRequest {
     pub account_id: String,
+    pub public_key: String,
+    pub signature: String,
+    pub message: String,
+    pub nonce: Vec<u8>,
+    pub recipient: String,
 }
 
-/// POST /api/auth/link-wallet — link a NEAR wallet to an authenticated account
-/// No signature needed — user is already authenticated via JWT (Google or NEAR).
-/// Wallet ownership is enforced at transaction time by wallet-selector.
+/// POST /api/auth/link-wallet — link a NEAR wallet to an authenticated account.
+/// Requires NEP-413 signature to prove wallet ownership.
 pub async fn link_wallet(
     State(state): State<AppState>,
     extensions: Extensions,
@@ -560,6 +580,19 @@ pub async fn link_wallet(
     if req.account_id.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "account_id is required".to_string()));
     }
+
+    // Verify wallet ownership via NEP-413 signature
+    verify_wallet_ownership(
+        &state.config.near_rpc_url,
+        &req.account_id,
+        &req.public_key,
+        &req.signature,
+        &req.message,
+        &req.nonce,
+        &req.recipient,
+        "link_wallet",
+    )
+    .await?;
 
     // Check if this NEAR account is already linked to another user
     if let Some(existing) = queries::get_user_by_account(&state.db, &req.account_id)

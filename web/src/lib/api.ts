@@ -73,6 +73,11 @@ export async function getCurrentUser(): Promise<AuthUser> {
 
 export async function linkWallet(payload: {
   account_id: string;
+  public_key: string;
+  signature: string;
+  message: string;
+  nonce: number[];
+  recipient: string;
 }): Promise<{
   token: string;
   user: AuthUser;

@@ -93,7 +93,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const pendingLinkRef = useRef(false);
 
   // Sign NEP-413 message and return the payload for API calls
-  const signNep413 = useCallback(async (w: Wallet, accId: string) => {
+  const signNep413 = useCallback(async (w: Wallet, accId: string, action: string = "sign_in") => {
     if (!w.signMessage) {
       console.warn("Wallet does not support signMessage (NEP-413)");
       return null;
@@ -103,7 +103,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     crypto.getRandomValues(nonce);
 
     const message = JSON.stringify({
-      action: "sign_in",
+      action,
       domain: "near.fm",
       version: 1,
       timestamp: Date.now(),
@@ -140,10 +140,15 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, [signNep413]);
 
-  const doLinkWallet = useCallback(async (_w: Wallet, accId: string) => {
-    await linkWalletApi({ account_id: accId });
+  const doLinkWallet = useCallback(async (w: Wallet, accId: string) => {
+    const payload = await signNep413(w, accId, "link_wallet");
+    if (!payload) {
+      setSignInPending(true);
+      return;
+    }
+    await linkWalletApi(payload);
     window.dispatchEvent(new Event("nearfm_session_changed"));
-  }, []);
+  }, [signNep413]);
 
   // Check if the function call access key has enough allowance.
   // Uses the maximum allowance across all function call keys for the contract,

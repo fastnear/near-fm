@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: nearfm
       POSTGRES_PASSWORD: ${DB_PASSWORD:-nearfm_dev}
     ports:
-      - "5499:5432"
+      - "127.0.0.1:5499:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
       POSTGRES_USER: nearfm
       POSTGRES_PASSWORD: ${DB_PASSWORD_MAINNET:-nearfm_dev}
     ports:
-      - "5508:5432"
+      - "127.0.0.1:5508:5432"
     volumes:
       - pgdata_mainnet:/var/lib/postgresql/data
     healthcheck:
@@ -66,7 +66,7 @@ services:
         NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
         NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
         NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
-        NEXT_PUBLIC_NEAR_RPC_URL: ${NEAR_RPC_URL:-https://rpc.testnet.near.org}
+        NEXT_PUBLIC_NEAR_RPC_URL: ${NEXT_PUBLIC_NEAR_RPC_URL:-https://rpc.mainnet.fastnear.com}
         NEXT_PUBLIC_ADMIN_ACCOUNTS: ${NEXT_PUBLIC_ADMIN_ACCOUNTS:-}
     ports:
       - "3847:3847"
@@ -77,7 +77,7 @@ services:
       NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-near-fm.testnet}
       NEXT_PUBLIC_NEAR_NETWORK: ${NEAR_NETWORK:-testnet}
       NEXT_PUBLIC_FASTFS_RECEIVER: ${FASTFS_RECEIVER:-fastfs.testnet}
-      NEXT_PUBLIC_NEAR_RPC_URL: ${NEAR_RPC_URL:-https://rpc.testnet.near.org}
+      NEXT_PUBLIC_NEAR_RPC_URL: ${NEXT_PUBLIC_NEAR_RPC_URL:-https://rpc.mainnet.fastnear.com}
       NEXT_PUBLIC_ADMIN_ACCOUNTS: ${NEXT_PUBLIC_ADMIN_ACCOUNTS:-}
       PORT: "3847"
 

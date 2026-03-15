@@ -11,6 +11,8 @@ use crate::{
     AppState,
 };
 
+use super::truncate_str;
+
 #[derive(Debug, Deserialize)]
 pub struct ListSongsQuery {
     pub sort: Option<String>,
@@ -164,6 +166,11 @@ pub async fn create_song(
         return Err((StatusCode::FORBIDDEN, "Your account has been banned".to_string()));
     }
 
+    // Truncate fields to reasonable limits
+    let title = truncate_str(&req.title, 200);
+    let description = req.description.as_deref().map(|s| truncate_str(s, 5000));
+    let lyrics = req.lyrics.as_deref().map(|s| truncate_str(s, 10000));
+
     // Check deduplication
     let exists = queries::check_audio_hash_exists(&state.db, &req.audio_hash)
         .await
@@ -187,9 +194,9 @@ pub async fn create_song(
         &state.db,
         &uuid,
         claims.user_id,
-        &req.title,
-        req.description.as_deref(),
-        req.lyrics.as_deref(),
+        &title,
+        description.as_deref(),
+        lyrics.as_deref(),
         req.ai_model.as_deref(),
         &req.audio_url,
         &req.audio_hash,
@@ -1038,7 +1045,7 @@ pub async fn report_song(
     )
     .bind(song.id)
     .bind(claims.user_id)
-    .bind(&req.reason)
+    .bind(&truncate_str(&req.reason, 2000))
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
