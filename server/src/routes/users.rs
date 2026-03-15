@@ -1107,3 +1107,46 @@ pub async fn record_profile_tip(
 
     Ok(Json(comment))
 }
+
+// ── Song tips received by user ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SongTipEntry {
+    pub id: i32,
+    pub song_uuid: String,
+    pub song_title: String,
+    pub song_cover_image_url: Option<String>,
+    pub tipper_slug: String,
+    pub tipper_display_name: Option<String>,
+    pub tipper_avatar_url: Option<String>,
+    pub amount_yocto: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_song_tips(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+) -> Result<Json<Vec<SongTipEntry>>, (StatusCode, String)> {
+    let target = queries::get_user_by_slug(&state.db, &account_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    let tips: Vec<SongTipEntry> = sqlx::query_as(
+        r#"SELECT t.id, s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
+                  u.slug AS tipper_slug, u.display_name AS tipper_display_name, u.avatar_url AS tipper_avatar_url,
+                  t.amount_yocto, t.created_at
+           FROM tips t
+           JOIN songs s ON t.song_id = s.id
+           JOIN users u ON t.tipper_id = u.id
+           WHERE t.recipient_id = $1
+           ORDER BY t.created_at DESC
+           LIMIT 100"#,
+    )
+    .bind(target.id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(tips))
+}

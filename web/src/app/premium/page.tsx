@@ -42,19 +42,19 @@ function toMinimalUnits(usd: number): string {
 const FEATURES = [
   {
     title: "40 free daily AI credits",
-    desc: "Generate up to 3 songs per day for free — resets every midnight UTC. Uses any Suno model including the latest V4.5+.",
+    desc: "Generate up to 3 songs per day for free — resets every midnight UTC. Uses any Suno model including the latest V5.",
   },
   {
     title: "Diamond Likes",
     desc: "Highlight the best tracks with Diamond Likes — they carry more weight and boost songs to the top.",
   },
   {
-    title: "Premium badge",
-    desc: "Stand out with a premium badge on your profile and comments.",
-  },
-  {
     title: "Playlists",
     desc: "Create and manage playlists, export them to your phone.",
+  },
+  {
+    title: "Premium badge",
+    desc: "Stand out with a premium badge on your profile and comments.",
   },
   {
     title: "Early access",
@@ -310,9 +310,12 @@ export default function PremiumPage() {
 
               {insufficient && (
                 <p className="text-xs text-slate-500 text-center">
-                  You need ${plan.usd} {selectedToken} in your wallet. Get USDC on any CEX or swap on{" "}
-                  <a href="https://app.ref.finance" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
-                    Ref Finance
+                  You need ${plan.usd} {selectedToken} in your wallet. Get USDC on{" "}
+                  <a href="https://www.near.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+                    near.com
+                  </a>{" "}or{" "}
+                  <a href="https://rhea.finance/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+                    Rhea Finance
                   </a>.
                 </p>
               )}
@@ -344,7 +347,7 @@ export default function PremiumPage() {
             <div className="text-slate-400">Resets</div>
             <div className="text-slate-300">midnight UTC</div>
             <div className="text-slate-400">Suno models</div>
-            <div className="text-slate-300">all incl. V4.5+</div>
+            <div className="text-slate-300">all incl. V5</div>
           </div>
           <p className="text-xs text-slate-500">
             Daily credits are spent before purchased credits — no credits lost if you have both.

@@ -239,7 +239,7 @@ export default function CabinetPage() {
 // ── Balance Tab ──
 
 function BalanceTab() {
-  const { user } = useAuth();
+  const { user, isPremium } = useAuth();
   const { accountId, connectWallet, linkWallet, callFunction, viewMethod } = useNearWallet();
   const [balance, setBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

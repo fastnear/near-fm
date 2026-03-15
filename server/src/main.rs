@@ -196,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
         // Comments (GET not rate-limited)
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
+        .route("/api/users/:account_id/song-tips", get(routes::users::list_song_tips))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route("/api/users/:account_id/profile", patch(routes::users::update_profile))

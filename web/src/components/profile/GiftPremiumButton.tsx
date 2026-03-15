@@ -134,7 +134,7 @@ export function GiftPremiumButton({ accountId, displayName, recipientHasPremium 
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full mb-2 right-0 rounded-2xl p-4 shadow-2xl z-50 w-72 bg-slate-900 border border-white/[0.1]">
+          <div className="absolute top-full mt-2 right-0 rounded-2xl p-4 shadow-2xl z-50 w-72 bg-slate-900 border border-white/[0.1]">
             <p className="text-xs font-medium text-slate-300 mb-1">
               Gift Premium to <span className="text-white">{displayName || accountId}</span>
             </p>

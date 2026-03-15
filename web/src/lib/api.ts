@@ -389,6 +389,22 @@ export async function getProfileComments(accountId: string): Promise<ProfileComm
   return fetchApi(`/api/users/${accountId}/comments`);
 }
 
+export interface SongTipEntry {
+  id: number;
+  song_uuid: string;
+  song_title: string;
+  song_cover_image_url: string | null;
+  tipper_slug: string;
+  tipper_display_name: string | null;
+  tipper_avatar_url: string | null;
+  amount_yocto: string;
+  created_at: string;
+}
+
+export async function getSongTips(accountId: string): Promise<SongTipEntry[]> {
+  return fetchApi(`/api/users/${accountId}/song-tips`);
+}
+
 export async function createProfileComment(accountId: string, body: string): Promise<ProfileComment> {
   return fetchApi(`/api/users/${accountId}/comments`, {
     method: "POST",
