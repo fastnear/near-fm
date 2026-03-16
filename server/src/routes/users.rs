@@ -793,6 +793,7 @@ pub struct ProfileCommentRow {
     pub author_is_premium: bool,
     pub author_is_agent: bool,
     pub amount_yocto: Option<String>,
+    pub reply_count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -817,9 +818,17 @@ pub async fn list_profile_comments(
                   u.avatar_url AS author_avatar_url,
                   COALESCE(u.premium_until > NOW(), FALSE) AS author_is_premium,
                   u.is_agent AS author_is_agent,
-                  pc.amount_yocto
+                  pc.amount_yocto,
+                  COALESCE(rc.reply_count, 0) AS reply_count
            FROM profile_comments pc
            JOIN users u ON u.id = pc.author_user_id
+           LEFT JOIN (
+               SELECT parent_id, COUNT(*) AS reply_count
+               FROM post_replies
+               WHERE parent_type = 'profile_comment' AND NOT is_hidden
+                 AND parent_id IN (SELECT id FROM profile_comments WHERE profile_user_id = $1 AND NOT is_hidden)
+               GROUP BY parent_id
+           ) rc ON rc.parent_id = pc.id
            WHERE pc.profile_user_id = $1 AND NOT pc.is_hidden
            ORDER BY pc.created_at DESC
            LIMIT 100"#,
@@ -890,7 +899,8 @@ pub async fn create_profile_comment(
                      (SELECT avatar_url FROM users WHERE id = $2) AS author_avatar_url,
                      COALESCE((SELECT premium_until > NOW() FROM users WHERE id = $2), FALSE) AS author_is_premium,
                      (SELECT is_agent FROM users WHERE id = $2) AS author_is_agent,
-                     NULL::TEXT AS amount_yocto"#,
+                     NULL::TEXT AS amount_yocto,
+                     0::BIGINT AS reply_count"#,
     )
     .bind(target.id)
     .bind(claims.user_id)
@@ -947,10 +957,23 @@ pub async fn delete_profile_comment(
         return Err((StatusCode::FORBIDDEN, "Not authorized to delete this comment".to_string()));
     }
 
+    // Delete replies first, then the comment itself (in a transaction)
+    let mut tx = state.db.begin().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    sqlx::query("DELETE FROM post_replies WHERE parent_type = 'profile_comment' AND parent_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     sqlx::query("DELETE FROM profile_comments WHERE id = $1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tx.commit().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -1079,7 +1102,8 @@ pub async fn record_profile_tip(
                      (SELECT avatar_url FROM users WHERE id = $2) AS author_avatar_url,
                      COALESCE((SELECT premium_until > NOW() FROM users WHERE id = $2), FALSE) AS author_is_premium,
                      (SELECT is_agent FROM users WHERE id = $2) AS author_is_agent,
-                     amount_yocto"#,
+                     amount_yocto,
+                     0::BIGINT AS reply_count"#,
     )
     .bind(target.id)
     .bind(claims.user_id)

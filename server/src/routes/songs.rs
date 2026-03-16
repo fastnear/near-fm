@@ -182,13 +182,8 @@ pub async fn create_song(
     let uuid = uuid::Uuid::new_v4().to_string();
     let mime = req.audio_mime_type.as_deref().unwrap_or("audio/mpeg");
 
-    // Check if song was created via our Suno pipeline
-    let created_on_nearfm = if let Some(ref task_id) = req.suno_task_id {
-        let cache = state.suno_cache.read().await;
-        cache.contains_key(task_id)
-    } else {
-        false
-    };
+    // Song is "created on near.fm" if a suno_task_id was provided (generated via our pipeline)
+    let created_on_nearfm = req.suno_task_id.is_some();
 
     let song = queries::create_song(
         &state.db,

@@ -24,8 +24,26 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(`https://near.fm${pathname}`);
   }
 
-  // Rewrite /trending, /latest, /top to /?sort=...
+  // Rewrite /profile/:slug/songs|blog|feed|tips → /profile/:slug?tab=...
   const { pathname } = request.nextUrl;
+  const profileTabMatch = pathname.match(/^\/profile\/([^/]+)\/(songs|feed|tips)$/);
+  if (profileTabMatch) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/profile/${profileTabMatch[1]}`;
+    url.searchParams.set("tab", profileTabMatch[2]);
+    return NextResponse.rewrite(url);
+  }
+  // /profile/:slug/blog (exact, no further segments) → ?tab=blog
+  const blogTabMatch = pathname.match(/^\/profile\/([^/]+)\/blog$/);
+  if (blogTabMatch) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/profile/${blogTabMatch[1]}`;
+    url.searchParams.set("tab", "blog");
+    return NextResponse.rewrite(url);
+  }
+  // /profile/:slug/blog/123 falls through to Next.js file routing (has generateMetadata)
+
+  // Rewrite /trending, /latest, /top to /?sort=...
   const sortRoutes: Record<string, string> = {
     "/trending": "trending",
     "/latest": "latest",

@@ -588,6 +588,12 @@ function NotificationIcon({ type }: { type: string }) {
           <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
         </svg>
       );
+    case "blog_post":
+      return (
+        <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+        </svg>
+      );
     default:
       return (
         <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -734,6 +740,30 @@ function notificationText(notif: Notification): React.ReactNode {
           {` gifted you ${daysAdded ?? "?"} days of `}
           <span className="diamond-shimmer font-medium">Premium</span>
           {" ✦"}
+        </>
+      );
+    }
+    case "blog_post": {
+      const authorSlug = data.author_slug as string | undefined;
+      const authorName = (data.author_display_name as string | undefined) || authorSlug;
+      const postId = data.post_id as number | undefined;
+      return (
+        <>
+          <Link href={`/profile/${authorSlug}`} className="text-purple-400 hover:underline">{authorName}</Link>
+          {" published a new "}
+          {authorSlug && postId ? (
+            <Link href={`/profile/${authorSlug}/blog/${postId}`} className="text-purple-400 hover:underline">blog post</Link>
+          ) : "blog post"}
+        </>
+      );
+    }
+    case "reply": {
+      const fromAccount = data.from_account as string | undefined;
+      const parentType = data.parent_type as string | undefined;
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-purple-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` replied to your ${parentType === "blog_post" ? "blog post" : "comment"}`}
         </>
       );
     }

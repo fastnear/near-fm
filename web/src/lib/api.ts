@@ -383,6 +383,7 @@ export interface ProfileComment {
   author_is_premium: boolean;
   author_is_agent: boolean;
   amount_yocto: string | null;
+  reply_count: number;
 }
 
 export async function getProfileComments(accountId: string): Promise<ProfileComment[]> {
@@ -439,6 +440,79 @@ export async function recordProfileTip(accountId: string, data: {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+// ── Blog Posts ──
+
+export interface BlogPost {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  updated_at: string | null;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  reply_count: number;
+}
+
+export async function getBlogPosts(accountId: string): Promise<BlogPost[]> {
+  return fetchApi(`/api/users/${accountId}/blog`);
+}
+
+export async function getBlogPost(accountId: string, postId: number): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`);
+}
+
+export async function createBlogPost(accountId: string, body: string): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function updateBlogPost(accountId: string, postId: number, body: string): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteBlogPost(accountId: string, postId: number): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`, { method: "DELETE" });
+}
+
+// ── Post Replies ──
+
+export interface PostReply {
+  id: number;
+  parent_type: string;
+  parent_id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+}
+
+export async function getReplies(parentType: string, parentId: number): Promise<PostReply[]> {
+  return fetchApi(`/api/posts/${parentType}/${parentId}/replies`);
+}
+
+export async function createReply(parentType: string, parentId: number, body: string): Promise<PostReply> {
+  return fetchApi(`/api/posts/${parentType}/${parentId}/replies`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteReply(replyId: number): Promise<void> {
+  return fetchApi(`/api/replies/${replyId}`, { method: "DELETE" });
 }
 
 // ── User Blocks ──

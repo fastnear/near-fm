@@ -2,15 +2,18 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser, getProfileComments, createProfileComment, deleteProfileComment, getSongTips, getPremiumGifts, recordProfileTip } from "@/lib/api";
-import type { FollowerEntry, ProfileComment, SongTipEntry, PremiumGiftEntry } from "@/lib/api";
-import { tipProfileAction, tipProfileFromBalanceArgs, getBalance } from "@/lib/near/contract";
+import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser } from "@/lib/api";
+import type { FollowerEntry } from "@/lib/api";
 import { GiftPremiumButton } from "@/components/profile/GiftPremiumButton";
+import { ProfileTabs, type ProfileTab } from "@/components/profile/ProfileTabs";
+import { SongsTab } from "@/components/profile/SongsTab";
+import { BlogTab } from "@/components/profile/BlogTab";
+import { FanFeedTab } from "@/components/profile/FanFeedTab";
+import { TipsTab } from "@/components/profile/TipsTab";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useToast } from "@/components/ui/Toast";
-import { SongCard } from "@/components/song/SongCard";
 import { FollowButton } from "@/components/song/FollowButton";
 import type { Song } from "@/types";
 import {
@@ -21,18 +24,13 @@ import {
   getRelativePath,
 } from "@/lib/near/fastfs";
 
-function nearToYocto(near: string): string {
-  const parts = near.split(".");
-  const whole = parts[0] || "0";
-  const frac = (parts[1] || "").padEnd(24, "0").slice(0, 24);
-  return BigInt(whole + frac).toString();
-}
-
 function formatNear(yocto: string): string {
   const n = Number(yocto) / 1e24;
   if (n === 0) return "0";
   if (n >= 10 || n === Math.floor(n)) return Math.round(n).toString();
-  return n.toFixed(1).replace(/\.0$/, "");
+  if (n >= 0.1) return n.toFixed(1).replace(/\.0$/, "");
+  if (n >= 0.001) return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function truncateId(id: string, max = 30): string {
@@ -63,13 +61,18 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followers, setFollowers] = useState<FollowerEntry[]>([]);
-  const [profileComments, setProfileComments] = useState<ProfileComment[]>([]);
-  const [songTips, setSongTips] = useState<SongTipEntry[]>([]);
-  const [premiumGifts, setPremiumGifts] = useState<PremiumGiftEntry[]>([]);
-  const [commentBody, setCommentBody] = useState("");
-  const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const [tipAmount, setTipAmount] = useState<string | null>(null);
-  const [fanFeedTab, setFanFeedTab] = useState<"all" | "tips">("all");
+
+  // Tab state — read from URL searchParam > localStorage > default "songs"
+  const [activeTab, setActiveTab] = useState<ProfileTab>(() => {
+    if (typeof window === "undefined") return "songs";
+    const urlTab = new URLSearchParams(window.location.search).get("tab") as ProfileTab | null;
+    if (urlTab && ["songs", "blog", "feed", "tips"].includes(urlTab)) return urlTab;
+    try {
+      const saved = localStorage.getItem(`nearfm:profile_tab:${accountId}`) as ProfileTab | null;
+      if (saved && ["songs", "blog", "feed", "tips"].includes(saved)) return saved;
+    } catch {}
+    return "songs";
+  });
 
   // Block & follow state
   const [isBlocked, setIsBlocked] = useState(false);
@@ -118,91 +121,9 @@ export default function ProfilePage() {
     }
   }, [accountId]);
 
-  // Load profile comments
-  useEffect(() => {
-    if (!accountId) return;
-    getProfileComments(accountId).then(setProfileComments).catch(console.error);
-    getSongTips(accountId).then(setSongTips).catch(console.error);
-    getPremiumGifts(accountId).then(setPremiumGifts).catch(console.error);
-    return () => {
-      setProfileComments([]);
-      setSongTips([]);
-      setPremiumGifts([]);
-      setFanFeedTab("all");
-    };
-  }, [accountId]);
-
-  const handleSubmitComment = async () => {
-    if ((!commentBody.trim() && !tipAmount) || commentSubmitting) return;
-    setCommentSubmitting(true);
-    try {
-      const recipientNearId = profileData?.near_account_id as string | null;
-      if (tipAmount && recipientNearId) {
-        if (!walletAccountId) { connectWallet(); setCommentSubmitting(false); return; }
-        // Send tip + optional message
-        const amountYocto = nearToYocto(tipAmount);
-        const toastId = showToast({ message: `Sending ${tipAmount} NEAR...`, type: "loading", id: "pc-tip" });
-
-        // Fetch balance to decide wallet vs deposit
-        let fromBalance = false;
-        let txHash: string;
-        try {
-          const bal = await getBalance(
-            (params) => viewMethod(params).then((r) => String(r ?? "0")),
-            walletAccountId
-          );
-          if (bal && BigInt(bal) >= BigInt(amountYocto)) {
-            fromBalance = true;
-            const action = tipProfileFromBalanceArgs(recipientNearId, amountYocto);
-            txHash = await callFunction({ contractId: action.contractId, method: action.method, args: action.args, gas: action.gas });
-          } else {
-            const action = tipProfileAction(recipientNearId, amountYocto);
-            txHash = await callFunction({ contractId: action.contractId, method: action.method, args: action.args, gas: action.gas, deposit: action.deposit });
-          }
-        } catch (e: any) {
-          const msg = e?.message || "";
-          if (msg.includes("User rejected") || msg.includes("User cancelled")) {
-            showToast({ id: toastId, message: "Cancelled", type: "error", duration: 2000 });
-          } else {
-            showToast({ id: toastId, message: "Tip failed. Please try again.", type: "error", duration: 5000 });
-          }
-          setCommentSubmitting(false);
-          return;
-        }
-
-        const comment = await recordProfileTip(accountId, {
-          tx_hash: txHash,
-          amount_yocto: amountYocto,
-          from_balance: fromBalance,
-          body: commentBody.trim() || undefined,
-        });
-        setProfileComments((prev) => [comment, ...prev]);
-        setCommentBody("");
-        setTipAmount(null);
-        showToast({ id: toastId, message: `${tipAmount} NEAR sent!`, type: "success", duration: 4000 });
-      } else {
-        // Just a comment, no tip
-        const comment = await createProfileComment(accountId, commentBody.trim());
-        setProfileComments((prev) => [comment, ...prev]);
-        setCommentBody("");
-        showToast({ message: "Comment posted!", type: "success", id: "pc-ok", duration: 2000 });
-      }
-    } catch (e) {
-      console.error("Failed to post:", e);
-      showToast({ message: "Failed to post. Please try again.", type: "error", id: "pc-err" });
-    } finally {
-      setCommentSubmitting(false);
-    }
-  };
-
-  const handleDeleteProfileComment = async (id: number) => {
-    try {
-      await deleteProfileComment(accountId, id);
-      setProfileComments((prev) => prev.filter((c) => c.id !== id));
-    } catch (e) {
-      console.error("Failed to delete comment:", e);
-      showToast({ message: "Failed to delete comment.", type: "error", id: "pc-del-err" });
-    }
+  const handleTabChange = (tab: ProfileTab) => {
+    setActiveTab(tab);
+    try { localStorage.setItem(`nearfm:profile_tab:${accountId}`, tab); } catch {}
   };
 
   // Check block status
@@ -749,20 +670,21 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Songs section */}
-      <h2 className="text-lg font-semibold text-white mb-4">Songs</h2>
+      {/* Tabs */}
+      <ProfileTabs activeTab={activeTab} onTabChange={handleTabChange} slug={accountId} />
 
-      {songs.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-slate-500 text-lg">No songs uploaded yet</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {songs.map((song) => (
-            <SongCard key={song.uuid} song={song} />
-          ))}
-        </div>
+      {/* Tab content */}
+      {activeTab === "songs" && <SongsTab songs={songs} />}
+      {activeTab === "blog" && <BlogTab accountId={accountId} isOwner={isOwnProfile} songs={songs} />}
+      {activeTab === "feed" && (
+        <FanFeedTab
+          accountId={accountId}
+          displayName={displayName}
+          nearAccountId={nearAccountId}
+          isOwnProfile={isOwnProfile}
+        />
       )}
+      {activeTab === "tips" && <TipsTab accountId={accountId} />}
 
       {/* Followers */}
       {followers.length > 0 && (
@@ -793,195 +715,6 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
-
-      {/* Fan Feed */}
-      <div className="mt-10">
-        {/* Header + tabs */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-white">Fan Feed</h2>
-            <div className="flex gap-1 p-0.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
-              {(["all", "tips"] as const).map((tab) => {
-                const count = tab === "tips"
-                  ? songTips.length + premiumGifts.length
-                  : profileComments.length;
-                return (
-                  <button
-                    key={tab}
-                    onClick={() => setFanFeedTab(tab)}
-                    className={`px-3 py-1 text-xs rounded-md transition-all capitalize ${
-                      fanFeedTab === tab
-                        ? "bg-white/[0.08] text-white font-medium"
-                        : "text-slate-500 hover:text-slate-300"
-                    }`}
-                  >
-                    {tab === "all" ? "All" : "Tips"}
-                    {count > 0 && (
-                      <span className="ml-1.5 text-[10px] text-slate-500">{count}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Comment + optional tip form */}
-        {fanFeedTab === "all" && currentUser && !isOwnProfile && (
-          <div className="mb-5 space-y-2">
-            <div className="flex gap-3">
-              <textarea
-                value={commentBody}
-                onChange={(e) => setCommentBody(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmitComment();
-                }}
-                placeholder={`Leave a message for ${displayName || accountId}...`}
-                maxLength={1000}
-                rows={2}
-                className="flex-1 rounded-xl px-4 py-2.5 text-sm border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-purple-500 focus:outline-none resize-none"
-              />
-              <button
-                onClick={handleSubmitComment}
-                disabled={commentSubmitting || (!commentBody.trim() && !tipAmount)}
-                className="self-end px-4 py-2.5 btn-primary rounded-xl text-sm disabled:opacity-40"
-              >
-                {commentSubmitting ? "..." : tipAmount ? `Send ${tipAmount} NEAR` : "Post"}
-              </button>
-            </div>
-            {nearAccountId && walletAccountId && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-slate-500 mr-1">Tip:</span>
-                {["0.1", "0.5", "1", "5"].map((amt) => (
-                  <button
-                    key={amt}
-                    onClick={() => setTipAmount(tipAmount === amt ? null : amt)}
-                    className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-all ${
-                      tipAmount === amt
-                        ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                        : "bg-white/[0.04] text-slate-500 border-white/[0.06] hover:text-slate-300 hover:bg-white/[0.08]"
-                    }`}
-                  >
-                    {amt} Ⓝ
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {fanFeedTab === "tips" ? (
-          songTips.length === 0 && premiumGifts.length === 0 ? (
-            <p className="text-slate-500 text-sm">No tips yet.</p>
-          ) : (
-            <div className="space-y-3">
-              {premiumGifts.map((gift) => (
-                <div key={`gift-${gift.id}`} className="flex gap-3 items-center">
-                  <Link href={`/profile/${gift.gifted_by_slug}`} className="shrink-0">
-                    {gift.gifted_by_avatar_url ? (
-                      <img src={gift.gifted_by_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white">
-                        {(gift.gifted_by_display_name || gift.gifted_by_slug)?.[0]?.toUpperCase()}
-                      </div>
-                    )}
-                  </Link>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-300">
-                      <Link href={`/profile/${gift.gifted_by_slug}`} className="font-medium text-white hover:underline">
-                        {gift.gifted_by_display_name || truncateId(gift.gifted_by_slug)}
-                      </Link>
-                      {" gifted "}
-                      <span className="text-cyan-400 font-medium diamond-shimmer">✦ {gift.days_added} days of Premium</span>
-                    </p>
-                  </div>
-                </div>
-              ))}
-              {songTips.map((tip) => (
-                <div key={tip.id} className="flex gap-3 items-center">
-                  <Link href={`/profile/${tip.tipper_slug}`} className="shrink-0">
-                    {tip.tipper_avatar_url ? (
-                      <img src={tip.tipper_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white">
-                        {(tip.tipper_display_name || tip.tipper_slug)?.[0]?.toUpperCase()}
-                      </div>
-                    )}
-                  </Link>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-300">
-                      <Link href={`/profile/${tip.tipper_slug}`} className="font-medium text-white hover:underline">
-                        {tip.tipper_display_name || truncateId(tip.tipper_slug)}
-                      </Link>
-                      {" tipped "}
-                      <span className="text-cyan-400 font-medium">{formatNear(tip.amount_yocto)} NEAR</span>
-                      {" on "}
-                      <Link href={`/song/${tip.song_uuid}`} className="text-purple-400 hover:underline">
-                        {tip.song_title}
-                      </Link>
-                    </p>
-                  </div>
-                  {tip.song_cover_image_url && (
-                    <Link href={`/song/${tip.song_uuid}`} className="shrink-0">
-                      <img src={tip.song_cover_image_url} alt="" className="w-10 h-10 rounded-lg object-cover" />
-                    </Link>
-                  )}
-                </div>
-              ))}
-            </div>
-          )
-        ) : profileComments.length === 0 ? (
-          <p className="text-slate-500 text-sm">
-            {isOwnProfile
-              ? "No messages yet."
-              : "No messages yet. Be the first to leave one!"}
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {profileComments.map((c) => (
-              <div key={c.id} className="flex gap-3 group">
-                <Link href={`/profile/${c.author_account_id}`} className="shrink-0">
-                  {c.author_avatar_url ? (
-                    <img src={c.author_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-xs font-bold text-white">
-                      {(c.author_display_name || c.author_account_id).charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                </Link>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <Link href={`/profile/${c.author_account_id}`} className="text-xs font-medium text-slate-300 hover:text-white transition-colors truncate">
-                      {c.author_display_name || c.author_account_id}
-                    </Link>
-                    {c.author_is_agent && (
-                      <span className="text-[9px] px-1 py-px rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/20 font-medium leading-none shrink-0">AI</span>
-                    )}
-                    {c.author_is_premium && (
-                      <span className="text-[9px] px-1 py-px rounded bg-purple-500/15 text-purple-400 border border-purple-500/20 font-medium leading-none shrink-0">✦</span>
-                    )}
-                    {c.amount_yocto && (
-                      <span className="text-[11px] font-semibold text-amber-400 shrink-0">
-                        +{formatNear(c.amount_yocto)} NEAR
-                      </span>
-                    )}
-                    <span className="text-[11px] text-slate-600 shrink-0">{new Date(c.created_at).toLocaleDateString()}</span>
-                    {(currentUser === c.author_account_id || currentUser === accountId || authUser?.is_admin) && (
-                      <button
-                        onClick={() => handleDeleteProfileComment(c.id)}
-                        className="ml-auto text-[11px] text-slate-600 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                      >
-                        delete
-                      </button>
-                    )}
-                  </div>
-                  {c.body && <p className="text-sm text-slate-300 break-words">{c.body}</p>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

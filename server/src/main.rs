@@ -109,6 +109,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/users/:account_id/comments", post(routes::users::create_profile_comment))
         .route("/api/users/:account_id/comments/:id", delete(routes::users::delete_profile_comment))
         .route("/api/users/:account_id/tip", post(routes::users::record_profile_tip))
+        .route("/api/users/:account_id/blog", post(routes::blog::create_blog_post))
+        .route("/api/users/:account_id/blog/:id", delete(routes::blog::delete_blog_post).patch(routes::blog::update_blog_post))
+        .route("/api/posts/:parent_type/:parent_id/replies", post(routes::blog::create_reply))
+        .route("/api/replies/:id", delete(routes::blog::delete_reply))
         .route("/api/requests/:uuid", patch(routes::requests::update_request))
         .layer(middleware::from_fn_with_state(
             strict_limiter,
@@ -196,6 +200,9 @@ async fn main() -> anyhow::Result<()> {
         // Comments (GET not rate-limited)
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
+        .route("/api/users/:account_id/blog", get(routes::blog::list_blog_posts))
+        .route("/api/users/:account_id/blog/:id", get(routes::blog::get_blog_post))
+        .route("/api/posts/:parent_type/:parent_id/replies", get(routes::blog::list_replies))
         .route("/api/users/:account_id/song-tips", get(routes::users::list_song_tips))
         .route("/api/users/:account_id/premium-gifts", get(routes::users::list_premium_gifts))
         // Users

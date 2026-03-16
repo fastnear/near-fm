@@ -385,3 +385,10 @@ input[type="range"]::-moz-range-thumb {
   animation-play-state: paused;
 }
 
+/* ── Song embed: equalizer bars ──────── */
+
+@keyframes equalizer {
+  0%, 100% { height: 30%; }
+  50% { height: 100%; }
+}
+
