@@ -215,10 +215,15 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
           setQueue((prev) => prev.slice(1));
           playSong(nextSong);
         } else if (feedSongsRef.current.length > 0) {
-          // Refill queue from feed songs and play first
-          const feed = feedSongsRef.current;
-          setQueue(feed.slice(1));
-          playSong(feed[0]);
+          // Refill queue from feed songs, skip current song to avoid repeat
+          const currentUuid = currentSongRef.current?.uuid;
+          const feed = feedSongsRef.current.filter(s => s.uuid !== currentUuid);
+          if (feed.length > 0) {
+            setQueue(feed.slice(1));
+            playSong(feed[0]);
+          } else {
+            setIsPlaying(false);
+          }
         } else {
           // No queue and no feed — fetch radio playlist from API
           getRadioPlaylist().then((songs) => {
@@ -294,9 +299,12 @@ export function AudioPlayerProvider({ children }: { children: ReactNode }) {
       setQueue((q) => q.slice(1));
       playSong(nextSong);
     } else if (playMode === "radio" && feedSongsRef.current.length > 0) {
-      const feed = feedSongsRef.current;
-      setQueue(feed.slice(1));
-      playSong(feed[0]);
+      const currentUuid = currentSongRef.current?.uuid;
+      const feed = feedSongsRef.current.filter(s => s.uuid !== currentUuid);
+      if (feed.length > 0) {
+        setQueue(feed.slice(1));
+        playSong(feed[0]);
+      }
     } else if (playMode === "radio") {
       // Fetch radio playlist from API
       getRadioPlaylist().then((songs) => {

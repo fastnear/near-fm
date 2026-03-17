@@ -782,9 +782,11 @@ function NotificationsTab() {
       const data = await getNotifications();
       setNotifications(data);
 
-      // Auto-mark all as read
+      // Auto-mark all as read & clear header badge
       if (data.some((n: Notification) => !n.is_read)) {
-        markAllNotificationsRead().catch(() => {});
+        markAllNotificationsRead()
+          .then(() => window.dispatchEvent(new Event("nearfm_notifications_read")))
+          .catch(() => {});
       }
     } catch (e) {
       console.error("Failed to load notifications:", e);

@@ -157,7 +157,7 @@ export function AudioPlayer() {
               {currentSong.title}
             </Link>
             <Link href={`/profile/${currentSong.uploader_account_id}`} className="text-xs text-slate-500 truncate block hover:text-slate-400 transition-colors max-w-[100px] sm:max-w-[180px]">
-              {currentSong.uploader_account_id}
+              {currentSong.uploader_display_name || currentSong.uploader_account_id}
             </Link>
           </div>
         </div>

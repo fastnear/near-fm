@@ -236,9 +236,9 @@ export function VoteButtons({ song, compact }: Props) {
   const handleBtnMouseUp = useCallback(() => {
     clearTimeout(holdTimer.current);
     if (!didHold.current) {
-      handleVote(1);
+      handleDiamondLike();
     }
-  }, [handleVote]);
+  }, [handleDiamondLike]);
 
   const handleBtnMouseEnter = useCallback(() => {
     clearTimeout(panelTimeout.current);

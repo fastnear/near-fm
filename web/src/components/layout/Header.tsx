@@ -31,6 +31,11 @@ export function Header() {
         setUnreadCount(notifs.filter((n) => !n.is_read).length);
       })
       .catch(() => {});
+
+    // Listen for "notifications read" event from cabinet page
+    const handleRead = () => setUnreadCount(0);
+    window.addEventListener("nearfm_notifications_read", handleRead);
+    return () => window.removeEventListener("nearfm_notifications_read", handleRead);
   }, [isAuthenticated]);
 
   // Close login menu on outside click
@@ -49,7 +54,16 @@ export function Header() {
   const displayName = user?.display_name || user?.slug || "";
   const profileSlug = user?.slug || "";
 
-  const navLinkClass = "relative text-sm text-slate-300 hover:text-white transition-colors duration-200 after:absolute after:bottom-0 after:left-0 after:w-0 after:h-[2px] after:bg-gradient-to-r after:from-purple-500 after:to-cyan-500 after:transition-all after:duration-300 hover:after:w-full";
+  const navLink = (href: string, extra?: string) => {
+    const isActive = href === "/"
+      ? pathname === "/" || pathname === "/trending" || pathname === "/latest" || pathname === "/top" || pathname === "/following"
+      : pathname.startsWith(href);
+    return `relative text-sm transition-colors duration-200 after:absolute after:bottom-0 after:left-0 after:h-[2px] after:bg-gradient-to-r after:from-purple-500 after:to-cyan-500 after:transition-all after:duration-300 ${
+      isActive
+        ? "text-white after:w-full"
+        : "text-slate-300 hover:text-white after:w-0 hover:after:w-full"
+    } ${extra || ""}`;
+  };
 
   return (
     <header className="sticky top-0 z-50 glass-strong">
@@ -76,13 +90,13 @@ export function Header() {
         </div>
 
         {/* Nav */}
-        <nav className="hidden md:flex items-center gap-8">
-          <Link href="/" className={navLinkClass}>Feed</Link>
-          <Link href="/requests" className={navLinkClass}>Requests</Link>
-          {(isPremium || user?.is_admin) && <Link href="/create" className={navLinkClass}>Create</Link>}
-          <Link href="/upload" className={navLinkClass}>Upload</Link>
-          <Link href="/premium" className={`${navLinkClass} diamond-shimmer`}>Premium</Link>
-          <Link href="/cabinet" className={navLinkClass}>
+        <nav className="hidden md:flex items-center gap-8" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); } catch {} }}>
+          <Link href="/" className={navLink("/")}>Feed</Link>
+          <Link href="/requests" className={navLink("/requests")}>Requests</Link>
+          {(isPremium || user?.is_admin) && <Link href="/create" className={navLink("/create")}>Create</Link>}
+          <Link href="/upload" className={navLink("/upload")}>Upload</Link>
+          <Link href="/premium" className={navLink("/premium", pathname === "/premium" ? "" : "diamond-shimmer")}>Premium</Link>
+          <Link href="/cabinet" className={navLink("/cabinet")}>
             Cabinet
             {unreadCount > 0 && (
               <span className="absolute -top-2.5 -right-5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-lg shadow-purple-500/30 animate-pulse">
@@ -194,7 +208,7 @@ export function Header() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-1.5">
+      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-1.5" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); } catch {} }}>
         <Link href="/" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/" || pathname === "/trending" || pathname === "/latest" || pathname === "/top" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955a1.126 1.126 0 0 1 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
@@ -213,7 +227,7 @@ export function Header() {
           </svg>
           <span className="text-[10px]">Upload</span>
         </Link>
-        <Link href="/premium" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/premium" ? "text-white diamond-shimmer" : "text-slate-500 hover:text-slate-300"}`}>
+        <Link href="/premium" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/premium" ? "text-white" : "text-slate-500 hover:text-slate-300 diamond-shimmer"}`}>
           <span className="text-lg leading-5">✦</span>
           <span className="text-[10px]">Premium</span>
         </Link>

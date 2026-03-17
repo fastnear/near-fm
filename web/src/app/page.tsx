@@ -205,9 +205,13 @@ function FeedPageInner() {
               <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
             </svg>
           </div>
-          <p className="text-slate-400 text-lg font-medium">No songs yet</p>
+          <p className="text-slate-400 text-lg font-medium">
+            {sort === "following" ? "No songs from people you follow" : "No songs yet"}
+          </p>
           <p className="text-slate-600 text-sm mt-2">
-            Be the first to upload an AI-generated song!
+            {sort === "following"
+              ? "Start following artists to see their songs here!"
+              : "Be the first to upload an AI-generated song!"}
           </p>
         </div>
       ) : (
