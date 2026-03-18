@@ -252,13 +252,16 @@ function FeedPageWrapper() {
   const [showLanding, setShowLanding] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Only show landing on the root path (not /trending, /latest, etc.)
     const isRoot = window.location.pathname === "/";
     const visited = localStorage.getItem("nearfm_visited");
     setShowLanding(isRoot && !visited);
+
+    // Any nav click sets nearfm_visited and dispatches this event
+    const handleDismiss = () => setShowLanding(false);
+    window.addEventListener("nearfm_dismiss_landing", handleDismiss);
+    return () => window.removeEventListener("nearfm_dismiss_landing", handleDismiss);
   }, []);
 
-  // Avoid flash while checking localStorage
   if (showLanding === null) return null;
 
   if (showLanding) {

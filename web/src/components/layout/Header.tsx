@@ -90,7 +90,7 @@ export function Header() {
         </div>
 
         {/* Nav */}
-        <nav className="hidden md:flex items-center gap-8" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); } catch {} }}>
+        <nav className="hidden md:flex items-center gap-8" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); window.dispatchEvent(new Event("nearfm_dismiss_landing")); } catch {} }}>
           <Link href="/" className={navLink("/")}>Feed</Link>
           <Link href="/requests" className={navLink("/requests")}>Requests</Link>
           {(isPremium || user?.is_admin) && <Link href="/create" className={navLink("/create")}>Create</Link>}
@@ -208,7 +208,7 @@ export function Header() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-1.5" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); } catch {} }}>
+      <nav className="md:hidden flex items-center justify-around border-t border-white/[0.06] py-1.5" onClick={() => { try { localStorage.setItem("nearfm_visited", "1"); window.dispatchEvent(new Event("nearfm_dismiss_landing")); } catch {} }}>
         <Link href="/" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/" || pathname === "/trending" || pathname === "/latest" || pathname === "/top" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955a1.126 1.126 0 0 1 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
