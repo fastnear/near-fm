@@ -534,42 +534,78 @@ pub async fn toggle_diamond_like(
     song_id: i32,
     user_id: i32,
 ) -> Result<bool, sqlx::Error> {
-    // Try to delete first; if a row was deleted, it was a removal
-    let deleted = sqlx::query(
-        "DELETE FROM diamond_likes WHERE song_id = $1 AND user_id = $2",
+    let mut tx = pool.begin().await?;
+
+    // Lock the row to prevent concurrent toggle race conditions
+    let existing: Option<(i32, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT id, created_at FROM diamond_likes WHERE song_id = $1 AND user_id = $2 AND removed_at IS NULL FOR UPDATE",
     )
     .bind(song_id)
     .bind(user_id)
-    .execute(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
-    if deleted.rows_affected() > 0 {
-        // Removed — decrement count
+    if let Some((like_id, created_at)) = existing {
+        // Remove: if created less than 10 minutes ago, hard-delete (refund quota)
+        // Otherwise soft-delete (quota consumed)
+        let age_minutes = (chrono::Utc::now() - created_at).num_minutes();
+        if age_minutes < 10 {
+            sqlx::query("DELETE FROM diamond_likes WHERE id = $1")
+                .bind(like_id)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query("UPDATE diamond_likes SET removed_at = NOW() WHERE id = $1")
+                .bind(like_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
         sqlx::query(
             "UPDATE songs SET diamond_like_count = GREATEST(diamond_like_count - 1, 0) WHERE id = $1",
         )
         .bind(song_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
         return Ok(false);
     }
 
-    // Insert new diamond like
-    sqlx::query(
-        "INSERT INTO diamond_likes (song_id, user_id) VALUES ($1, $2)",
+    // Check if a soft-deleted diamond like exists (re-liking)
+    let removed: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM diamond_likes WHERE song_id = $1 AND user_id = $2 AND removed_at IS NOT NULL FOR UPDATE",
     )
     .bind(song_id)
     .bind(user_id)
-    .execute(pool)
+    .fetch_optional(&mut *tx)
     .await?;
+
+    if let Some((like_id,)) = removed {
+        sqlx::query(
+            "UPDATE diamond_likes SET removed_at = NULL, created_at = NOW() WHERE id = $1",
+        )
+        .bind(like_id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO diamond_likes (song_id, user_id) VALUES ($1, $2)",
+        )
+        .bind(song_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     sqlx::query(
         "UPDATE songs SET diamond_like_count = diamond_like_count + 1 WHERE id = $1",
     )
     .bind(song_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
+    tx.commit().await?;
     Ok(true)
 }
 
@@ -577,6 +613,10 @@ pub async fn get_diamond_likes_today(
     pool: &PgPool,
     user_id: i32,
 ) -> Result<i64, sqlx::Error> {
+    // Count today's diamond likes that consume quota:
+    // - Active likes (removed_at IS NULL) — currently placed
+    // - Soft-deleted likes (removed_at IS NOT NULL) — removed after 10min, quota consumed
+    // Quick-removed likes (removed within 10 min) are hard-deleted and not counted
     sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM diamond_likes WHERE user_id = $1 AND created_at >= CURRENT_DATE",
     )
@@ -591,7 +631,7 @@ pub async fn get_user_diamond_like(
     user_id: i32,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM diamond_likes WHERE song_id = $1 AND user_id = $2)",
+        "SELECT EXISTS(SELECT 1 FROM diamond_likes WHERE song_id = $1 AND user_id = $2 AND removed_at IS NULL)",
     )
     .bind(song_id)
     .bind(user_id)
@@ -614,7 +654,7 @@ pub async fn get_diamond_likers(
         r#"SELECT u.slug, u.display_name, u.avatar_url
            FROM diamond_likes dl
            JOIN users u ON dl.user_id = u.id
-           WHERE dl.song_id = $1
+           WHERE dl.song_id = $1 AND dl.removed_at IS NULL
            ORDER BY dl.created_at DESC"#,
     )
     .bind(song_id)

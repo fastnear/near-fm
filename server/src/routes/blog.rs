@@ -360,10 +360,17 @@ pub async fn community_feed(
                   COALESCE(u.premium_until > NOW(), FALSE) AS author_is_premium,
                   u.is_agent AS author_is_agent,
                   NULL::TEXT AS song_uuid, NULL::TEXT AS song_title, NULL::TEXT AS song_cover_image_url,
-                  (SELECT COUNT(*) FROM post_replies pr WHERE pr.parent_type = 'blog_post' AND pr.parent_id = bp.id AND NOT pr.is_hidden) AS reply_count,
+                  COALESCE(rc.reply_count, 0) AS reply_count,
                   bp.updated_at,
                   bp.id AS blog_post_id
-           FROM blog_posts bp JOIN users u ON u.id = bp.author_user_id
+           FROM blog_posts bp
+           JOIN users u ON u.id = bp.author_user_id
+           LEFT JOIN (
+               SELECT parent_id, COUNT(*) AS reply_count
+               FROM post_replies
+               WHERE parent_type = 'blog_post' AND NOT is_hidden
+               GROUP BY parent_id
+           ) rc ON rc.parent_id = bp.id
            WHERE NOT bp.is_hidden)
         UNION ALL
         (SELECT c.id, 'song_comment' AS item_type, c.body, c.created_at,

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Song } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
-import { voteSong, getUserVote, diamondLikeSong, getDiamondLikers } from "@/lib/api";
+import { voteSong, getUserVote, diamondLikeSong, getDiamondLikers, getDiamondLikesRemaining } from "@/lib/api";
 
 interface Props {
   song: Song;
@@ -132,6 +132,7 @@ export function VoteButtons({ song, compact }: Props) {
   const [diamondLoading, setDiamondLoading] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
+  const [diamondQuotaExhausted, setDiamondQuotaExhausted] = useState(false);
   const tooltipTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const panelTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
   const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -150,8 +151,13 @@ export function VoteButtons({ song, compact }: Props) {
           setUserHasDiamondLiked(r.user_has_diamond_liked);
         })
         .catch(() => {});
+      if (isPremium && !compact) {
+        getDiamondLikesRemaining()
+          .then((r) => setDiamondQuotaExhausted(r.diamond_likes_remaining_today <= 0))
+          .catch(() => {});
+      }
     }
-  }, [isAuthenticated, song.uuid]);
+  }, [isAuthenticated, isPremium, compact, song.uuid]);
 
   const handleVote = useCallback(async (value: 1 | -1) => {
     if (!isAuthenticated) { promptSignIn(); return; }
@@ -195,8 +201,11 @@ export function VoteButtons({ song, compact }: Props) {
         setDiamondLikeCount(r.diamond_like_count);
         setUserHasDiamondLiked(r.user_has_diamond_liked);
       }).catch(() => {});
-    } catch (e) {
-      console.error("Diamond like failed:", e);
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.includes("limit reached")) {
+        setDiamondQuotaExhausted(true);
+      }
       // Revert optimistic update on error
       if (willAddDiamond && hadUpvote) {
         setUpvotes((v) => v + 1);
@@ -256,11 +265,14 @@ export function VoteButtons({ song, compact }: Props) {
   const net = upvotes + diamondLikeCount - downvotes;
   const hasDiamondLikes = diamondLikeCount > 0;
 
+  // Should we show diamond button? Only if premium AND (has quota OR already diamond-liked this song)
+  const showDiamond = isPremium && (!diamondQuotaExhausted || userHasDiamondLiked);
+
   // ── Compact mode (SongCard) ──
   if (compact) {
     return (
       <div className="flex items-center">
-        {isPremium ? (
+        {showDiamond ? (
           // Premium user: diamond-styled button
           <>
             <button
@@ -309,8 +321,8 @@ export function VoteButtons({ song, compact }: Props) {
             <ThumbUp filled={userVote === 1} className="w-[18px] h-[18px]" />
           </button>
         )}
-        {/* Diamond tooltip for non-premium users too (shows who diamond-liked) */}
-        {!isPremium && showTooltip && hasDiamondLikes && (
+        {/* Diamond tooltip for non-diamond users too (shows who diamond-liked) */}
+        {!showDiamond && showTooltip && hasDiamondLikes && (
           <PortalTooltip anchorRef={diamondAnchorRef}>
             <DiamondTooltipContent
               songUuid={song.uuid}
@@ -351,8 +363,8 @@ export function VoteButtons({ song, compact }: Props) {
 
   // ── Full mode (SongDetail) ──
 
-  // Premium user: diamond-styled button + hold/hover panel
-  if (isPremium) {
+  // Premium user with quota (or already diamond-liked): diamond-styled button + hold/hover panel
+  if (showDiamond) {
     return (
       <div className="flex items-center gap-3">
         <div className="relative">

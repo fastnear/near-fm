@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { CommunityFeedItem } from "@/lib/api";
 import { MarkdownBody } from "@/components/post/MarkdownBody";
 import { ShareButton } from "@/components/ui/ShareButton";
-import { SongEmbed } from "@/components/post/SongEmbed";
+import { SongEmbedCompact } from "@/components/post/SongEmbed";
 
 export function CommunityFeedCard({ item }: { item: CommunityFeedItem }) {
   if (item.item_type === "song_comment") {
@@ -16,8 +16,8 @@ export function CommunityFeedCard({ item }: { item: CommunityFeedItem }) {
 function SongCommentCard({ item }: { item: CommunityFeedItem }) {
   return (
     <div className="glass-card rounded-2xl p-4 space-y-2">
-      {item.song_uuid && (
-        <SongEmbed uuid={item.song_uuid} />
+      {item.song_uuid && item.song_title && (
+        <SongEmbedCompact uuid={item.song_uuid} title={item.song_title} coverImageUrl={item.song_cover_image_url} />
       )}
       <div className="flex items-center gap-2 flex-wrap">
         <Link href={`/profile/${item.author_account_id}`} className="shrink-0">
@@ -43,7 +43,7 @@ function SongCommentCard({ item }: { item: CommunityFeedItem }) {
         </span>
       </div>
       <div className="text-sm text-slate-300 break-words pl-9">
-        {item.body}
+        <MarkdownBody mode="reply">{item.body}</MarkdownBody>
       </div>
     </div>
   );
