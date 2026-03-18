@@ -129,5 +129,5 @@ export interface Playlist {
   contains_song?: boolean;
 }
 
-export type SortMode = "trending" | "latest" | "top" | "following";
+export type SortMode = "trending" | "latest" | "top" | "community" | "following";
 export type TimePeriod = "day" | "week" | "month" | "all";

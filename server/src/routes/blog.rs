@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{Extensions, StatusCode},
     Json,
 };
@@ -315,6 +315,81 @@ pub async fn delete_blog_post(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Community Feed ──
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct CommunityFeedItem {
+    pub id: i32,
+    pub item_type: String,
+    pub body: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub author_account_id: String,
+    pub author_display_name: Option<String>,
+    pub author_avatar_url: Option<String>,
+    pub author_is_premium: bool,
+    pub author_is_agent: bool,
+    pub song_uuid: Option<String>,
+    pub song_title: Option<String>,
+    pub song_cover_image_url: Option<String>,
+    pub reply_count: Option<i64>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub blog_post_id: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CommunityFeedQuery {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+/// GET /api/feed/community
+pub async fn community_feed(
+    State(state): State<AppState>,
+    Query(params): Query<CommunityFeedQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let page = params.page.unwrap_or(1).max(1);
+    let limit = params.limit.unwrap_or(24).clamp(1, 100);
+    let offset = (page - 1) * limit;
+
+    let items = sqlx::query_as::<_, CommunityFeedItem>(
+        r#"(SELECT bp.id, 'blog_post' AS item_type, bp.body, bp.created_at,
+                  u.slug AS author_account_id, u.display_name AS author_display_name,
+                  u.avatar_url AS author_avatar_url,
+                  COALESCE(u.premium_until > NOW(), FALSE) AS author_is_premium,
+                  u.is_agent AS author_is_agent,
+                  NULL::TEXT AS song_uuid, NULL::TEXT AS song_title, NULL::TEXT AS song_cover_image_url,
+                  (SELECT COUNT(*) FROM post_replies pr WHERE pr.parent_type = 'blog_post' AND pr.parent_id = bp.id AND NOT pr.is_hidden) AS reply_count,
+                  bp.updated_at,
+                  bp.id AS blog_post_id
+           FROM blog_posts bp JOIN users u ON u.id = bp.author_user_id
+           WHERE NOT bp.is_hidden)
+        UNION ALL
+        (SELECT c.id, 'song_comment' AS item_type, c.body, c.created_at,
+                u.slug AS author_account_id, u.display_name AS author_display_name,
+                u.avatar_url AS author_avatar_url,
+                COALESCE(u.premium_until > NOW(), FALSE) AS author_is_premium,
+                u.is_agent AS author_is_agent,
+                s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
+                NULL::BIGINT AS reply_count, NULL::TIMESTAMPTZ AS updated_at, NULL::INT AS blog_post_id
+         FROM comments c JOIN users u ON u.id = c.user_id
+         JOIN songs s ON s.id = c.song_id
+         WHERE NOT c.is_hidden AND NOT s.is_hidden AND NOT s.is_deleted)
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2"#,
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "page": page,
+        "limit": limit,
+    })))
 }
 
 // ── Post Replies (shared for blog_post and profile_comment) ──

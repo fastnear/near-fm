@@ -484,6 +484,33 @@ export async function deleteBlogPost(accountId: string, postId: number): Promise
   return fetchApi(`/api/users/${accountId}/blog/${postId}`, { method: "DELETE" });
 }
 
+// ── Community Feed ──
+
+export interface CommunityFeedItem {
+  id: number;
+  item_type: "blog_post" | "song_comment";
+  body: string;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  song_uuid: string | null;
+  song_title: string | null;
+  song_cover_image_url: string | null;
+  reply_count: number | null;
+  updated_at: string | null;
+  blog_post_id: number | null;
+}
+
+export async function getCommunityFeed(page?: number, limit?: number): Promise<{ items: CommunityFeedItem[]; page: number; limit: number }> {
+  const params = new URLSearchParams();
+  if (page) params.set("page", String(page));
+  if (limit) params.set("limit", String(limit));
+  return fetchApi(`/api/feed/community?${params.toString()}`);
+}
+
 // ── Post Replies ──
 
 export interface PostReply {

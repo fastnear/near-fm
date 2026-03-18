@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
-import { getSongs, getRadioPlaylist } from "@/lib/api";
+import { getSongs, getRadioPlaylist, getCommunityFeed } from "@/lib/api";
+import type { CommunityFeedItem } from "@/lib/api";
 import { SongCard } from "@/components/song/SongCard";
 import { FeedTabs } from "@/components/feed/FeedTabs";
 import { FeedFilters } from "@/components/feed/FeedFilters";
+import { CommunityFeedCard } from "@/components/feed/CommunityFeedCard";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { LandingPage } from "@/components/landing/LandingPage";
@@ -14,6 +16,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 function FeedPageInner() {
   const searchParams = useSearchParams();
   const [songs, setSongs] = useState<Song[]>([]);
+  const [communityItems, setCommunityItems] = useState<CommunityFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortReady, setSortReady] = useState(false);
   const [sort, setSort] = useState<SortMode>("trending");
@@ -52,6 +55,7 @@ function FeedPageInner() {
       "/latest": "latest",
       "/top": "top",
       "/following": "following",
+      "/community": "community",
     };
     if (sortRoutes[pathname]) {
       setSort(sortRoutes[pathname]);
@@ -59,7 +63,7 @@ function FeedPageInner() {
       // Restore last selected feed tab from localStorage
       try {
         const saved = localStorage.getItem("nearfm_feed_sort");
-        if (saved && ["trending", "latest", "top", "following"].includes(saved)) {
+        if (saved && ["trending", "latest", "top", "following", "community"].includes(saved)) {
           setSort(saved as SortMode);
           window.history.replaceState(null, "", `/${saved}`);
         }
@@ -70,7 +74,7 @@ function FeedPageInner() {
     const cat = searchParams.get("category");
     if (cat) setCategoryId(Number(cat));
     const sortParam = searchParams.get("sort");
-    if (sortParam && ["trending", "latest", "top", "following"].includes(sortParam)) {
+    if (sortParam && ["trending", "latest", "top", "following", "community"].includes(sortParam)) {
       setSort(sortParam as SortMode);
     }
     const genreParam = searchParams.get("genre");
@@ -85,22 +89,31 @@ function FeedPageInner() {
     const version = ++fetchVersionRef.current;
     setLoading(true);
     try {
-      const isFollowing = sort === "following";
-      const data = await getSongs({
-        sort,
-        period: sort === "top" ? period : undefined,
-        lang: isFollowing ? undefined : languageId,
-        category: isFollowing ? undefined : categoryId,
-        genre: isFollowing ? undefined : genreSlug,
-        lang_code: isFollowing ? undefined : langCode,
-        q: isFollowing ? undefined : (searchQuery || undefined),
-        page,
-        limit: 24,
-      });
-      // Ignore stale responses
-      if (version !== fetchVersionRef.current) return;
-      setSongs(data.songs);
-      setFeedSongs(data.songs);
+      if (sort === "community") {
+        const data = await getCommunityFeed(page, 24);
+        if (version !== fetchVersionRef.current) return;
+        setCommunityItems(data.items);
+        setSongs([]);
+        setFeedSongs([]);
+      } else {
+        const isFollowing = sort === "following";
+        const data = await getSongs({
+          sort,
+          period: sort === "top" ? period : undefined,
+          lang: isFollowing ? undefined : languageId,
+          category: isFollowing ? undefined : categoryId,
+          genre: isFollowing ? undefined : genreSlug,
+          lang_code: isFollowing ? undefined : langCode,
+          q: isFollowing ? undefined : (searchQuery || undefined),
+          page,
+          limit: 24,
+        });
+        // Ignore stale responses
+        if (version !== fetchVersionRef.current) return;
+        setSongs(data.songs);
+        setCommunityItems([]);
+        setFeedSongs(data.songs);
+      }
     } catch (e) {
       console.error("Failed to load songs:", e);
     }
@@ -167,7 +180,7 @@ function FeedPageInner() {
           </button>
           <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); setGenreSlug(undefined); setLangCode(undefined); }} isAuthenticated={!!currentUser} />
         </div>
-        {sort !== "following" && (
+        {sort !== "following" && sort !== "community" && (
           <FeedFilters
             languageId={languageId}
             categoryId={categoryId}
@@ -185,19 +198,52 @@ function FeedPageInner() {
         )}
       </div>
 
-      {/* Song grid */}
+      {/* Content */}
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="glass-card rounded-2xl">
-              <div className="aspect-square rounded-t-2xl skeleton" />
-              <div className="p-3 space-y-2">
-                <div className="h-4 rounded-lg skeleton w-3/4" />
-                <div className="h-3 rounded-lg skeleton w-1/2" />
+        sort === "community" ? (
+          <div className="max-w-2xl mx-auto space-y-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="glass-card rounded-2xl p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full skeleton" />
+                  <div className="h-3 skeleton rounded w-28" />
+                </div>
+                <div className="h-4 skeleton rounded w-full" />
+                <div className="h-4 skeleton rounded w-2/3" />
               </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="glass-card rounded-2xl">
+                <div className="aspect-square rounded-t-2xl skeleton" />
+                <div className="p-3 space-y-2">
+                  <div className="h-4 rounded-lg skeleton w-3/4" />
+                  <div className="h-3 rounded-lg skeleton w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : sort === "community" ? (
+        communityItems.length === 0 ? (
+          <div className="text-center py-24">
+            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/10 to-cyan-500/10 flex items-center justify-center">
+              <svg className="w-10 h-10 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
             </div>
-          ))}
-        </div>
+            <p className="text-slate-400 text-lg font-medium">No community posts yet</p>
+            <p className="text-slate-600 text-sm mt-2">Blog posts and song comments will appear here.</p>
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto space-y-4">
+            {communityItems.map((item) => (
+              <CommunityFeedCard key={`${item.item_type}-${item.id}`} item={item} />
+            ))}
+          </div>
+        )
       ) : songs.length === 0 ? (
         <div className="text-center py-24">
           <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/10 to-cyan-500/10 flex items-center justify-center">
@@ -223,7 +269,7 @@ function FeedPageInner() {
       )}
 
       {/* Pagination */}
-      {songs.length >= 24 && (
+      {(sort === "community" ? communityItems.length >= 24 : songs.length >= 24) && (
         <div className="flex justify-center mt-10 gap-3">
           {page > 1 && (
             <button

@@ -68,7 +68,7 @@ async fn do_validate(pool: &PgPool, song_id: i32, audio_url: &str) -> Result<(),
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if !content_type.starts_with("audio/") && !content_type.starts_with("video/") {
+    if !content_type.starts_with("audio/") && !content_type.starts_with("video/") && content_type != "application/octet-stream" {
         return Err(format!(
             "Invalid content type: expected audio/* or video/*, got '{}'",
             content_type

@@ -49,6 +49,7 @@ export function middleware(request: NextRequest) {
     "/latest": "latest",
     "/top": "top",
     "/following": "following",
+    "/community": "community",
   };
   if (sortRoutes[pathname]) {
     const url = request.nextUrl.clone();

@@ -200,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
         // Comments (GET not rate-limited)
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
         .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
+        .route("/api/feed/community", get(routes::blog::community_feed))
         .route("/api/users/:account_id/blog", get(routes::blog::list_blog_posts))
         .route("/api/users/:account_id/blog/:id", get(routes::blog::get_blog_post))
         .route("/api/posts/:parent_type/:parent_id/replies", get(routes::blog::list_replies))

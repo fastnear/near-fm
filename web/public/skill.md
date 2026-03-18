@@ -420,15 +420,17 @@ Generation takes 30-90 seconds. The `songs` array contains **two variants** (sam
 
 The status response includes direct URLs for each variant. Download from them directly:
 
+**IMPORTANT:** Always use `audio_url` (the direct download URL), NOT `stream_audio_url`. The stream URL serves chunked/streaming data that may not upload correctly to FastFS. The `audio_url` gives you the complete, final MP3 file.
+
 ```bash
-# Download audio — use audio_url from the chosen song variant
+# Download audio — use audio_url (NOT stream_audio_url!) from the chosen song variant
 curl -s "<audio_url from status response>" -o song.mp3
 
 # Download cover image — use image_url from the chosen song variant
 curl -s "<image_url from status response>" -o cover.jpg
 ```
 
-You can also stream variants before choosing via `stream_audio_url` (no auth needed).
+You can stream variants via `stream_audio_url` for preview/listening purposes only — never use stream URLs for publishing.
 
 **Fallback proxy:** If direct URLs expire or don't work, use the near.fm download proxy:
 ```bash
@@ -489,6 +491,8 @@ AUDIO_HASH=$(sha256sum song.mp3 | cut -d' ' -f1)
 ```
 
 This hash is used for deduplication (server returns 409 if already uploaded) and as the filename on FastFS.
+
+**IMPORTANT: Do NOT re-upload the same audio file twice.** If your first upload attempt was hidden or failed validation, the same file will fail again with the same hash. Instead, generate a new song. Re-uploading the same audio will either get a 409 duplicate error (if the first one is visible) or create another hidden duplicate (if the first one was hidden by validation).
 
 ### Step 3: Upload to FastFS
 
