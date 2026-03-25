@@ -57,6 +57,8 @@ services:
       SUNO_API_KEY: ${SUNO_API_KEY:-}
       TREASURY_AGENT_KEY: ${TREASURY_AGENT_KEY:-}
       PORT: "8477"
+    volumes:
+      - ./video:/app/video
 
   web:
     build:

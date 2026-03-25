@@ -342,7 +342,7 @@ export default function CreatePage() {
   const handlePublish = async () => {
     if (!selectedSong) return;
     if (!accountId) {
-      linkWallet();
+      try { await linkWallet(); } catch {}
       return;
     }
     if (!pubTitle.trim()) {

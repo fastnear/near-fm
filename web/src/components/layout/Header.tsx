@@ -227,10 +227,19 @@ export function Header() {
           </svg>
           <span className="text-[10px]">Upload</span>
         </Link>
-        <Link href="/premium" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/premium" ? "text-white" : "text-slate-500 hover:text-slate-300 diamond-shimmer"}`}>
-          <span className="text-lg leading-5">✦</span>
-          <span className="text-[10px]">Premium</span>
-        </Link>
+        {isPremium || user?.is_admin ? (
+          <Link href="/create" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/create" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z" />
+            </svg>
+            <span className="text-[10px]">Create</span>
+          </Link>
+        ) : (
+          <Link href="/premium" className={`flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/premium" ? "text-white" : "text-slate-500 hover:text-slate-300 diamond-shimmer"}`}>
+            <span className="text-lg leading-5">✦</span>
+            <span className="text-[10px]">Premium</span>
+          </Link>
+        )}
         <Link href="/cabinet" className={`relative flex flex-col items-center gap-0.5 px-2 py-1 transition-colors ${pathname === "/cabinet" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />

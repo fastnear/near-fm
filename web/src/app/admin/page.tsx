@@ -28,6 +28,8 @@ import {
   getAdminUsers,
   getAdminCreditsSummary,
   getAdminCreditsTransactions,
+  getVideoStatus,
+  generateVideo,
 } from "@/lib/api";
 import type { AdminComment, AdminSongScore, AdminUser, CreditsSummary, CreditTransaction } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
@@ -910,6 +912,76 @@ function LanguagesPanel() {
 
 // NOTE: Moderation actions (hide/unhide, delete, genre picker) should be available
 // in ALL admin song views (By Score, Search & Moderate), not just search.
+function VideoButton({ uuid }: { uuid: string }) {
+  const [status, setStatus] = useState<"unknown" | "none" | "generating" | "ready">("unknown");
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVideoStatus(uuid).then((s) => {
+      setStatus(s.exists ? "ready" : "none");
+      setUrl(s.url);
+    }).catch(() => setStatus("none"));
+  }, [uuid]);
+
+  if (status === "unknown") return null;
+
+  if (status === "ready") {
+    return (
+      <a
+        href={url!}
+        download
+        className="p-1.5 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 rounded-lg border border-purple-500/20 transition"
+        title="Download video"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      </a>
+    );
+  }
+
+  return (
+    <button
+      onClick={async () => {
+        setStatus("generating");
+        try {
+          const res = await generateVideo(uuid);
+          if (res.status === "exists") {
+            setStatus("ready");
+            setUrl(res.url || null);
+          } else {
+            const poll = setInterval(async () => {
+              const s = await getVideoStatus(uuid);
+              if (s.exists) {
+                setStatus("ready");
+                setUrl(s.url);
+                clearInterval(poll);
+              }
+            }, 5000);
+            setTimeout(() => { clearInterval(poll); if (status === "generating") setStatus("none"); }, 300000);
+          }
+        } catch {
+          setStatus("none");
+        }
+      }}
+      disabled={status === "generating"}
+      className="p-1.5 text-slate-500 hover:text-purple-400 hover:bg-purple-500/10 disabled:opacity-50 rounded-lg border border-white/[0.08] transition"
+      title={status === "generating" ? "Generating..." : "Generate video"}
+    >
+      {status === "generating" ? (
+        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function SongsPanel() {
   const [mode, setMode] = useState<"scores" | "search">("scores");
   const [scoreSort, setScoreSort] = useState<"score" | "latest" | "top">("score");
@@ -1166,6 +1238,7 @@ function SongsPanel() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <VideoButton uuid={song.uuid} />
                     <a
                       href={`/song/${song.uuid}`}
                       target="_blank"

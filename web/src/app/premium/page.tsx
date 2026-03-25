@@ -93,7 +93,7 @@ export default function PremiumPage() {
     };
     Promise.all([fetchBalance("USDC"), fetchBalance("USDT")]).then(([usdc, usdt]) => {
       setTokenBalances({ USDC: usdc, USDT: usdt });
-    });
+    }).catch(() => {});
   }, [walletId, viewMethod, result]);
 
   const runSubscribe = useCallback(async (pending: PendingState) => {

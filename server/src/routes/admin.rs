@@ -12,6 +12,8 @@ use crate::{
     AppState,
 };
 
+const VIDEO_DIR: &str = "/app/video";
+
 // ── Categories ──
 
 pub async fn list_categories(
@@ -932,4 +934,94 @@ pub async fn credits_transactions(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(rows))
+}
+
+// ── Video Generation ──
+
+#[derive(Serialize)]
+pub struct VideoStatus {
+    pub exists: bool,
+    pub url: Option<String>,
+}
+
+/// Check whether a generated video exists for this song.
+pub async fn video_status(
+    Path(uuid): Path<String>,
+) -> Json<VideoStatus> {
+    let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
+    let exists = std::path::Path::new(&path).exists();
+    Json(VideoStatus {
+        exists,
+        url: if exists { Some(format!("/video/{}.mp4", uuid)) } else { None },
+    })
+}
+
+/// Generate a promo video for a song (admin only). Runs ffmpeg in background.
+pub async fn generate_video(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    // Check if already exists
+    let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
+    if std::path::Path::new(&path).exists() {
+        return Ok(Json(serde_json::json!({ "status": "exists", "url": format!("/video/{}.mp4", uuid) })));
+    }
+
+    // Fetch song data
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT audio_url, cover_image_url FROM songs WHERE uuid = $1 AND NOT is_deleted",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let Some((audio_url, cover_url)) = row else {
+        return Err((StatusCode::NOT_FOUND, "Song not found".to_string()));
+    };
+
+    // Spawn ffmpeg in background
+    let uuid_clone = uuid.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new("/app/scripts/generate-video.sh");
+        cmd.arg(&audio_url);
+        cmd.arg(cover_url.as_deref().unwrap_or(""));
+        cmd.arg(&format!("{}/{}.mp4", VIDEO_DIR, uuid_clone));
+        match cmd.output() {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if output.status.success() {
+                    tracing::info!(uuid = %uuid_clone, "Video generated: {}", stdout.trim());
+                } else {
+                    tracing::error!(uuid = %uuid_clone, "Video generation failed: {} {}", stdout.trim(), stderr.trim());
+                }
+            }
+            Err(e) => {
+                tracing::error!(uuid = %uuid_clone, "Failed to run generate-video.sh: {}", e);
+            }
+        }
+    });
+
+    Ok(Json(serde_json::json!({ "status": "generating" })))
+}
+
+/// Delete a generated video (admin only).
+pub async fn delete_video(
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
+    if std::path::Path::new(&path).exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+    Ok(Json(serde_json::json!({ "status": "deleted" })))
 }

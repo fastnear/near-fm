@@ -167,7 +167,7 @@ function UploadPage() {
   };
 
   const handleUpload = async () => {
-    if (!accountId) { linkWallet(); return; }
+    if (!accountId) { linkWallet().catch(() => {}); return; }
 
     if (!audioFile || !title.trim() || !lyrics.trim()) {
       setError("Title, lyrics, and audio file are required");

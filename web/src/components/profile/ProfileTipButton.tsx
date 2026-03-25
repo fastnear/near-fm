@@ -51,7 +51,7 @@ export function ProfileTipButton({ accountId, nearAccountId, onTipSuccess }: Pro
   }, [walletId, showModal, viewMethod]);
 
   const handleTip = async (amountNear: string) => {
-    if (!walletId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
+    if (!walletId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
     if (!nearAccountId) {
       showToast({ message: "This artist hasn't linked a NEAR wallet yet", type: "error", id: "ptip" });
       return;
@@ -107,7 +107,7 @@ export function ProfileTipButton({ accountId, nearAccountId, onTipSuccess }: Pro
     <div className="relative">
       <button
         onClick={() => {
-          if (!walletId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
+          if (!walletId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
           setShowModal(!showModal);
         }}
         className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-xl font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/30 transition-all"

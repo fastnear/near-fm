@@ -47,7 +47,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
   }, [accountId, showModal, viewMethod]);
 
   const handleTip = async (amountNear: string) => {
-    if (!accountId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
+    if (!accountId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
 
     setLoading(true);
     const toastId = showToast({ message: `Sending ${amountNear} NEAR tip...`, type: "loading", id: "tip" });
@@ -137,7 +137,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     <div className="relative">
       <button
         onClick={() => {
-          if (!accountId) { isAuthenticated ? linkWallet() : connectWallet(); return; }
+          if (!accountId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
           setShowModal(!showModal);
         }}
         className={compact

@@ -80,7 +80,7 @@ export default function CreditsPage() {
     };
     Promise.all([fetchBalance("USDC"), fetchBalance("USDT")]).then(([usdc, usdt]) => {
       setTokenBalances({ USDC: usdc, USDT: usdt });
-    });
+    }).catch(() => {});
   }, [accountId, viewMethod, result]);
 
   // Load history

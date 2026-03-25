@@ -32,7 +32,7 @@ export default function AboutPage() {
           near.fm
         </h1>
         <p className="text-lg text-slate-400 text-center max-w-xl">
-          The first decentralized platform for AI-generated music, powered by NEAR Protocol.
+          The first Web3 platform for AI-generated music.
         </p>
       </div>
 
@@ -112,7 +112,7 @@ export default function AboutPage() {
             },
             {
               title: "Decentralized Storage",
-              desc: "Audio files are stored on FastFS \u2014 a decentralized file system built on NEAR by FastNEAR. No single point of failure.",
+              desc: "Audio files are stored on FastFS \u2014 a decentralized file system. No single point of failure.",
               icon: (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
               ),
@@ -201,14 +201,14 @@ export default function AboutPage() {
 
       {/* Tech */}
       <section className="mb-12">
-        <h2 className="text-xl font-bold text-white mb-4">Built on NEAR</h2>
+        <h2 className="text-xl font-bold text-white mb-4">Web3-Powered</h2>
         <p className="text-slate-300 text-sm leading-relaxed mb-4">
-          near.fm uses NEAR Protocol for all financial operations. Tips, bounties, deposits, and withdrawals
-          are handled by a smart contract with transparent, verifiable logic. Authentication uses NEP-413
-          signed messages &mdash; no passwords, no email, just your NEAR wallet.
+          near.fm uses blockchain for all financial operations. Tips, bounties, deposits, and withdrawals
+          are handled by smart contracts with transparent, verifiable logic. Authentication uses
+          cryptographic signatures &mdash; no passwords, no email, just your wallet.
         </p>
         <p className="text-slate-400 text-sm">
-          Created by <a href="https://fastnear.com" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00ec97] transition-colors">FastNEAR</a>, powered by <a href="https://near.org" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00ec97] transition-colors">NEAR Blockchain</a>.
+          Created by <a href="https://fastnear.com" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00ec97] transition-colors">FastNEAR</a>.
         </p>
       </section>
 

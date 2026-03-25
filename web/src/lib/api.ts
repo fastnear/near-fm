@@ -699,6 +699,20 @@ export async function deleteSong(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, { method: "DELETE" });
 }
 
+// ── Video ──
+
+export async function getVideoStatus(uuid: string): Promise<{ exists: boolean; url: string | null }> {
+  return fetchApi(`/api/songs/${uuid}/video`);
+}
+
+export async function generateVideo(uuid: string): Promise<{ status: string; url?: string }> {
+  return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "POST" });
+}
+
+export async function deleteVideo(uuid: string): Promise<void> {
+  return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "DELETE" });
+}
+
 // ── Comments ──
 
 export interface Comment {
