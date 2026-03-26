@@ -43,11 +43,6 @@ export function middleware(request: NextRequest) {
   }
   // /profile/:slug/blog/123 falls through to Next.js file routing (has generateMetadata)
 
-  // Redirect /credits to /balance (legacy URL)
-  if (pathname === "/credits") {
-    return NextResponse.redirect(new URL("/balance", request.url));
-  }
-
   // Rewrite /trending, /latest, /top to /?sort=...
   const sortRoutes: Record<string, string> = {
     "/trending": "trending",

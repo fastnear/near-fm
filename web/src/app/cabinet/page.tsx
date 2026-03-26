@@ -242,129 +242,46 @@ export default function CabinetPage() {
 
 function BalanceTab() {
   const { user, isPremium } = useAuth();
-  const { accountId, connectWallet, linkWallet, callFunction, viewMethod } = useNearWallet();
-  const [balance, setBalance] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [depositAmount, setDepositAmount] = useState("1");
+  const { accountId, viewMethod, callFunction } = useNearWallet();
+  const [nearBalance, setNearBalance] = useState<string | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
-  const fetchBalance = useCallback(async () => {
+  // Fetch legacy NEAR virtual balance (only for NEAR wallet users)
+  useEffect(() => {
     if (!accountId) return;
-    try {
-      const bal = await getBalance(
-        viewMethod as (params: { contractId: string; method: string; args: Record<string, unknown> }) => Promise<string>,
-        accountId
-      );
-      setBalance(typeof bal === "string" ? bal : String(bal));
-    } catch (e) {
-      console.error("Failed to fetch balance:", e);
-      setBalance("0");
-    }
-    setLoading(false);
+    const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID || "near-fm.near";
+    getBalance(
+      viewMethod as (params: { contractId: string; method: string; args: Record<string, unknown> }) => Promise<string>,
+      accountId
+    ).then((bal) => {
+      const b = typeof bal === "string" ? bal : String(bal);
+      if (b !== "0" && BigInt(b) > 0) setNearBalance(b);
+    }).catch(() => {});
   }, [accountId, viewMethod]);
 
-  useEffect(() => {
-    fetchBalance();
-  }, [fetchBalance]);
-
-  const handleDeposit = async () => {
-    if (!depositAmount || parseFloat(depositAmount) <= 0) return;
+  const handleNearWithdraw = async () => {
+    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || !callFunction) return;
     setActionLoading(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      const yocto = nearToYocto(depositAmount);
-      const action = depositAction(yocto);
-      await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args,
-        gas: action.gas,
-        deposit: action.deposit,
-      });
-      setDepositAmount("");
-      setActionSuccess(`Deposited ${depositAmount} NEAR successfully.`);
-      // Wait for NEAR finality before refreshing balance
-      await new Promise((r) => setTimeout(r, 2000));
-      await fetchBalance();
-    } catch (e: any) {
-      console.error("Deposit failed:", e);
-      setActionError(e.message || "Deposit failed.");
-    }
-    setActionLoading(false);
-  };
-
-  const handleWithdraw = async () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) return;
-    setActionLoading(true);
-    setActionError(null);
-    setActionSuccess(null);
+    setActionMsg(null);
     try {
       const yocto = nearToYocto(withdrawAmount);
       const action = withdrawAction(yocto);
       await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args,
-        gas: action.gas,
+        contractId: action.contractId, method: action.method, args: action.args, gas: action.gas,
       });
       setWithdrawAmount("");
-      setActionSuccess(`Withdrew ${withdrawAmount} NEAR successfully.`);
-      // Wait for NEAR finality before refreshing balance
-      await new Promise((r) => setTimeout(r, 2000));
-      await fetchBalance();
+      setActionMsg({ type: "success", text: `Withdrew ${withdrawAmount} NEAR` });
+      setNearBalance(null);
     } catch (e: any) {
-      console.error("Withdraw failed:", e);
-      setActionError(e.message || "Withdraw failed.");
+      setActionMsg({ type: "error", text: e.message || "Withdraw failed" });
     }
     setActionLoading(false);
   };
 
-  // Wallet-selector not connected — show connect button (only for non-Solana users)
-  if (!accountId && !user?.solana_address) {
-    return (
-      <div className="glass-card rounded-2xl p-8 text-center">
-        <p className="text-slate-400 text-sm mb-4">Connect a NEAR wallet to manage your balance, send tips, and upload songs.</p>
-        <button
-          onClick={() => user?.near_account_id ? connectWallet() : linkWallet()}
-          className="btn-primary px-6 py-3 rounded-xl font-medium"
-        >
-          Connect NEAR Wallet
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Current balance */}
-      <div className="glass-card rounded-2xl p-8 glow-purple text-center">
-        <p className="text-slate-400 text-sm mb-2">Virtual Balance</p>
-        {loading ? (
-          <div className="h-10 rounded-xl w-40 mx-auto skeleton" />
-        ) : (
-          <p className="text-4xl font-bold text-white">
-            {yoctoToNear(balance || "0")}{" "}
-            <span className="text-lg text-slate-400 font-normal">NEAR</span>
-          </p>
-        )}
-      </div>
-
-      {/* Feedback messages */}
-      {actionError && (
-        <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-xl px-4 py-3 text-sm">
-          {actionError}
-        </div>
-      )}
-      {actionSuccess && (
-        <div className="bg-[#00ec97]/10 border border-[#00ec97]/20 text-[#00ec97] rounded-xl px-4 py-3 text-sm">
-          {actionSuccess}
-        </div>
-      )}
-
       {/* AI Credits */}
       <div className="glass-card rounded-2xl p-6">
         <div className="flex items-center justify-between mb-1">
@@ -380,8 +297,8 @@ function BalanceTab() {
           </p>
         )}
         <div className="flex gap-2">
-          <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
-            Top Up
+          <Link href="/balance" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
+            Top Up Balance
           </Link>
           {!isPremium && (
             <Link href="/premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/20 transition-all">
@@ -391,67 +308,46 @@ function BalanceTab() {
         </div>
       </div>
 
-      {/* Deposit & Withdraw */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        {/* Deposit */}
-        <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-white font-semibold mb-4">Deposit NEAR</h3>
-          <div className="flex gap-3">
+      {/* Legacy NEAR virtual balance — only shown for NEAR users with balance > 0 */}
+      {accountId && nearBalance && (
+        <div className="glass-card rounded-2xl p-6 border border-amber-500/20 bg-amber-500/[0.04]">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            <span className="text-sm font-medium text-amber-300">Legacy NEAR Balance</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">
+            You have <span className="text-white font-medium">{yoctoToNear(nearBalance)} NEAR</span> in the old virtual balance.
+            We recommend withdrawing it to your wallet.
+          </p>
+          <div className="flex gap-2">
             <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
+              type="number" min="0" step="0.01" placeholder="0.00"
+              value={withdrawAmount}
+              onChange={(e) => setWithdrawAmount(e.target.value)}
               disabled={actionLoading}
-              className="flex-1 border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
+              className="flex-1 border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition disabled:opacity-50"
             />
             <button
-              onClick={handleDeposit}
-              disabled={actionLoading || !depositAmount || parseFloat(depositAmount) <= 0}
-              className="btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none px-6 py-3"
+              onClick={() => setWithdrawAmount(yoctoToNear(nearBalance))}
+              className="px-2 py-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg"
             >
-              {actionLoading ? "..." : "Deposit"}
+              Max
             </button>
-          </div>
-        </div>
-
-        {/* Withdraw */}
-        <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-white font-semibold mb-4">Withdraw NEAR</h3>
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                disabled={actionLoading}
-                className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 pr-14 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
-              />
-              {balance && BigInt(balance) > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setWithdrawAmount(yoctoToNear(balance))}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 rounded-lg transition"
-                >
-                  Max
-                </button>
-              )}
-            </div>
             <button
-              onClick={handleWithdraw}
+              onClick={handleNearWithdraw}
               disabled={actionLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
-              className="btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none px-6 py-3"
+              className="px-4 py-2 text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 disabled:opacity-30 transition-all"
             >
               {actionLoading ? "..." : "Withdraw"}
             </button>
           </div>
+          {actionMsg && (
+            <p className={`text-xs mt-2 ${actionMsg.type === "error" ? "text-red-400" : "text-green-400"}`}>{actionMsg.text}</p>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

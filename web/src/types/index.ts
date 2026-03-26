@@ -31,6 +31,7 @@ export interface Song {
   downvotes: number;
   play_count: number;
   total_tips_yocto: string;
+  total_tips_usd_cents: number;
   is_validated: boolean;
   is_hidden: boolean;
   is_deleted: boolean;

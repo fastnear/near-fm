@@ -90,14 +90,24 @@ export function TipsTab({ accountId }: { accountId: string }) {
                 {tip.tipper_display_name || truncateId(tip.tipper_slug)}
               </Link>
               {" tipped "}
-              <span className="text-cyan-400 font-medium">{formatNear(tip.amount_yocto)} NEAR</span>
-              {" on "}
-              <Link href={`/song/${tip.song_uuid}`} className="text-purple-400 hover:underline">
-                {tip.song_title}
-              </Link>
+              {tip.amount_usd_cents ? (
+                <span className="text-green-400 font-medium">${(tip.amount_usd_cents / 100).toFixed(2)}</span>
+              ) : tip.amount_yocto ? (
+                <span className="text-cyan-400 font-medium">{formatNear(tip.amount_yocto)} NEAR</span>
+              ) : null}
+              {tip.song_uuid && tip.song_title ? (
+                <>
+                  {" on "}
+                  <Link href={`/song/${tip.song_uuid}`} className="text-purple-400 hover:underline">
+                    {tip.song_title}
+                  </Link>
+                </>
+              ) : (
+                <span className="text-slate-500"> (profile tip)</span>
+              )}
             </p>
           </div>
-          {tip.song_cover_image_url && (
+          {tip.song_uuid && tip.song_cover_image_url && (
             <Link href={`/song/${tip.song_uuid}`} className="shrink-0">
               <img src={tip.song_cover_image_url} alt="" className="w-10 h-10 rounded-lg object-cover" />
             </Link>

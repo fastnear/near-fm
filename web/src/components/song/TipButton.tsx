@@ -35,7 +35,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     setLoading(true);
     const toastId = showToast({ message: `Sending ${formatCents(amountCents)} tip...`, type: "loading", id: "tip" });
     try {
-      await sendTipFromBalance(song.uuid, amountCents);
+      await sendTipFromBalance(amountCents, { songUuid: song.uuid });
 
       showToast({
         id: toastId,

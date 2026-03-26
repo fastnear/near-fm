@@ -7,6 +7,9 @@ ALTER TABLE tips ALTER COLUMN tx_hash DROP NOT NULL;
 ALTER TABLE tips ALTER COLUMN amount_yocto DROP NOT NULL;
 ALTER TABLE tips ALTER COLUMN amount_yocto SET DEFAULT NULL;
 
+-- Allow profile tips (no song_id)
+ALTER TABLE tips ALTER COLUMN song_id DROP NOT NULL;
+
 -- Track USD tips on songs and users
 ALTER TABLE songs ADD COLUMN total_tips_usd_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN total_tips_received_usd_cents INTEGER NOT NULL DEFAULT 0;

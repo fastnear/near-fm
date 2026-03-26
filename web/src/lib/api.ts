@@ -393,13 +393,15 @@ export async function getProfileComments(accountId: string): Promise<ProfileComm
 
 export interface SongTipEntry {
   id: number;
-  song_uuid: string;
-  song_title: string;
+  song_uuid: string | null;
+  song_title: string | null;
   song_cover_image_url: string | null;
   tipper_slug: string;
   tipper_display_name: string | null;
   tipper_avatar_url: string | null;
-  amount_yocto: string;
+  amount_yocto: string | null;
+  amount_usd_cents: number | null;
+  payment_method: string;
   created_at: string;
 }
 
@@ -731,10 +733,10 @@ export async function getWalletBalance(): Promise<{ balance_usdc: string; balanc
   return fetchApi("/api/wallet/balance");
 }
 
-export async function sendTipFromBalance(songUuid: string, amountCents: number): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
+export async function sendTipFromBalance(amountCents: number, opts: { songUuid?: string; profileSlug?: string }): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
   return fetchApi("/api/tips/send", {
     method: "POST",
-    body: JSON.stringify({ song_uuid: songUuid, amount_cents: amountCents }),
+    body: JSON.stringify({ song_uuid: opts.songUuid, profile_slug: opts.profileSlug, amount_cents: amountCents }),
   });
 }
 
@@ -761,6 +763,13 @@ export async function awardBountyFromBalance(uuid: string, awardedSongId: number
 
 export async function withdrawBountyFromBalance(uuid: string): Promise<{ status: string; refund_cents: number; penalty_cents: number }> {
   return fetchApi(`/api/bounties/${uuid}/withdraw`, { method: "POST" });
+}
+
+export async function buyPremiumFromBalance(months: number, recipientSlug?: string): Promise<{ status: string; days_added: number; price_cents: number; is_gift: boolean }> {
+  return fetchApi("/api/premium/buy", {
+    method: "POST",
+    body: JSON.stringify({ months, recipient_slug: recipientSlug }),
+  });
 }
 
 export async function withdrawFromBalance(amountCents: number, chain: string, receiver: string): Promise<{ status: string }> {

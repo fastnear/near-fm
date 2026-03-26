@@ -1209,13 +1209,15 @@ pub async fn list_premium_gifts(
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct SongTipEntry {
     pub id: i32,
-    pub song_uuid: String,
-    pub song_title: String,
+    pub song_uuid: Option<String>,
+    pub song_title: Option<String>,
     pub song_cover_image_url: Option<String>,
     pub tipper_slug: String,
     pub tipper_display_name: Option<String>,
     pub tipper_avatar_url: Option<String>,
-    pub amount_yocto: String,
+    pub amount_yocto: Option<String>,
+    pub amount_usd_cents: Option<i32>,
+    pub payment_method: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1231,9 +1233,9 @@ pub async fn list_song_tips(
     let tips: Vec<SongTipEntry> = sqlx::query_as(
         r#"SELECT t.id, s.uuid AS song_uuid, s.title AS song_title, s.cover_image_url AS song_cover_image_url,
                   u.slug AS tipper_slug, u.display_name AS tipper_display_name, u.avatar_url AS tipper_avatar_url,
-                  t.amount_yocto, t.created_at
+                  t.amount_yocto, t.amount_usd_cents, t.payment_method, t.created_at
            FROM tips t
-           JOIN songs s ON t.song_id = s.id
+           LEFT JOIN songs s ON t.song_id = s.id
            JOIN users u ON t.tipper_id = u.id
            WHERE t.recipient_id = $1
            ORDER BY t.created_at DESC

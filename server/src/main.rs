@@ -153,6 +153,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/bounties/:uuid/topup", post(routes::wallet::topup_bounty))
         .route("/api/bounties/:uuid/withdraw", post(routes::wallet::withdraw_bounty))
         .route("/api/wallet/withdraw", post(routes::wallet::withdraw))
+        .route("/api/credits/buy-from-balance", post(routes::wallet::buy_credits))
+        .route("/api/premium/buy", post(routes::wallet::buy_premium))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,

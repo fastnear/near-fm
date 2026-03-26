@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 use crate::{auth::jwt::require_auth, db::queries, AppState};
 
@@ -112,7 +113,7 @@ pub async fn backup(
     }
 
     sqlx::query(
-        "UPDATE users SET outlayer_api_key = $1, outlayer_near_account = $2 WHERE id = $3"
+        "UPDATE users SET outlayer_api_key = $1, outlayer_near_account = $2 WHERE id = $3 AND outlayer_api_key IS NULL"
     )
     .bind(&req.api_key)
     .bind(&req.near_account_id)
@@ -217,8 +218,9 @@ pub async fn balance(
 
 #[derive(Deserialize)]
 pub struct SendTipRequest {
-    pub song_uuid: String,
-    pub amount_cents: u32, // e.g. 50 = $0.50
+    pub song_uuid: Option<String>,       // tip a song
+    pub profile_slug: Option<String>,    // tip a profile (one of the two required)
+    pub amount_cents: u32,               // e.g. 50 = $0.50
 }
 
 #[derive(Serialize)]
@@ -256,25 +258,56 @@ pub async fn send_tip(
         return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
     }
 
-    // Get song + recipient
-    let song = queries::get_song_by_uuid(&state.db, &req.song_uuid)
+    // Resolve recipient: either from song or from profile
+    let (song_id, recipient_id, tip_context, song_title) = if let Some(ref song_uuid) = req.song_uuid {
+        let song = queries::get_song_by_uuid(&state.db, song_uuid)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+        if song.uploader_id == claims.user_id {
+            return Err((StatusCode::BAD_REQUEST, "Cannot tip your own song".to_string()));
+        }
+        let title = song.title.clone();
+        (Some(song.id), song.uploader_id, format!("song:{}", song_uuid), Some(title))
+    } else if let Some(ref profile_slug) = req.profile_slug {
+        let recipient: Option<(i32,)> = sqlx::query_as(
+            "SELECT id FROM users WHERE slug = $1"
+        )
+        .bind(profile_slug)
+        .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let Some((rid,)) = recipient else {
+            return Err((StatusCode::NOT_FOUND, "User not found".to_string()));
+        };
+        if rid == claims.user_id {
+            return Err((StatusCode::BAD_REQUEST, "Cannot tip yourself".to_string()));
+        }
+        (None, rid, format!("profile:{}", profile_slug), None)
+    } else {
+        return Err((StatusCode::BAD_REQUEST, "Either song_uuid or profile_slug required".to_string()));
+    };
 
-    if song.uploader_id == claims.user_id {
-        return Err((StatusCode::BAD_REQUEST, "Cannot tip your own song".to_string()));
-    }
-
-    // Rate limit: max 1 balance tip per song per user per minute (prevent double-click)
-    let recent_tip: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM tips WHERE tipper_id = $1 AND song_id = $2 AND payment_method = 'balance' AND created_at > NOW() - INTERVAL '1 minute')"
-    )
-    .bind(claims.user_id)
-    .bind(song.id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
+    // Rate limit: max 1 balance tip per target per user per minute
+    let recent_tip: bool = if let Some(sid) = song_id {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM tips WHERE tipper_id = $1 AND song_id = $2 AND payment_method = 'balance' AND created_at > NOW() - INTERVAL '1 minute')"
+        )
+        .bind(claims.user_id)
+        .bind(sid)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false)
+    } else {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM tips WHERE tipper_id = $1 AND recipient_id = $2 AND song_id IS NULL AND payment_method = 'balance' AND created_at > NOW() - INTERVAL '1 minute')"
+        )
+        .bind(claims.user_id)
+        .bind(recipient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false)
+    };
 
     if recent_tip {
         return Err((StatusCode::TOO_MANY_REQUESTS, "Please wait before tipping again".to_string()));
@@ -293,16 +326,28 @@ pub async fn send_tip(
         (StatusCode::BAD_REQUEST, "No wallet found. Please top up your balance first.".to_string())
     })?;
 
-    let recipient_key: Option<String> = sqlx::query_scalar(
+    let mut recipient_key: Option<String> = sqlx::query_scalar(
         "SELECT outlayer_api_key FROM users WHERE id = $1"
     )
-    .bind(song.uploader_id)
+    .bind(recipient_id)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Auto-provision wallet for recipient if missing
+    if recipient_key.is_none() {
+        ensure_wallet(&state.db, &state.http_client, recipient_id).await;
+        recipient_key = sqlx::query_scalar(
+            "SELECT outlayer_api_key FROM users WHERE id = $1"
+        )
+        .bind(recipient_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
     let recipient_key = recipient_key.ok_or_else(|| {
-        (StatusCode::BAD_REQUEST, "This artist hasn't set up a wallet yet. They will get one on next login.".to_string())
+        (StatusCode::BAD_GATEWAY, "Failed to create wallet for recipient. Try again later.".to_string())
     })?;
 
     // Calculate amounts (1 cent = 10_000 raw USDC units, USDC has 6 decimals)
@@ -338,7 +383,7 @@ pub async fn send_tip(
         Some(serde_json::json!({
             "token": default_token(),
             "amount": raw_amount.to_string(),
-            "memo": format!("Tip for {}", song.title),
+            "memo": format!("Tip: {}", tip_context),
         })),
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to create tip check: {}", e)))?;
 
@@ -381,31 +426,33 @@ pub async fn send_tip(
         ).await;
     }
 
-    // Step 3: Record in DB
+    // Step 4: Record in DB
     let tip_id = sqlx::query_scalar::<_, i32>(
         r#"INSERT INTO tips (song_id, tipper_id, recipient_id, amount_usd_cents, payment_method)
            VALUES ($1, $2, $3, $4, 'balance')
            RETURNING id"#,
     )
-    .bind(song.id)
+    .bind(song_id)
     .bind(claims.user_id)
-    .bind(song.uploader_id)
+    .bind(recipient_id)
     .bind(req.amount_cents as i32)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Update USD tip totals (recipient's share, after commission)
-    sqlx::query("UPDATE songs SET total_tips_usd_cents = total_tips_usd_cents + $1 WHERE id = $2")
-        .bind(recipient_cents as i32)
-        .bind(song.id)
-        .execute(&state.db)
-        .await
-        .ok();
+    // Update USD tip totals
+    if let Some(sid) = song_id {
+        sqlx::query("UPDATE songs SET total_tips_usd_cents = total_tips_usd_cents + $1 WHERE id = $2")
+            .bind(recipient_cents as i32)
+            .bind(sid)
+            .execute(&state.db)
+            .await
+            .ok();
+    }
 
     sqlx::query("UPDATE users SET total_tips_received_usd_cents = total_tips_received_usd_cents + $1 WHERE id = $2")
         .bind(recipient_cents as i32)
-        .bind(song.uploader_id)
+        .bind(recipient_id)
         .execute(&state.db)
         .await
         .ok();
@@ -413,11 +460,12 @@ pub async fn send_tip(
     // Notification
     queries::create_notification(
         &state.db,
-        song.uploader_id,
+        recipient_id,
         "tip_received",
         &serde_json::json!({
             "song_uuid": req.song_uuid,
-            "song_title": song.title,
+            "song_title": song_title,
+            "profile_slug": req.profile_slug,
             "from_account": claims.sub,
             "amount_usd_cents": req.amount_cents,
         }),
@@ -428,8 +476,9 @@ pub async fn send_tip(
     tracing::info!(
         tip_id,
         sender = claims.user_id,
-        recipient = song.uploader_id,
+        recipient = recipient_id,
         amount_cents = req.amount_cents,
+        context = %tip_context,
         "USD tip sent via payment check"
     );
 
@@ -746,6 +795,20 @@ pub async fn award_bounty(
         return Err((StatusCode::BAD_REQUEST, "No active escrow".to_string()));
     };
 
+    // Verify song is a submission to this request
+    let submission_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM request_submissions WHERE request_id = $1 AND song_id = $2)"
+    )
+    .bind(request.0)
+    .bind(awarded_song_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    if !submission_exists {
+        return Err((StatusCode::BAD_REQUEST, "This song was not submitted to this request".to_string()));
+    }
+
     // Get recipient
     let recipient_id: i32 = sqlx::query_scalar("SELECT uploader_id FROM songs WHERE id = $1")
         .bind(awarded_song_id)
@@ -929,6 +992,247 @@ pub async fn withdraw_bounty(
     })))
 }
 
+// ── Credits from balance ──
+
+#[derive(Deserialize)]
+pub struct BuyCreditsRequest {
+    pub amount_cents: u32, // $1 = 100 credits
+}
+
+/// POST /api/credits/buy-from-balance — buy AI credits from OutLayer balance.
+/// 1 credit = $0.01. Credits cannot be withdrawn.
+pub async fn buy_credits(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<BuyCreditsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    if req.amount_cents < 1 {
+        return Err((StatusCode::BAD_REQUEST, "Minimum is 1 credit ($0.01)".to_string()));
+    }
+
+    let credits = req.amount_cents as i32; // 1 cent = 1 credit
+    let raw_amount = (req.amount_cents as u64) * 10_000;
+
+    let api_key: Option<String> = sqlx::query_scalar(
+        "SELECT outlayer_api_key FROM users WHERE id = $1"
+    )
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let api_key = api_key.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, "No wallet found. Top up your balance at /balance first.".to_string())
+    })?;
+
+    // Check balance
+    let balance_resp = outlayer_request(
+        &state.http_client, &api_key, "GET",
+        &format!("/wallet/v1/balance?token={}&source=intents", default_token()), None,
+    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
+
+    let balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    if balance < raw_amount {
+        return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${:.2}", req.amount_cents as f64 / 100.0)));
+    }
+
+    // Create check → claim to treasury
+    let check_resp = outlayer_request(
+        &state.http_client, &api_key, "POST",
+        "/wallet/v1/payment-check/create",
+        Some(serde_json::json!({
+            "token": default_token(),
+            "amount": raw_amount.to_string(),
+            "memo": format!("Buy {} AI credits", credits),
+        })),
+    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
+
+    let check_key = check_resp["check_key"].as_str()
+        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?;
+
+    if !state.config.treasury_agent_key.is_empty() {
+        outlayer_request(
+            &state.http_client, &state.config.treasury_agent_key, "POST",
+            "/wallet/v1/payment-check/claim",
+            Some(serde_json::json!({ "check_key": check_key })),
+        ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Claim failed: {}", e)))?;
+    }
+
+    // Add credits
+    let new_balance: i32 = sqlx::query_scalar(
+        "UPDATE users SET credit_balance = credit_balance + $1 WHERE id = $2 RETURNING credit_balance"
+    )
+    .bind(credits)
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tracing::info!(user_id = claims.user_id, credits, "Credits purchased from balance");
+
+    Ok(Json(serde_json::json!({
+        "credits_added": credits,
+        "new_balance": new_balance,
+    })))
+}
+
+// ── Premium from balance ──
+
+#[derive(Deserialize)]
+pub struct BuyPremiumRequest {
+    pub months: u32,                    // 1, 2, 3, or 12
+    pub recipient_slug: Option<String>, // gift to another user (None = self)
+}
+
+/// POST /api/premium/buy — buy premium subscription from OutLayer balance.
+/// $10/month, max 12 months. Supports gifting to another user.
+pub async fn buy_premium(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<BuyPremiumRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    if req.months < 1 || req.months > 12 {
+        return Err((StatusCode::BAD_REQUEST, "1-12 months allowed".to_string()));
+    }
+
+    let price_cents = req.months * 1000; // $10/month
+    let days = (req.months * 30).min(365) as i32;
+    let raw_amount = (price_cents as u64) * 10_000;
+
+    // Resolve recipient
+    let recipient_id = if let Some(ref slug) = req.recipient_slug {
+        let rid: Option<i32> = sqlx::query_scalar("SELECT id FROM users WHERE slug = $1")
+            .bind(slug).fetch_optional(&state.db).await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        rid.ok_or_else(|| (StatusCode::NOT_FOUND, "Recipient not found".to_string()))?
+    } else {
+        claims.user_id
+    };
+    let is_gift = recipient_id != claims.user_id;
+
+    let api_key: Option<String> = sqlx::query_scalar(
+        "SELECT outlayer_api_key FROM users WHERE id = $1"
+    )
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let api_key = api_key.ok_or_else(|| {
+        (StatusCode::BAD_REQUEST, "No wallet found. Top up your balance first.".to_string())
+    })?;
+
+    // Check balance
+    let balance_resp = outlayer_request(
+        &state.http_client, &api_key, "GET",
+        &format!("/wallet/v1/balance?token={}&source=intents", default_token()), None,
+    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
+
+    let balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    if balance < raw_amount {
+        return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${}.00", price_cents / 100)));
+    }
+
+    // Create check from buyer
+    let check_resp = outlayer_request(
+        &state.http_client, &api_key, "POST",
+        "/wallet/v1/payment-check/create",
+        Some(serde_json::json!({
+            "token": default_token(),
+            "amount": raw_amount.to_string(),
+            "memo": format!("Premium {} months{}", req.months, if is_gift { " (gift)" } else { "" }),
+        })),
+    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
+
+    let check_key = check_resp["check_key"].as_str()
+        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
+        .to_string();
+
+    // Claim to treasury — must succeed before granting premium
+    if !state.config.treasury_agent_key.is_empty() {
+        outlayer_request(
+            &state.http_client, &state.config.treasury_agent_key, "POST",
+            "/wallet/v1/payment-check/claim",
+            Some(serde_json::json!({ "check_key": check_key })),
+        ).await.map_err(|e| {
+            // Reclaim on failure
+            let client = state.http_client.clone();
+            let key = api_key.clone();
+            let ck = check_key.clone();
+            tokio::spawn(async move {
+                let _ = outlayer_request(&client, &key, "POST",
+                    "/wallet/v1/payment-check/reclaim",
+                    Some(serde_json::json!({ "check_key": ck })),
+                ).await;
+            });
+            (StatusCode::BAD_GATEWAY, format!("Payment claim failed, funds returned: {}", e))
+        })?;
+    }
+
+    // Record in premium_purchases (dedup via check_key_hash)
+    let key_hash = hex::encode(sha2::Sha256::digest(check_key.as_bytes()));
+    let insert_result = sqlx::query(
+        r#"INSERT INTO premium_purchases (user_id, check_key_hash, token, amount, days_added, gifted_by_user_id)
+           VALUES ($1, $2, $3, $4, $5, $6)"#,
+    )
+    .bind(recipient_id)
+    .bind(&key_hash)
+    .bind(default_token())
+    .bind(raw_amount.to_string())
+    .bind(days)
+    .bind(if is_gift { Some(claims.user_id) } else { None })
+    .execute(&state.db)
+    .await;
+
+    if let Err(e) = insert_result {
+        if e.to_string().contains("check_key_hash") {
+            return Err((StatusCode::CONFLICT, "This purchase was already processed".to_string()));
+        }
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    // Add premium days to recipient
+    sqlx::query(
+        r#"UPDATE users SET
+            premium_since = COALESCE(premium_since, NOW()),
+            premium_until = GREATEST(COALESCE(premium_until, NOW()), NOW()) + make_interval(days => $1)
+           WHERE id = $2"#,
+    )
+    .bind(days)
+    .bind(recipient_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Notification for gift
+    if is_gift {
+        queries::create_notification(&state.db, recipient_id, "premium_gifted", &serde_json::json!({
+            "from_account": claims.sub,
+            "months": req.months,
+            "days_added": days,
+        })).await.ok();
+    }
+
+    tracing::info!(
+        user_id = claims.user_id, recipient_id, months = req.months, days,
+        is_gift, "Premium purchased from balance"
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "months": req.months,
+        "days_added": days,
+        "price_cents": price_cents,
+        "is_gift": is_gift,
+    })))
+}
+
 // ── Withdrawal ──
 
 #[derive(Deserialize)]
@@ -948,8 +1252,8 @@ pub async fn withdraw(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    if req.amount_cents < 100 {
-        return Err((StatusCode::BAD_REQUEST, "Minimum withdrawal is $1.00".to_string()));
+    if req.amount_cents < 1 {
+        return Err((StatusCode::BAD_REQUEST, "Minimum withdrawal is $0.01".to_string()));
     }
     if req.receiver.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Receiver address required".to_string()));

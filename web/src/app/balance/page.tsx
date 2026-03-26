@@ -46,7 +46,11 @@ export default function BalancePage() {
   const ensureWallet = useCallback(async (): Promise<string> => {
     // 1. Try localStorage
     const localKey = localStorage.getItem("nearfm_outlayer_api_key");
-    if (localKey) return localKey;
+    if (localKey) {
+      // Ensure backup exists on server (best-effort, non-blocking)
+      getAddress(localKey).then(({ address }) => backupWallet(localKey, address)).catch(() => {});
+      return localKey;
+    }
 
     // 2. Try restore from server backup
     try {
@@ -64,7 +68,7 @@ export default function BalancePage() {
     // 4. Register new OutLayer wallet
     const apiKey = await ensureRegistered();
 
-    // 5. Backup to server (best-effort)
+    // 5. Backup to server
     try {
       const { address } = await getAddress(apiKey);
       await backupWallet(apiKey, address);
