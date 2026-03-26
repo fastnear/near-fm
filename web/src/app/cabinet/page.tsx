@@ -506,16 +506,23 @@ function notificationText(notif: Notification): React.ReactNode {
 
   switch (notif.type) {
     case "tip_received": {
-      const amount = data.amount_yocto as string | undefined;
+      const amountYocto = data.amount_yocto as string | undefined;
+      const amountUsdCents = data.amount_usd_cents as number | undefined;
       const from = (data.from_account || data.from_account_id) as string | undefined;
-      const nearAmount = amount ? yoctoToNear(amount) : "?";
       const songTitle = data.song_title as string | undefined;
       const songUuid = data.song_uuid as string | undefined;
+      const profileSlug = data.profile_slug as string | undefined;
+      const tipDisplay = amountUsdCents
+        ? `$${(amountUsdCents / 100).toFixed(2)}`
+        : amountYocto
+          ? `${yoctoToNear(amountYocto)} NEAR`
+          : "";
       return (
         <>
-          You received a tip of {nearAmount} NEAR
+          You received a tip{tipDisplay ? ` of ${tipDisplay}` : ""}
           {from ? <> from <Link href={`/profile/${from}`} className="text-purple-400 hover:underline">{from}</Link></> : ""}
           {songTitle && songUuid ? <> for <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link></> : ""}
+          {profileSlug && !songUuid ? " on your profile" : ""}
         </>
       );
     }
@@ -1414,13 +1421,17 @@ function WalletKeyTab() {
     <div className="space-y-4">
       <div className="glass-card rounded-2xl p-6 space-y-4">
         <div>
-          <div className="text-sm font-medium text-slate-300 mb-1">Your Wallet Key</div>
-          <p className="text-xs text-slate-500 mb-3">
-            This key gives full access to your balance. Keep it safe. You can use it to withdraw funds even if AI Radio is unavailable.
+          <div className="text-sm font-medium text-slate-300 mb-1">OutLayer Custody Wallet</div>
+          <p className="text-xs text-slate-400 mb-1">
+            An OutLayer custody wallet has been created for you. Your key is stored in your browser, with a backup copy on the server.
+          </p>
+          <p className="text-xs text-slate-400 mb-3">
+            Copy and save this key — you can use it to manage your funds independently, even if NEAR FM is unavailable.
           </p>
         </div>
 
         <div className="bg-black/20 rounded-xl p-4 space-y-3">
+          <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Wallet Key</div>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs text-slate-300 font-mono break-all">
               {revealed ? apiKey : maskedKey}
@@ -1453,16 +1464,54 @@ function WalletKeyTab() {
         )}
       </div>
 
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div className="text-sm font-medium text-slate-300">What you can do with this wallet</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-cyan-400 mb-1">Gasless Transactions</div>
+            <p className="text-[11px] text-slate-500">Send tips, create payment checks, and withdraw funds — no gas tokens needed on any chain.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-purple-400 mb-1">Cross-Chain Swaps</div>
+            <p className="text-[11px] text-slate-500">Swap between 200+ tokens across NEAR, Solana, Ethereum, and 20+ other chains via NEAR Intents.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-green-400 mb-1">Payment Checks</div>
+            <p className="text-[11px] text-slate-500">Create and claim payment checks — instant, gasless transfers between wallets on any chain.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-amber-400 mb-1">Withdraw Anywhere</div>
+            <p className="text-[11px] text-slate-500">Send funds to your NEAR, Solana, Ethereum, Bitcoin wallet — or any of 20+ supported chains.</p>
+          </div>
+        </div>
+      </div>
+
       <div className="glass-card rounded-2xl p-6 space-y-3">
-        <div className="text-sm font-medium text-slate-300">How to use independently</div>
-        <ol className="text-xs text-slate-400 space-y-2 list-decimal list-inside">
-          <li>Go to <a href={dashboardUrl} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300 underline">OutLayer Dashboard</a></li>
-          <li>View your balance, transaction history</li>
-          <li>Withdraw funds to any wallet (NEAR, Solana, Ethereum, 20+ chains)</li>
-        </ol>
-        <p className="text-[11px] text-slate-600">
-          Your balance is stored on-chain (intents.near). AI Radio does not hold your funds.
+        <div className="text-sm font-medium text-slate-300">Use independently</div>
+        <p className="text-xs text-slate-400">
+          Your balance is stored on-chain (intents.near). NEAR FM does not hold your funds — you always have full control.
         </p>
+        <p className="text-xs text-slate-500">
+          Give an AI agent the wallet skill so it can manage your NEAR FM wallet — send tips, check balance, and more.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="https://skills.outlayer.ai/agent-custody/SKILL.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20 rounded-lg hover:bg-purple-500/15 transition"
+          >
+            Agent Wallet Skill
+          </a>
+          <a
+            href="https://outlayer.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 bg-white/[0.04] border border-white/[0.06] rounded-lg hover:bg-white/[0.08] transition"
+          >
+            About OutLayer
+          </a>
+        </div>
       </div>
     </div>
   );

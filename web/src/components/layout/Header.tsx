@@ -5,13 +5,14 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getNotifications } from "@/lib/api";
+import { getNotifications, getWalletBalance } from "@/lib/api";
 
 
 export function Header() {
   const { user, isAuthenticated, isPremium, loading: authLoading, promptSignIn } = useAuth();
   const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, reconnectWallet, lowAllowance, loading: walletLoading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
   const pathname = usePathname();
   const router = useRouter();
   const showBack = pathname !== "/" && pathname !== "/trending" && pathname !== "/latest" && pathname !== "/top";
@@ -21,12 +22,16 @@ export function Header() {
   useEffect(() => {
     if (!isAuthenticated) {
       setUnreadCount(0);
+      setWalletBalance(null);
       return;
     }
     getNotifications()
       .then((notifs) => {
         setUnreadCount(notifs.filter((n) => !n.is_read).length);
       })
+      .catch(() => {});
+    getWalletBalance()
+      .then((b) => setWalletBalance(b.balance_usdc_formatted))
       .catch(() => {});
 
     // Listen for "notifications read" event from cabinet page
@@ -78,10 +83,9 @@ export function Header() {
           <Link href="/requests" className={navLink("/requests")}>Requests</Link>
           <Link href="/create" className={navLink("/create")}>Create</Link>
           <Link href="/upload" className={navLink("/upload")}>Upload</Link>
-          <Link href="/balance" className={navLink("/balance")}>Balance</Link>
           <Link href="/premium" className={navLink("/premium", pathname === "/premium" ? "" : "diamond-shimmer")}>Premium</Link>
           <Link href="/cabinet" className={navLink("/cabinet")}>
-            Cabinet
+            Cabinet{walletBalance && walletBalance !== "0.00" ? ` ($${walletBalance})` : ""}
             {unreadCount > 0 && (
               <span className="absolute -top-2.5 -right-5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-lg shadow-purple-500/30 animate-pulse">
                 {unreadCount > 9 ? "9+" : unreadCount}

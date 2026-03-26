@@ -418,8 +418,8 @@ export default function ProfilePage() {
                 {/* Chain badge */}
                 {authProvider === "near" && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6" />
+                    <svg className="w-3 h-3" viewBox="0 0 90.1 90" fill="currentColor">
+                      <path d="M72.2 4.6L53.4 32.5c-1.7 2.5 1.7 5.5 3.9 3.5l20-18.2c.5-.4 1.2-.1 1.2.6v54.4c0 .7-.9 1-1.3.5L18.4 2.8A12.3 12.3 0 0 0 8.7 0h-1C3.5 0 0 3.8 0 8.5v73c0 4.7 3.5 8.5 7.8 8.5 2.8 0 5.5-1.6 7-4.2l18.8-27.9c1.7-2.5-1.7-5.5-3.9-3.5l-20 18.2c-.5.4-1.2.1-1.2-.6V18.6c0-.7.9-1 1.3-.5l58.8 70.4a12.3 12.3 0 0 0 9.6 4.5h1c4.3 0 7.8-3.8 7.8-8.5v-73c0-4.7-3.5-8.5-7.8-8.5-2.9 0-5.5 1.6-7 4.6z" />
                     </svg>
                     NEAR
                   </span>
