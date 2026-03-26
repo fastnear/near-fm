@@ -28,6 +28,10 @@ rand = "0.8"
 # NEAR RPC
 reqwest = { version = "0.11", features = ["json"] }
 borsh = { version = "1.5", features = ["derive"] }
+near-primitives = "0.26"
+near-crypto = "0.26"
+near-jsonrpc-client = "0.13"
+near-jsonrpc-primitives = "0.26"
 
 # Utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }

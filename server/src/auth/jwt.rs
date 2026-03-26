@@ -17,6 +17,8 @@ pub struct Claims {
     pub exp: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,  // NEAR wallet account, if linked
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solana_address: Option<String>,
 }
 
 pub fn create_token(
@@ -25,6 +27,7 @@ pub fn create_token(
     user_id: i32,
     is_admin: bool,
     account_id: Option<&str>,
+    solana_address: Option<&str>,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(365))
@@ -37,6 +40,7 @@ pub fn create_token(
         is_admin,
         exp: expiration,
         account_id: account_id.map(|s| s.to_string()),
+        solana_address: solana_address.map(|s| s.to_string()),
     };
 
     encode(

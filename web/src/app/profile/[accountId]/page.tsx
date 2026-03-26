@@ -19,6 +19,7 @@ import type { Song } from "@/types";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -198,19 +199,24 @@ export default function ProfilePage() {
       // Upload avatar to FastFS if selected
       if (avatarFile) {
         setUploadProgress("Uploading avatar...");
-        const buffer = await avatarFile.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        const hash = await computeFileHash(bytes);
-        const relPath = getRelativePath(hash, avatarFile.type || "image/jpeg");
-        const parts = prepareFastFSUpload(relPath, avatarFile.type, bytes);
-
-        await uploadToFastFS(
-          (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
-          parts,
-          (done, total) => setUploadProgress(`Uploading avatar ${done}/${total}...`)
-        );
-
-        avatarUrl = getFastFSUrl(walletAccountId!, relPath);
+        if (walletAccountId) {
+          // Direct upload via NEAR wallet
+          const buffer = await avatarFile.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const hash = await computeFileHash(bytes);
+          const relPath = getRelativePath(hash, avatarFile.type || "image/jpeg");
+          const parts = prepareFastFSUpload(relPath, avatarFile.type, bytes);
+          await uploadToFastFS(
+            (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
+            parts,
+          );
+          avatarUrl = getFastFSUrl(walletAccountId, relPath);
+        } else {
+          // Upload via server relayer (Solana/Google users)
+          setUploadProgress("Uploading avatar (may take 1-2 min to appear)...");
+          const result = await uploadToFastFSViaRelayer(avatarFile);
+          avatarUrl = result.url;
+        }
       }
 
       setUploadProgress("Saving profile...");
@@ -240,6 +246,11 @@ export default function ProfilePage() {
       setProfileData(userData);
       setSongs(userSongs ?? []);
       setEditing(false);
+
+      // Show toast if avatar was uploaded via relayer (takes 1-2 min to appear on FastFS)
+      if (avatarUrl && !walletAccountId) {
+        showToast({ message: "Profile saved! Avatar may take 1-2 minutes to appear.", type: "success", id: "avatar-upload" });
+      }
     } catch (e) {
       console.error("Save profile failed:", e);
       alert("Failed to save profile. Please try again.");
@@ -459,7 +470,7 @@ export default function ProfilePage() {
             )}
             {isOwnProfile && (
               <>
-                {authUser && !authUser.near_account_id && (
+                {authUser && !authUser.near_account_id && !authUser.solana_address && (
                   <button
                     onClick={() => linkWallet()}
                     className="px-4 py-2 text-sm text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/30 rounded-xl transition-all"

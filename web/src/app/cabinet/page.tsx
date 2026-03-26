@@ -10,7 +10,7 @@ import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
 import type { Song, Notification, Playlist } from "@/types";
-import { prepareFastFSUpload, uploadToFastFS, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
+import { prepareFastFSUpload, uploadToFastFS, uploadToFastFSViaRelayer, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
 
 // ── Helpers ──
 
@@ -321,8 +321,8 @@ function BalanceTab() {
     setActionLoading(false);
   };
 
-  // Wallet-selector not connected — show connect button
-  if (!accountId) {
+  // Wallet-selector not connected — show connect button (only for non-Solana users)
+  if (!accountId && !user?.solana_address) {
     return (
       <div className="glass-card rounded-2xl p-8 text-center">
         <p className="text-slate-400 text-sm mb-4">Connect a NEAR wallet to manage your balance, send tips, and upload songs.</p>
@@ -1003,7 +1003,7 @@ function PlaylistsTab() {
   };
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedPlaylist || !accountId || !callFunction) return;
+    if (!selectedPlaylist) return;
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { alert("Please select an image file"); return; }
@@ -1011,17 +1011,25 @@ function PlaylistsTab() {
 
     setCoverUploading(true);
     try {
-      const content = new Uint8Array(await file.arrayBuffer());
-      const hash = await import("@/lib/near/fastfs").then((m) => m.computeFileHash(content));
-      const relativePath = getRelativePath(await hash, file.type);
-      const parts = prepareFastFSUpload(relativePath, file.type, content);
-      await uploadToFastFS(
-        (params) => callFunction(params) as Promise<string>,
-        parts
-      );
-      // Wait for FastFS indexing
-      await new Promise((r) => setTimeout(r, 3000));
-      const url = getFastFSUrl(accountId, relativePath);
+      let url: string;
+      if (accountId && callFunction) {
+        // Direct upload via NEAR wallet
+        const content = new Uint8Array(await file.arrayBuffer());
+        const hash = await import("@/lib/near/fastfs").then((m) => m.computeFileHash(content));
+        const relativePath = getRelativePath(await hash, file.type);
+        const parts = prepareFastFSUpload(relativePath, file.type, content);
+        await uploadToFastFS(
+          (params) => callFunction(params) as Promise<string>,
+          parts
+        );
+        await new Promise((r) => setTimeout(r, 3000));
+        url = getFastFSUrl(accountId, relativePath);
+      } else {
+        // Upload via server relayer
+        const result = await uploadToFastFSViaRelayer(file);
+        await new Promise((r) => setTimeout(r, 3000));
+        url = result.url;
+      }
       const { playlist } = await updatePlaylist(selectedPlaylist.uuid, { cover_image_url: url });
       setSelectedPlaylist(playlist);
       setPlaylists((prev) => prev.map((p) => (p.uuid === playlist.uuid ? playlist : p)));
@@ -1098,7 +1106,7 @@ function PlaylistsTab() {
             )}
             <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
               <span className="text-xs text-white font-medium">{coverUploading ? "Uploading..." : "Change Cover"}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || !accountId} />
+              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || (!accountId && !user?.solana_address)} />
             </label>
           </div>
 

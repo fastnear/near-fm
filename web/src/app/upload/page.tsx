@@ -10,6 +10,7 @@ import { GenrePicker } from "@/components/song/GenrePicker";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -29,7 +30,7 @@ export default function UploadPageWrapper() {
 }
 
 function UploadPage() {
-  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { user, isAuthenticated, promptSignIn } = useAuth();
   const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction } = useNearWallet();
   const searchParams = useSearchParams();
   const fulfillsRequestId = searchParams.get("fulfills_request_id");
@@ -107,29 +108,21 @@ function UploadPage() {
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
           <p className="text-slate-400 mb-8">
-            Sign in and connect a NEAR wallet to upload AI-generated music.
+            Sign in to upload AI-generated music.
           </p>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={connectAndSignIn}
-              className="btn-primary px-8 py-3 rounded-xl text-sm"
-            >
-              Sign in with NEAR Wallet
-            </button>
-            <button
-              onClick={signInWithGoogle}
-              className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
-            >
-              Sign in with Google
-            </button>
-          </div>
+          <button
+            onClick={promptSignIn}
+            className="btn-primary px-8 py-3 rounded-xl text-sm"
+          >
+            Sign In
+          </button>
         </div>
       </div>
     );
   }
 
-  // Logged in but no wallet connected → need to link/connect wallet
-  if (!accountId) {
+  // Logged in but no NEAR wallet and no Solana → need to connect a wallet
+  if (!accountId && !user?.solana_address) {
     return (
       <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -166,8 +159,29 @@ function UploadPage() {
     setSigning(false);
   };
 
+  // Upload bytes to FastFS — uses relayer if no NEAR wallet
+  const uploadBytes = async (bytes: Uint8Array, mime: string): Promise<{ url: string; hash: string }> => {
+    const hash = await computeFileHash(bytes);
+    const relPath = getRelativePath(hash, mime);
+
+    if (accountId) {
+      const parts = prepareFastFSUpload(relPath, mime, bytes);
+      await uploadToFastFS(
+        (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
+        parts,
+        (done, total) => setUploadProgress(`Uploading (${done}/${total} chunks)...`),
+      );
+      return { url: getFastFSUrl(accountId, relPath), hash };
+    } else {
+      const blob = new Blob([bytes as BlobPart], { type: mime });
+      const file = new File([blob], relPath, { type: mime });
+      const result = await uploadToFastFSViaRelayer(file);
+      return { url: result.url, hash: result.hash };
+    }
+  };
+
   const handleUpload = async () => {
-    if (!accountId) { linkWallet().catch(() => {}); return; }
+    if (!isAuthenticated) { promptSignIn(); return; }
 
     if (!audioFile || !title.trim() || !lyrics.trim()) {
       setError("Title, lyrics, and audio file are required");
@@ -178,40 +192,16 @@ function UploadPage() {
     setError("");
 
     try {
-      // Upload cover first (small file) — gives FastFS more time to index
-      // while the larger audio file uploads after
       let coverUrl: string | undefined;
       if (coverFile) {
         setUploadProgress("Uploading cover image...");
-        const coverBuffer = await coverFile.arrayBuffer();
-        const coverBytes = new Uint8Array(coverBuffer);
-        const coverHash = await computeFileHash(coverBytes);
-        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
-        const coverParts = prepareFastFSUpload(
-          coverRelPath,
-          coverFile.type || "image/jpeg",
-          coverBytes
-        );
-
-        await uploadToFastFS(
-          (params) =>
-            callFunction({
-              contractId: params.contractId,
-              method: params.method,
-              args: params.args,
-              gas: params.gas,
-            }),
-          coverParts
-        );
-
-        coverUrl = getFastFSUrl(accountId, coverRelPath);
+        const coverBytes = new Uint8Array(await coverFile.arrayBuffer());
+        const coverResult = await uploadBytes(coverBytes, coverFile.type || "image/jpeg");
+        coverUrl = coverResult.url;
       }
 
-      setUploadProgress("Reading audio file...");
-      const audioBuffer = await audioFile.arrayBuffer();
-      const audioBytes = new Uint8Array(audioBuffer);
-
       setUploadProgress("Checking for duplicates...");
+      const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
       const audioHash = await computeFileHash(audioBytes);
       try {
         await getSongs({ audio_hash: audioHash });
@@ -223,31 +213,9 @@ function UploadPage() {
         }
       }
 
-      const audioRelPath = getRelativePath(audioHash, audioFile.type || "audio/mpeg");
-      const audioParts = prepareFastFSUpload(
-        audioRelPath,
-        audioFile.type || "audio/mpeg",
-        audioBytes
-      );
-
-      setUploadProgress(
-        `Uploading audio (0/${audioParts.length} chunks)...`
-      );
-
-      await uploadToFastFS(
-        (params) =>
-          callFunction({
-            contractId: params.contractId,
-            method: params.method,
-            args: params.args,
-            gas: params.gas,
-          }),
-        audioParts,
-        (done, total) =>
-          setUploadProgress(`Uploading audio (${done}/${total} chunks)...`)
-      );
-
-      const audioUrl = getFastFSUrl(accountId, audioRelPath);
+      setUploadProgress("Uploading audio...");
+      const audioResult = await uploadBytes(audioBytes, audioFile.type || "audio/mpeg");
+      const audioUrl = audioResult.url;
 
       setUploadProgress("Saving song...");
       const song = await createSong({

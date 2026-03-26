@@ -13,6 +13,7 @@ import { getRadioPlaylist } from "@/lib/api";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -21,6 +22,7 @@ import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
 import { renderWithMentions } from "@/lib/mentions";
+import { useToast } from "@/components/ui/Toast";
 
 function truncateId(id: string, max = 30): string {
   if (id.length <= max) return id;
@@ -56,6 +58,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const { currentSong, isPlaying, togglePlay, playMode, setPlayMode, next, previous, startRadio, queue } = useAudioPlayer();
   const { user, isAuthenticated, promptSignIn } = useAuth();
   const { accountId, callFunction } = useNearWallet();
+  const { showToast } = useToast();
 
   // Track whether the user navigated here manually (should not auto-follow currentSong)
   // vs. the song changed automatically via radio/queue (should follow)
@@ -188,15 +191,22 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       let cover_image_url: string | undefined;
 
       // Upload cover to FastFS if a new one was selected
-      if (coverFile && accountId) {
+      if (coverFile && (accountId || user?.solana_address)) {
         setCoverUploading(true);
-        const coverBuffer = await coverFile.arrayBuffer();
-        const coverBytes = new Uint8Array(coverBuffer);
-        const coverHash = await computeFileHash(coverBytes);
-        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
-        const coverParts = prepareFastFSUpload(coverRelPath, coverFile.type || "image/jpeg", coverBytes);
-        await uploadToFastFS((params) => callFunction(params), coverParts);
-        cover_image_url = getFastFSUrl(accountId, coverRelPath);
+        if (accountId) {
+          // Direct upload via NEAR wallet
+          const coverBuffer = await coverFile.arrayBuffer();
+          const coverBytes = new Uint8Array(coverBuffer);
+          const coverHash = await computeFileHash(coverBytes);
+          const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
+          const coverParts = prepareFastFSUpload(coverRelPath, coverFile.type || "image/jpeg", coverBytes);
+          await uploadToFastFS((params) => callFunction(params), coverParts);
+          cover_image_url = getFastFSUrl(accountId, coverRelPath);
+        } else {
+          // Upload via server relayer
+          const result = await uploadToFastFSViaRelayer(coverFile);
+          cover_image_url = result.url;
+        }
         setCoverUploading(false);
       }
 
@@ -214,6 +224,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       setCoverFile(null);
       setCoverPreview(null);
       setEditing(false);
+      if (cover_image_url && !accountId) {
+        showToast({ message: "Song updated! Cover image may take 1-2 minutes to appear.", type: "success", id: "cover-upload" });
+      }
     } catch (e) {
       console.error("Update failed:", e);
       setCoverUploading(false);
@@ -475,7 +488,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                       />
                     </label>
                   )}
-                  {coverFile && !accountId && (
+                  {coverFile && !accountId && !user?.solana_address && (
                     <p className="text-xs text-amber-400 mt-1">Connect NEAR wallet to upload cover image</p>
                   )}
                 </div>
@@ -483,7 +496,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
               <div className="flex gap-2">
                 <button
                   onClick={saveEdit}
-                  disabled={editSaving || coverUploading || (!!coverFile && !accountId)}
+                  disabled={editSaving || coverUploading || (!!coverFile && !accountId && !user?.solana_address)}
                   className="px-5 py-2 btn-primary rounded-xl text-sm disabled:opacity-50"
                 >
                   {coverUploading ? "Uploading cover..." : editSaving ? "Saving..." : "Save"}

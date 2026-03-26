@@ -28,6 +28,7 @@ pub struct AppState {
     pub suno_client: reqwest::Client,
     pub suno_cache: routes::suno::SunoTaskCache,
     pub suno_lyrics_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, routes::suno::SunoLyricsCallbackData>>>,
+    pub fastfs_upload_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[tokio::main]
@@ -72,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         suno_client,
         suno_cache: routes::suno::new_task_cache(),
         suno_lyrics_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        fastfs_upload_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     // CORS
@@ -114,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/posts/:parent_type/:parent_id/replies", post(routes::blog::create_reply))
         .route("/api/replies/:id", delete(routes::blog::delete_reply))
         .route("/api/requests/:uuid", patch(routes::requests::update_request))
+        .route("/api/fastfs/upload", post(routes::fastfs::upload).layer(DefaultBodyLimit::max(25 * 1024 * 1024)))
         .layer(middleware::from_fn_with_state(
             strict_limiter,
             rate_limit::rate_limit_middleware,
@@ -123,6 +126,8 @@ async fn main() -> anyhow::Result<()> {
     let moderate_routes = Router::new()
         .route("/api/auth/verify", post(routes::auth::verify))
         .route("/api/auth/link-wallet", post(routes::auth::link_wallet))
+        .route("/api/auth/solana/verify", post(routes::auth::solana_verify))
+        .route("/api/auth/link-solana", post(routes::auth::link_solana))
         .route("/api/auth/logout", post(routes::auth::logout))
         .route("/api/songs", post(routes::songs::create_song))
         .route("/api/requests", post(routes::requests::create_request))

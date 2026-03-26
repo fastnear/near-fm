@@ -56,6 +56,9 @@ services:
       RUST_LOG: ${RUST_LOG:-nearfm_server=info,tower_http=info}
       SUNO_API_KEY: ${SUNO_API_KEY:-}
       TREASURY_AGENT_KEY: ${TREASURY_AGENT_KEY:-}
+      FASTFS_RELAYER_ACCOUNT_ID: ${FASTFS_RELAYER_ACCOUNT_ID:-}
+      FASTFS_RELAYER_PRIVATE_KEY: ${FASTFS_RELAYER_PRIVATE_KEY:-}
+      FASTFS_RELAYER_RPC_URL: ${FASTFS_RELAYER_RPC_URL:-}
       PORT: "8477"
     volumes:
       - ./video:/app/video

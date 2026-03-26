@@ -58,6 +58,7 @@ pub struct UserResponse {
     pub reputation_score: String,
     pub auth_provider: String,
     pub near_account_id: Option<String>,
+    pub solana_address: Option<String>,
     pub credit_balance: i32,
     pub daily_credits_remaining: i32,
 }
@@ -176,6 +177,7 @@ pub async fn verify(
         user.id,
         user.is_admin,
         user.account_id.as_deref(),
+        user.solana_address.as_deref(),
     )
     .map_err(|e| {
         (
@@ -203,6 +205,7 @@ pub async fn verify(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
+            solana_address: user.solana_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -393,6 +396,7 @@ pub async fn google_callback(
         user.id,
         user.is_admin,
         user.account_id.as_deref(),
+        user.solana_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -484,6 +488,7 @@ pub struct MeResponse {
     pub premium_until: Option<String>,
     pub auth_provider: String,
     pub reputation_score: String,
+    pub solana_address: Option<String>,
     pub credit_balance: i32,
     pub daily_credits_remaining: i32,
 }
@@ -521,6 +526,7 @@ pub async fn get_me(
         premium_until,
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
+        solana_address: user.solana_address,
         credit_balance: user.credit_balance,
         daily_credits_remaining,
     }))
@@ -626,6 +632,7 @@ pub async fn link_wallet(
         user.id,
         is_admin,
         Some(&req.account_id),
+        user.solana_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -647,6 +654,7 @@ pub async fn link_wallet(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),
+            solana_address: user.solana_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -816,7 +824,7 @@ pub async fn agent_auth(
     }
 
     // Issue JWT
-    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref())
+    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref(), user.solana_address.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Token error: {}", e), "Try again later")))?;
 
     let (is_premium, premium_until) = compute_premium(&user);
@@ -837,6 +845,7 @@ pub async fn agent_auth(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
+            solana_address: user.solana_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -848,4 +857,219 @@ fn agent_error(error: &str, hint: &str) -> Json<serde_json::Value> {
         "error": error,
         "hint": hint,
     }))
+}
+
+// ── Solana Auth ──
+
+#[derive(Debug, Deserialize)]
+pub struct SolanaVerifyRequest {
+    pub solana_address: String,
+    pub signature: String,  // base58
+    pub message: String,
+}
+
+/// Validate the signed message JSON structure and timestamp.
+fn validate_auth_message(message: &str, expected_action: &str) -> Result<(), (StatusCode, String)> {
+    let msg: serde_json::Value = serde_json::from_str(message)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid message JSON".to_string()))?;
+
+    let action = msg["action"].as_str()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing action".to_string()))?;
+    if action != expected_action {
+        return Err((StatusCode::BAD_REQUEST, format!("Expected action '{}', got '{}'", expected_action, action)));
+    }
+
+    let domain = msg["domain"].as_str()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing domain".to_string()))?;
+    if domain != "near.fm" {
+        return Err((StatusCode::BAD_REQUEST, "Invalid domain".to_string()));
+    }
+
+    let ts = msg["timestamp"].as_i64()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing timestamp".to_string()))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let age_ms = now - ts;
+    if age_ms > 5 * 60 * 1000 || age_ms < -30_000 {
+        return Err((StatusCode::BAD_REQUEST, "Message expired or too far in the future".to_string()));
+    }
+
+    Ok(())
+}
+
+/// POST /api/auth/solana/verify — sign in with Solana wallet
+pub async fn solana_verify(
+    State(state): State<AppState>,
+    Json(req): Json<SolanaVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    // 1. Validate message structure
+    validate_auth_message(&req.message, "sign_in")?;
+
+    // 2. Verify Solana signature
+    let valid = crate::auth::solana::verify_solana_signature(
+        &req.solana_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Solana signature".to_string()));
+    }
+
+    // 3. Find or create user
+    let user = match sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE solana_address = $1",
+    )
+    .bind(&req.solana_address)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        Some(u) => u,
+        None => {
+            // Create new user with generated slug
+            let slug = generate_solana_slug(&req.solana_address);
+            sqlx::query_as::<_, crate::db::models::User>(
+                "INSERT INTO users (slug, solana_address, auth_provider) VALUES ($1, $2, 'solana') RETURNING *",
+            )
+            .bind(&slug)
+            .bind(&req.solana_address)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create user: {}", e)))?
+        }
+    };
+
+    if user.is_banned {
+        return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 4. Create JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// POST /api/auth/link-solana — link Solana wallet to existing account
+pub async fn link_solana(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<SolanaVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // 1. Validate message
+    validate_auth_message(&req.message, "link_wallet")?;
+
+    // 2. Verify Solana signature
+    let valid = crate::auth::solana::verify_solana_signature(
+        &req.solana_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Solana signature".to_string()));
+    }
+
+    // 3. Check if Solana address already linked to another user
+    let existing: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE solana_address = $1",
+    )
+    .bind(&req.solana_address)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if let Some((eid,)) = existing {
+        if eid != claims.user_id {
+            return Err((StatusCode::CONFLICT, "This Solana address is already linked to another account".to_string()));
+        }
+    }
+
+    // 4. Link Solana wallet
+    let user = sqlx::query_as::<_, crate::db::models::User>(
+        "UPDATE users SET solana_address = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(&req.solana_address)
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 5. Issue new JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// Generate a slug from a Solana address: first 8 chars + UUID suffix.
+fn generate_solana_slug(address: &str) -> String {
+    // Use first 12 chars of the Solana address (lowercase) for recognizability
+    let addr_part = &address[..12.min(address.len())];
+    let suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    format!("{}-{}", addr_part.to_lowercase(), suffix)
 }

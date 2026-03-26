@@ -69,6 +69,56 @@ export async function getIntentsBalance(
   );
 }
 
+// ── Solana deposit via 1Click bridge ──
+
+export interface SolanaDepositIntent {
+  intent_id: string;
+  deposit_address: string;
+  amount: string;
+  amount_out: string;
+  min_amount_out: string;
+  expires_at: string;
+  estimated_time_secs: number;
+}
+
+export interface SolanaDepositStatus {
+  intent_id: string;
+  status: "pending" | "bridging" | "success" | "failed" | "expired";
+  result?: {
+    amountOut: string;
+    amountOutFormatted: string;
+  };
+}
+
+export async function createSolanaDepositIntent(
+  apiKey: string,
+  amount: string,
+  token: string,
+  refundAddress: string,
+): Promise<SolanaDepositIntent> {
+  return outlayerFetch("/wallet/v1/solana/deposit-intent", apiKey, {
+    method: "POST",
+    body: JSON.stringify({ amount, token, refund_address: refundAddress }),
+  });
+}
+
+export async function getSolanaDepositStatus(
+  apiKey: string,
+  intentId: string,
+): Promise<SolanaDepositStatus> {
+  return outlayerFetch(`/wallet/v1/solana/deposit-status?id=${intentId}`, apiKey);
+}
+
+export async function saveExternalAddresses(
+  apiKey: string,
+  addresses: Array<{ chain: string; address: string; label: string }>,
+): Promise<void> {
+  return outlayerFetch("/wallet/v1/external-addresses", apiKey, {
+    method: "PUT",
+    body: JSON.stringify({ addresses }),
+  });
+}
+
 export async function createCheck(
   apiKey: string,
   token: string,

@@ -169,7 +169,10 @@ pub async fn create_song(
     // Truncate fields to reasonable limits
     let title = truncate_str(&req.title, 200);
     let description = req.description.as_deref().map(|s| truncate_str(s, 5000));
-    let lyrics = req.lyrics.as_deref().map(|s| truncate_str(s, 10000));
+    let lyrics = req.lyrics.as_deref().map(|s| {
+        let trimmed: String = s.lines().map(|line| line.trim()).collect::<Vec<_>>().join("\n");
+        truncate_str(&trimmed, 10000)
+    });
 
     // Check deduplication
     let exists = queries::check_audio_hash_exists(&state.db, &req.audio_hash)

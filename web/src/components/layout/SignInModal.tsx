@@ -3,10 +3,12 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useSolanaWallet } from "@/contexts/SolanaWalletContext";
 
 export function SignInModal() {
   const { showSignInModal, closeSignInModal, signInWithGoogle } = useAuth();
   const { connectAndSignIn } = useNearWallet();
+  const { connectAndSignIn: connectSolana } = useSolanaWallet();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function SignInModal() {
       onClick={(e) => { if (e.target === overlayRef.current) closeSignInModal(); }}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
     >
-      <div className="w-full max-w-sm mx-4 glass-card rounded-2xl border border-white/[0.1] shadow-2xl p-6">
+      <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/[0.1] shadow-2xl p-6 bg-slate-900/95 backdrop-blur-xl">
         <h2 className="text-lg font-semibold text-white mb-2">Sign in to NEAR FM</h2>
         <ul className="text-sm text-slate-400 mb-6 space-y-1.5">
           <li className="flex items-center gap-2"><span className="text-purple-400">&#x2022;</span> Vote and comment on songs</li>
@@ -65,6 +67,26 @@ export function SignInModal() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3" />
             </svg>
             Sign in with NEAR
+          </button>
+
+          {/* Solana */}
+          <button
+            onClick={() => {
+              closeSignInModal();
+              connectSolana();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.06] border border-white/[0.1] text-sm text-slate-200 hover:bg-white/[0.1] transition-all"
+          >
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 397.7 311.7" fill="none">
+              <linearGradient id="sol-a" x1="360.9" y1="351.5" x2="141.2" y2="-69.2" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 -25)">
+                <stop offset="0" stopColor="#00FFA3" />
+                <stop offset="1" stopColor="#DC1FFF" />
+              </linearGradient>
+              <path fill="url(#sol-a)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z" />
+              <path fill="url(#sol-a)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z" />
+              <path fill="url(#sol-a)" d="M333.1 120c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1L333.1 120z" />
+            </svg>
+            Sign in with Solana
           </button>
         </div>
 

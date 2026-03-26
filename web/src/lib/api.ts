@@ -38,6 +38,7 @@ export interface AuthUser {
   slug: string;
   account_id: string; // slug for backward compat
   near_account_id: string | null;
+  solana_address: string | null;
   display_name: string | null;
   avatar_url: string | null;
   is_admin: boolean;

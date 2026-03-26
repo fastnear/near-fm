@@ -20,6 +20,7 @@ import { GenrePicker } from "@/components/song/GenrePicker";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -36,7 +37,7 @@ const MODELS = [
 ];
 
 export default function CreatePage() {
-  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { user, isAuthenticated, promptSignIn } = useAuth();
   const { accountId, connectAndSignIn, linkWallet, callFunction } = useNearWallet();
 
   const [step, setStep] = useState<Step>("form");
@@ -185,14 +186,9 @@ export default function CreatePage() {
           <p className="text-slate-400 mb-8">
             Sign in to create music with AI.
           </p>
-          <div className="flex flex-col gap-3">
-            <button onClick={connectAndSignIn} className="btn-primary px-8 py-3 rounded-xl text-sm">
-              Sign in with NEAR Wallet
-            </button>
-            <button onClick={signInWithGoogle} className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all">
-              Sign in with Google
-            </button>
-          </div>
+          <button onClick={promptSignIn} className="btn-primary px-8 py-3 rounded-xl text-sm">
+            Sign In
+          </button>
         </div>
       </div>
     );
@@ -339,10 +335,32 @@ export default function CreatePage() {
     setStep("publish");
   };
 
+  // Upload bytes to FastFS — uses relayer if no NEAR wallet
+  const uploadBytes = async (bytes: Uint8Array, mime: string): Promise<{ url: string; hash: string }> => {
+    const hash = await computeFileHash(bytes);
+    const relPath = getRelativePath(hash, mime);
+
+    if (accountId) {
+      // Direct upload via NEAR wallet
+      const parts = prepareFastFSUpload(relPath, mime, bytes);
+      await uploadToFastFS(
+        (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
+        parts,
+      );
+      return { url: getFastFSUrl(accountId, relPath), hash };
+    } else {
+      // Upload via server relayer
+      const blob = new Blob([bytes as BlobPart], { type: mime });
+      const file = new File([blob], relPath, { type: mime });
+      const result = await uploadToFastFSViaRelayer(file);
+      return { url: result.url, hash: result.hash };
+    }
+  };
+
   const handlePublish = async () => {
     if (!selectedSong) return;
-    if (!accountId) {
-      try { await linkWallet(); } catch {}
+    if (!isAuthenticated) {
+      promptSignIn();
       return;
     }
     if (!pubTitle.trim()) {
@@ -385,10 +403,6 @@ export default function CreatePage() {
         }
       }
 
-      setPublishProgress("Preparing upload...");
-      const audioRelPath = getRelativePath(audioHash, audioMime);
-      const audioParts = prepareFastFSUpload(audioRelPath, audioMime, audioBytes);
-
       // Upload cover if available
       let coverUrl: string | undefined;
       // Upload cover image (custom or from AI)
@@ -403,55 +417,39 @@ export default function CreatePage() {
             coverBytes = new Uint8Array(await customCover.arrayBuffer());
             coverMime = customCover.type || "image/jpeg";
           } else {
-            // Download AI-generated cover via server proxy
+            // Download AI-generated cover — try server proxy first, fall back to direct URL
             const coverIdx = songs.findIndex((s) => s.id === selectedSong.id);
-            const coverResp = await fetch(
-              `${apiBase}/api/suno/download?taskId=${encodeURIComponent(taskId)}&songIndex=${coverIdx >= 0 ? coverIdx : 0}&type=image`,
-              { credentials: "include" }
-            );
-            if (!coverResp.ok) throw new Error("Failed to download cover");
-            const coverBlob = await coverResp.blob();
+            let coverBlob: Blob | null = null;
+            try {
+              const coverResp = await fetch(
+                `${apiBase}/api/suno/download?taskId=${encodeURIComponent(taskId)}&songIndex=${coverIdx >= 0 ? coverIdx : 0}&type=image`,
+                { credentials: "include" }
+              );
+              if (coverResp.ok) coverBlob = await coverResp.blob();
+            } catch {}
+            // Fallback: try direct image URL from browser (no CORS for images)
+            if (!coverBlob && selectedSong.image_url) {
+              try {
+                const directResp = await fetch(selectedSong.image_url);
+                if (directResp.ok) coverBlob = await directResp.blob();
+              } catch {}
+            }
+            if (!coverBlob) throw new Error("Failed to download cover");
             coverBytes = new Uint8Array(await coverBlob.arrayBuffer());
             coverMime = coverBlob.type || "image/jpeg";
           }
 
-          const coverHash = await computeFileHash(coverBytes);
-          const coverRelPath = getRelativePath(coverHash, coverMime);
-          const coverParts = prepareFastFSUpload(coverRelPath, coverMime, coverBytes);
-
-          await uploadToFastFS(
-            (params) =>
-              callFunction({
-                contractId: params.contractId,
-                method: params.method,
-                args: params.args,
-                gas: params.gas,
-              }),
-            coverParts
-          );
-
-          coverUrl = getFastFSUrl(accountId, coverRelPath);
+          const coverResult = await uploadBytes(coverBytes, coverMime);
+          coverUrl = coverResult.url;
         } catch (e) {
           console.warn("Cover upload failed, continuing without cover:", e);
         }
       }
 
       // Upload audio
-      setPublishProgress(`Uploading audio (0/${audioParts.length} chunks)...`);
-      await uploadToFastFS(
-        (params) =>
-          callFunction({
-            contractId: params.contractId,
-            method: params.method,
-            args: params.args,
-            gas: params.gas,
-          }),
-        audioParts,
-        (done, total) =>
-          setPublishProgress(`Uploading audio (${done}/${total} chunks)...`)
-      );
-
-      const audioUrl = getFastFSUrl(accountId, audioRelPath);
+      setPublishProgress("Uploading audio...");
+      const audioResult = await uploadBytes(audioBytes, audioMime);
+      const audioUrl = audioResult.url;
 
       // Create song
       setPublishProgress("Saving song...");
@@ -984,8 +982,12 @@ export default function CreatePage() {
                 <button
                   type="button"
                   onClick={() => coverInputRef.current?.click()}
-                  className="text-xs text-purple-400/70 hover:text-purple-400 transition-colors mt-1"
+                  className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/15 px-2.5 py-1 rounded-lg border border-purple-500/20 transition-all mt-2"
                 >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
                   Change cover
                 </button>
               </div>
@@ -1017,8 +1019,8 @@ export default function CreatePage() {
           />
         </div>
 
-        {/* No wallet connected */}
-        {!accountId && (
+        {/* No wallet connected (only for non-Solana users) */}
+        {!accountId && !user?.solana_address && (
           <div className="glass-card rounded-2xl p-6 mb-8 text-center">
             <p className="text-slate-400 mb-4">Connect a NEAR wallet to publish (files are stored on-chain via FastFS).</p>
             <button onClick={linkWallet} className="btn-primary px-6 py-2.5 rounded-xl text-sm">
@@ -1141,7 +1143,7 @@ export default function CreatePage() {
             </button>
             <button
               onClick={handlePublish}
-              disabled={publishing || !pubTitle.trim() || !accountId}
+              disabled={publishing || !pubTitle.trim() || (!accountId && !user?.solana_address)}
               className="flex-1 py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {publishing ? "Publishing..." : "Publish Song"}
