@@ -85,7 +85,7 @@ export function Header() {
           <Link href="/upload" className={navLink("/upload")}>Upload</Link>
           <Link href="/premium" className={navLink("/premium", pathname === "/premium" ? "" : "diamond-shimmer")}>Premium</Link>
           <Link href="/cabinet" className={navLink("/cabinet")}>
-            Cabinet{walletBalance && walletBalance !== "0.00" ? ` ($${walletBalance})` : ""}
+            Account
             {unreadCount > 0 && (
               <span className="absolute -top-2.5 -right-5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow-lg shadow-purple-500/30 animate-pulse">
                 {unreadCount > 9 ? "9+" : unreadCount}
@@ -119,19 +119,42 @@ export function Header() {
               </button>
             </div>
           ) : isAuthenticated && user ? (
-            <Link
-              href={`/profile/${profileSlug}`}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all max-w-[200px]"
-            >
-              {user.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
-              ) : (
-                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-[9px] font-bold text-white shrink-0">
-                  {displayName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <span className="truncate">{displayName}</span>
-            </Link>
+            <div className="relative group">
+              <Link
+                href={`/profile/${profileSlug}`}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-slate-300 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all max-w-[200px]"
+              >
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center text-[9px] font-bold text-white shrink-0">
+                    {displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="truncate">{displayName}</span>
+              </Link>
+              {/* Dropdown on hover */}
+              <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-white/[0.1] rounded-xl shadow-2xl overflow-hidden z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150">
+                {walletBalance && (
+                  <div className="px-4 py-3 border-b border-white/[0.06]">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">Balance</div>
+                    <div className="text-sm font-bold text-green-400">${walletBalance}</div>
+                  </div>
+                )}
+                <Link href={`/profile/${profileSlug}`} className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
+                  Profile
+                </Link>
+                <Link href="/cabinet" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
+                  Account
+                </Link>
+                <Link href="/balance" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
+                  Deposit
+                </Link>
+                <Link href="/credits" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
+                  Credits
+                </Link>
+              </div>
+            </div>
           ) : (
             <button
               onClick={promptSignIn}
@@ -198,7 +221,7 @@ export function Header() {
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
           </svg>
-          <span className="text-[10px]">Cabinet</span>
+          <span className="text-[10px]">Account</span>
           {unreadCount > 0 && (
             <span className="absolute -top-0.5 right-0 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">
               {unreadCount > 9 ? "9+" : unreadCount}

@@ -227,7 +227,12 @@ export default function CabinetPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "balance" && <BalanceTab />}
+      {activeTab === "balance" && (
+        <div className="space-y-6">
+          <BalanceTab />
+          <BalanceDepositSection />
+        </div>
+      )}
       {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
       {activeTab === "wallet" && <WalletKeyTab />}
       {activeTab === "playlists" && isPremium && <PlaylistsTab />}
@@ -239,6 +244,42 @@ export default function CabinetPage() {
 }
 
 // ── Balance Tab ──
+
+function BalanceDepositSection() {
+  const { isAuthenticated } = useAuth();
+  const [balance, setBalance] = useState("0.00");
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      import("@/lib/api").then(({ getWalletBalance }) =>
+        getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {})
+      );
+    }
+  }, [isAuthenticated]);
+
+  return (
+    <div className="glass-card rounded-2xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium text-slate-300">Wallet Balance</div>
+          <div className="text-xs text-slate-500 mt-0.5">USDC on-chain (intents.near)</div>
+        </div>
+        <div className="text-2xl font-bold text-green-400">${balance}</div>
+      </div>
+      <p className="text-xs text-slate-500">
+        Used for tips, bounties, and premium. Deposit from any chain (NEAR, Solana, Ethereum).
+      </p>
+      <div className="flex gap-2">
+        <Link href="/balance" className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium btn-primary rounded-lg">
+          Deposit
+        </Link>
+        <Link href="/credits" className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-slate-300 bg-white/[0.06] border border-white/[0.08] rounded-lg hover:bg-white/[0.1] transition">
+          Buy Credits
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 function BalanceTab() {
   const { user, isPremium } = useAuth();
