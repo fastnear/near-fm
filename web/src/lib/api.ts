@@ -714,6 +714,62 @@ export async function deleteVideo(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "DELETE" });
 }
 
+// ── Wallet ──
+
+export async function backupWallet(apiKey: string, nearAccountId: string): Promise<void> {
+  return fetchApi("/api/wallet/backup", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey, near_account_id: nearAccountId }),
+  });
+}
+
+export async function restoreWallet(): Promise<{ api_key: string | null; near_account_id: string | null }> {
+  return fetchApi("/api/wallet/restore");
+}
+
+export async function getWalletBalance(): Promise<{ balance_usdc: string; balance_usdc_formatted: string }> {
+  return fetchApi("/api/wallet/balance");
+}
+
+export async function sendTipFromBalance(songUuid: string, amountCents: number): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
+  return fetchApi("/api/tips/send", {
+    method: "POST",
+    body: JSON.stringify({ song_uuid: songUuid, amount_cents: amountCents }),
+  });
+}
+
+export async function createBountyFromBalance(title: string, description: string, amountCents: number, languageId?: number): Promise<{ uuid: string; request_id: number }> {
+  return fetchApi("/api/bounties/create", {
+    method: "POST",
+    body: JSON.stringify({ title, description, amount_cents: amountCents, language_id: languageId }),
+  });
+}
+
+export async function topupBountyFromBalance(uuid: string, amountCents: number): Promise<{ status: string }> {
+  return fetchApi(`/api/bounties/${uuid}/topup`, {
+    method: "POST",
+    body: JSON.stringify({ amount_cents: amountCents }),
+  });
+}
+
+export async function awardBountyFromBalance(uuid: string, awardedSongId: number): Promise<{ status: string; recipient_cents: number }> {
+  return fetchApi(`/api/bounties/${uuid}/award`, {
+    method: "POST",
+    body: JSON.stringify({ awarded_song_id: awardedSongId }),
+  });
+}
+
+export async function withdrawBountyFromBalance(uuid: string): Promise<{ status: string; refund_cents: number; penalty_cents: number }> {
+  return fetchApi(`/api/bounties/${uuid}/withdraw`, { method: "POST" });
+}
+
+export async function withdrawFromBalance(amountCents: number, chain: string, receiver: string): Promise<{ status: string }> {
+  return fetchApi("/api/wallet/withdraw", {
+    method: "POST",
+    body: JSON.stringify({ amount_cents: amountCents, chain, receiver }),
+  });
+}
+
 // ── Comments ──
 
 export interface Comment {

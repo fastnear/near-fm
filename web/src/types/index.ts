@@ -91,6 +91,8 @@ export interface SongRequest {
   description: string;
   bounty_amount_yocto: string;
   bounty_tx_hash: string;
+  bounty_usd_cents: number | null;
+  bounty_payment_method: string;
   status: string;
   awarded_song_id: number | null;
   award_tx_hash: string | null;

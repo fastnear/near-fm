@@ -9,6 +9,7 @@ pub fn truncate_str(s: &str, max_len: usize) -> String {
 pub mod admin;
 pub mod blog;
 pub mod fastfs;
+pub mod wallet;
 pub mod auth;
 pub mod comments;
 pub mod credits;

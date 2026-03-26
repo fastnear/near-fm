@@ -28,6 +28,8 @@ pub struct User {
     pub daily_credits_used: i32,
     pub daily_credits_date: chrono::NaiveDate,
     pub solana_address: Option<String>,
+    pub outlayer_api_key: Option<String>,
+    pub outlayer_near_account: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

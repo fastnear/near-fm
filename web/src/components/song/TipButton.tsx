@@ -3,31 +3,17 @@
 import { useState, useEffect } from "react";
 import type { Song } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useToast } from "@/components/ui/Toast";
-import { recordTip } from "@/lib/api";
-import { tipSongAction, tipFromBalanceArgs, getBalance } from "@/lib/near/contract";
+import { sendTipFromBalance, getWalletBalance } from "@/lib/api";
 
-const TIP_AMOUNTS = ["0.01", "0.1", "0.5", "1", "5"];
+const TIP_AMOUNTS = [10, 50, 100, 500]; // cents: $0.10, $0.50, $1, $5
 
-function nearToYocto(near: string): string {
-  const parts = near.split(".");
-  const whole = parts[0] || "0";
-  const frac = (parts[1] || "").padEnd(24, "0").slice(0, 24);
-  return BigInt(whole + frac).toString();
-}
-
-function yoctoToNear(yocto: string): string {
-  if (!yocto || yocto === "0") return "0";
-  const padded = yocto.padStart(25, "0");
-  const whole = padded.slice(0, padded.length - 24) || "0";
-  const frac = padded.slice(padded.length - 24, padded.length - 20);
-  return `${whole}.${frac}`;
+function formatCents(cents: number): string {
+  return cents >= 100 ? `$${(cents / 100).toFixed(0)}` : `$${(cents / 100).toFixed(2)}`;
 }
 
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
-  const { isAuthenticated } = useAuth();
-  const { accountId, linkWallet, connectWallet, callFunction, viewMethod } = useNearWallet();
+  const { isAuthenticated, promptSignIn } = useAuth();
   const { showToast } = useToast();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -36,108 +22,44 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
   const [customAmount, setCustomAmount] = useState("");
 
   useEffect(() => {
-    if (accountId && showModal) {
-      getBalance(
-        (params) => viewMethod(params).then((r) => String(r ?? "0")),
-        accountId
-      )
-        .then((b) => setBalance(b))
+    if (showModal && isAuthenticated) {
+      getWalletBalance()
+        .then((b) => setBalance(b.balance_usdc_formatted))
         .catch(() => setBalance(null));
     }
-  }, [accountId, showModal, viewMethod]);
+  }, [showModal, isAuthenticated]);
 
-  const handleTip = async (amountNear: string) => {
-    if (!accountId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
+  const handleTip = async (amountCents: number) => {
+    if (amountCents < 1) return;
 
     setLoading(true);
-    const toastId = showToast({ message: `Sending ${amountNear} NEAR tip...`, type: "loading", id: "tip" });
+    const toastId = showToast({ message: `Sending ${formatCents(amountCents)} tip...`, type: "loading", id: "tip" });
     try {
-      const amountYocto = nearToYocto(amountNear);
-      let txHash: string;
-      let fromBalance = false;
-
-      const recipientNearId = song.uploader_near_account_id;
-      if (!recipientNearId) {
-        showToast({ message: "This artist hasn't linked a NEAR wallet yet", type: "error", id: "tip" });
-        setLoading(false);
-        return;
-      }
-
-      // If user has enough virtual balance, tip from balance (no wallet popup)
-      if (balance && BigInt(balance) >= BigInt(amountYocto)) {
-        fromBalance = true;
-        const action = tipFromBalanceArgs(
-          recipientNearId,
-          amountYocto,
-          song.uuid
-        );
-        txHash = await callFunction({
-          contractId: action.contractId,
-          method: action.method,
-          args: action.args,
-          gas: action.gas,
-        });
-      } else {
-        // Not enough balance — send full amount as deposit (goes to virtual balance)
-        const action = tipSongAction(
-          recipientNearId,
-          song.uuid,
-          amountYocto
-        );
-        txHash = await callFunction({
-          contractId: action.contractId,
-          method: action.method,
-          args: action.args,
-          gas: action.gas,
-          deposit: action.deposit,
-        });
-      }
-
-      await recordTip({
-        song_uuid: song.uuid,
-        tx_hash: txHash,
-        amount_yocto: amountYocto,
-        from_balance: fromBalance,
-      });
-
-      // Refresh balance
-      if (accountId) {
-        getBalance(
-          (params) => viewMethod(params).then((r) => String(r ?? "0")),
-          accountId
-        ).then((b) => setBalance(b)).catch(() => {});
-      }
+      await sendTipFromBalance(song.uuid, amountCents);
 
       showToast({
         id: toastId,
-        message: `Tip of ${amountNear} NEAR sent!`,
+        message: `Tip of ${formatCents(amountCents)} sent!`,
         type: "success",
-        link: { url: `https://near.rocks/tx/${txHash}`, label: "View transaction" },
-        duration: 8000,
+        duration: 5000,
       });
 
       setSuccess(true);
       onTipSuccess?.();
-      setTimeout(() => {
-        setSuccess(false);
-        setShowModal(false);
-      }, 2000);
-    } catch (e) {
-      console.error("Tip failed:", e);
-      showToast({ id: toastId, message: "Tip failed. Please try again.", type: "error", duration: 5000 });
+      getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {});
+      setTimeout(() => { setSuccess(false); setShowModal(false); }, 2000);
+    } catch (e: any) {
+      const msg = e?.message || "Tip failed";
+      showToast({ id: toastId, message: msg, type: "error", duration: 5000 });
     }
     setLoading(false);
   };
-
-  const hasBalance =
-    balance && BigInt(balance) > 0;
-  const balanceNear = balance ? yoctoToNear(balance) : "0";
 
   return (
     <div className="relative">
       <button
         onClick={() => {
-          if (!accountId) { isAuthenticated ? linkWallet().catch(() => {}) : connectWallet(); return; }
+          if (!isAuthenticated) { promptSignIn(); return; }
           setShowModal(!showModal);
         }}
         className={compact
@@ -162,30 +84,23 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
             </div>
           ) : (
             <div className="space-y-3">
-              {hasBalance && (
+              {balance && (
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">Balance</span>
-                  <span className="text-xs font-medium text-purple-400">{balanceNear} NEAR</span>
+                  <span className="text-xs font-medium text-green-400">${balance}</span>
                 </div>
               )}
               <div className="flex gap-1.5 flex-wrap">
-                {TIP_AMOUNTS.map((amount) => {
-                  const canUseBalance = balance && BigInt(balance) >= BigInt(nearToYocto(amount));
-                  return (
-                    <button
-                      key={amount}
-                      onClick={() => handleTip(amount)}
-                      disabled={loading}
-                      className={`flex-1 min-w-[36px] px-1.5 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 ${
-                        canUseBalance
-                          ? "bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20"
-                          : "bg-white/[0.04] text-slate-300 border-white/[0.08] hover:bg-white/[0.08] hover:border-white/[0.15]"
-                      }`}
-                    >
-                      {amount}
-                    </button>
-                  );
-                })}
+                {TIP_AMOUNTS.map((cents) => (
+                  <button
+                    key={cents}
+                    onClick={() => handleTip(cents)}
+                    disabled={loading}
+                    className="flex-1 min-w-[44px] px-1.5 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 bg-green-500/10 text-green-300 border-green-500/20 hover:bg-green-500/20"
+                  >
+                    {formatCents(cents)}
+                  </button>
+                ))}
               </div>
               <div className="flex gap-1.5">
                 <input
@@ -194,24 +109,24 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
                   step="0.01"
                   value={customAmount}
                   onChange={(e) => setCustomAmount(e.target.value)}
-                  placeholder="Custom"
-                  className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-purple-500 focus:outline-none"
+                  placeholder="$ Custom"
+                  className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-200 placeholder:text-slate-600 focus:border-green-500 focus:outline-none"
                 />
                 <button
                   onClick={() => {
                     const val = parseFloat(customAmount);
-                    if (val >= 0.01) handleTip(customAmount);
+                    if (val >= 0.01) handleTip(Math.round(val * 100));
                   }}
                   disabled={loading || !customAmount || parseFloat(customAmount) < 0.01}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-all disabled:opacity-30"
                 >
                   Tip
                 </button>
               </div>
-              {hasBalance && (
-                <p className="text-[10px] text-slate-500 text-center">
-                  Purple = from balance, gray = wallet deposit
-                </p>
+              {balance === "0.00" && (
+                <a href="/balance" className="block text-center text-[10px] text-purple-400 hover:text-purple-300">
+                  Top up balance →
+                </a>
               )}
             </div>
           )}

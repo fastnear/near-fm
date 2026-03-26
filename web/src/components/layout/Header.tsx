@@ -67,7 +67,7 @@ export function Header() {
           )}
           <Link href="/" className="flex items-center gap-2.5 group">
             <span className="text-xl font-bold text-gradient tracking-tight">
-              AI RADIO
+              NEAR FM
             </span>
           </Link>
         </div>
@@ -78,6 +78,7 @@ export function Header() {
           <Link href="/requests" className={navLink("/requests")}>Requests</Link>
           <Link href="/create" className={navLink("/create")}>Create</Link>
           <Link href="/upload" className={navLink("/upload")}>Upload</Link>
+          <Link href="/balance" className={navLink("/balance")}>Balance</Link>
           <Link href="/premium" className={navLink("/premium", pathname === "/premium" ? "" : "diamond-shimmer")}>Premium</Link>
           <Link href="/cabinet" className={navLink("/cabinet")}>
             Cabinet

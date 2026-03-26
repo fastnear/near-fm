@@ -144,6 +144,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/credits/topup", post(routes::credits::topup))
         .route("/api/premium/subscribe", post(routes::premium::subscribe))
         .route("/api/auth/agent", post(routes::auth::agent_auth))
+        .route("/api/wallet/backup", post(routes::wallet::backup))
+        .route("/api/wallet/restore", get(routes::wallet::restore))
+        .route("/api/wallet/balance", get(routes::wallet::balance))
+        .route("/api/tips/send", post(routes::wallet::send_tip))
+        .route("/api/bounties/create", post(routes::wallet::create_bounty))
+        .route("/api/bounties/:uuid/award", post(routes::wallet::award_bounty))
+        .route("/api/bounties/:uuid/topup", post(routes::wallet::topup_bounty))
+        .route("/api/bounties/:uuid/withdraw", post(routes::wallet::withdraw_bounty))
+        .route("/api/wallet/withdraw", post(routes::wallet::withdraw))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,

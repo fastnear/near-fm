@@ -188,6 +188,16 @@ pub async fn verify(
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
+    // Auto-provision OutLayer wallet in background (non-blocking)
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
     let (is_premium, premium_until) = compute_premium(&user);
 
     let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
@@ -401,6 +411,16 @@ pub async fn google_callback(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
 
     // Build response with session cookie + clear oauth_state cookie + redirect
     let response = axum::response::Response::builder()
@@ -958,6 +978,16 @@ pub async fn solana_verify(
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
     let body = Json(VerifyResponse {
         token: token.clone(),
         user: UserResponse {
@@ -1043,6 +1073,16 @@ pub async fn link_solana(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
 
     let body = Json(VerifyResponse {
         token: token.clone(),

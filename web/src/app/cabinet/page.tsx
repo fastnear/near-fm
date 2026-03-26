@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining, restoreWallet } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
@@ -47,11 +47,12 @@ function timeAgo(iso: string): string {
 
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "playlists" | "feed" | "notifications" | "reports";
+type TabKey = "balance" | "songs" | "playlists" | "wallet" | "feed" | "notifications" | "reports";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
+  { key: "wallet", label: "Wallet" },
   { key: "feed", label: "Blocked Users" },
   { key: "notifications", label: "Notifications" },
 ];
@@ -228,6 +229,7 @@ export default function CabinetPage() {
       {/* Tab content */}
       {activeTab === "balance" && <BalanceTab />}
       {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
+      {activeTab === "wallet" && <WalletKeyTab />}
       {activeTab === "playlists" && isPremium && <PlaylistsTab />}
       {activeTab === "feed" && <BlockedUsers />}
       {activeTab === "notifications" && <NotificationsTab />}
@@ -1462,6 +1464,110 @@ function ReportsTab() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Wallet Key Tab ──
+
+function WalletKeyTab() {
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [nearAccount, setNearAccount] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    // Try localStorage first, then server backup
+    const localKey = localStorage.getItem("nearfm_outlayer_api_key");
+    if (localKey) {
+      setApiKey(localKey);
+      setLoading(false);
+      return;
+    }
+    restoreWallet()
+      .then((data) => {
+        if (data.api_key) {
+          setApiKey(data.api_key);
+          setNearAccount(data.near_account_id);
+          localStorage.setItem("nearfm_outlayer_api_key", data.api_key);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div className="glass-card rounded-2xl p-6"><div className="h-4 skeleton rounded w-1/3" /></div>;
+  }
+
+  if (!apiKey) {
+    return (
+      <div className="glass-card rounded-2xl p-6">
+        <p className="text-slate-400 text-sm">
+          No wallet found. Visit <a href="/balance" className="text-purple-400 hover:text-purple-300">/balance</a> to create one.
+        </p>
+      </div>
+    );
+  }
+
+  const maskedKey = apiKey.slice(0, 6) + "•".repeat(20) + apiKey.slice(-4);
+  const dashboardUrl = `https://outlayer.fastnear.com/wallet?key=${apiKey}`;
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div>
+          <div className="text-sm font-medium text-slate-300 mb-1">Your Wallet Key</div>
+          <p className="text-xs text-slate-500 mb-3">
+            This key gives full access to your balance. Keep it safe. You can use it to withdraw funds even if AI Radio is unavailable.
+          </p>
+        </div>
+
+        <div className="bg-black/20 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs text-slate-300 font-mono break-all">
+              {revealed ? apiKey : maskedKey}
+            </code>
+            <button
+              onClick={() => setRevealed(!revealed)}
+              className="px-3 py-1.5 text-xs text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition shrink-0"
+            >
+              {revealed ? "Hide" : "Show"}
+            </button>
+          </div>
+          {revealed && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(apiKey);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="text-xs text-purple-400 hover:text-purple-300 transition"
+            >
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </button>
+          )}
+        </div>
+
+        {nearAccount && (
+          <div className="text-xs text-slate-500">
+            NEAR account: <span className="text-slate-400 font-mono">{nearAccount}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="glass-card rounded-2xl p-6 space-y-3">
+        <div className="text-sm font-medium text-slate-300">How to use independently</div>
+        <ol className="text-xs text-slate-400 space-y-2 list-decimal list-inside">
+          <li>Go to <a href={dashboardUrl} target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:text-purple-300 underline">OutLayer Dashboard</a></li>
+          <li>View your balance, transaction history</li>
+          <li>Withdraw funds to any wallet (NEAR, Solana, Ethereum, 20+ chains)</li>
+        </ol>
+        <p className="text-[11px] text-slate-600">
+          Your balance is stored on-chain (intents.near). AI Radio does not hold your funds.
+        </p>
+      </div>
     </div>
   );
 }

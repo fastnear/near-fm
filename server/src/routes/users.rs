@@ -17,6 +17,8 @@ use crate::{
 pub struct UserProfileResponse {
     pub account_id: String, // slug (backward compat field name)
     pub near_account_id: Option<String>,
+    pub solana_address: Option<String>,
+    pub auth_provider: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub reputation_score: String,
@@ -146,6 +148,8 @@ pub async fn get_profile(
     Ok(Json(UserProfileResponse {
         account_id: user.slug.clone(),
         near_account_id: user.account_id,
+        solana_address: user.solana_address,
+        auth_provider: user.auth_provider.clone(),
         display_name: user.display_name,
         avatar_url: user.avatar_url,
         reputation_score: user.reputation_score.to_string(),

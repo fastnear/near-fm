@@ -307,6 +307,8 @@ export default function ProfilePage() {
   const isProfileAgent = profileData.is_agent as boolean;
   const premiumGift = profileData.premium_gifted_by as { gifted_by_slug: string; gifted_by_display_name: string | null; days_added: number; created_at: string } | null;
   const nearAccountId = profileData.near_account_id as string | null;
+  const solanaAddress = profileData.solana_address as string | null;
+  const authProvider = profileData.auth_provider as string;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
   const twitterHandle = profileData.twitter_handle as string | null;
@@ -413,6 +415,33 @@ export default function ProfilePage() {
                 <p className="text-slate-300 text-sm mt-1.5 line-clamp-2 hidden sm:block">{bio}</p>
               )}
               <div className="flex items-center gap-3 mt-1 flex-wrap">
+                {/* Chain badge */}
+                {authProvider === "near" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6" />
+                    </svg>
+                    NEAR
+                  </span>
+                )}
+                {authProvider === "solana" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                    <svg className="w-3 h-3" viewBox="0 0 397.7 311.7" fill="none">
+                      <linearGradient id="sol-p" x1="360.9" y1="351.5" x2="141.2" y2="-69.2" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 -25)">
+                        <stop offset="0" stopColor="#00FFA3" /><stop offset="1" stopColor="#DC1FFF" />
+                      </linearGradient>
+                      <path fill="url(#sol-p)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z" />
+                      <path fill="url(#sol-p)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z" />
+                      <path fill="url(#sol-p)" d="M333.1 120c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1L333.1 120z" />
+                    </svg>
+                    Solana
+                  </span>
+                )}
+                {solanaAddress && authProvider !== "solana" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                    + Solana
+                  </span>
+                )}
                 {nearAccountId && nearAccountId !== accountId && (
                   <span className="text-xs text-slate-500 font-mono" title={nearAccountId}>{truncateId(nearAccountId)}</span>
                 )}

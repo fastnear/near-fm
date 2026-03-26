@@ -274,8 +274,103 @@ async fn deduct_credits(
         }
         None => Err((
             StatusCode::PAYMENT_REQUIRED,
-            format!("Insufficient credits ({} required). Top up at /credits", cost),
+            format!("Insufficient credits ({} required). Top up at /balance", cost),
         )),
+    }
+}
+
+/// Try legacy credits first. If insufficient, deduct from OutLayer balance via payment check.
+/// Returns (Option<DeductionResult>, bool) — bool = true if paid from OutLayer balance.
+async fn deduct_credits_or_balance(
+    state: &crate::AppState,
+    user_id: i32,
+    cost_credits: i32,
+) -> Result<(Option<DeductionResult>, bool), (StatusCode, String)> {
+    // 1. Try legacy credits (daily + purchased)
+    match deduct_credits(&state.db, user_id, cost_credits).await {
+        Ok(result) => return Ok((result, false)),
+        Err((StatusCode::PAYMENT_REQUIRED, _)) => {
+            // Fall through to OutLayer balance
+        }
+        Err(e) => return Err(e),
+    }
+
+    // 2. Try OutLayer balance: 1 credit = $0.01, so cost_credits credits = cost_credits cents
+    let cost_cents = cost_credits as u64;
+    let raw_amount = cost_cents * 10_000; // cents → raw USDC (6 decimals)
+
+    let api_key: Option<String> = sqlx::query_scalar(
+        "SELECT outlayer_api_key FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let Some(api_key) = api_key else {
+        return Err((StatusCode::PAYMENT_REQUIRED,
+            format!("Insufficient credits ({} required). Top up at /balance", cost_credits)));
+    };
+
+    let token = super::wallet::default_token();
+
+    // Create check from user (funds frozen, not yet claimed)
+    let check_resp = super::wallet::outlayer_request(
+        &state.http_client,
+        &api_key,
+        "POST",
+        "/wallet/v1/payment-check/create",
+        Some(serde_json::json!({
+            "token": token,
+            "amount": raw_amount.to_string(),
+            "memo": "AI song generation",
+        })),
+    ).await.map_err(|e| {
+        if e.contains("insufficient") || e.contains("balance") {
+            (StatusCode::PAYMENT_REQUIRED,
+                format!("Insufficient balance (${:.2} required). Top up at /balance", cost_cents as f64 / 100.0))
+        } else {
+            (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e))
+        }
+    })?;
+
+    let check_key = check_resp["check_key"].as_str()
+        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
+        .to_string();
+
+    // Claim to treasury
+    if !state.config.treasury_agent_key.is_empty() {
+        let _ = super::wallet::outlayer_request(
+            &state.http_client,
+            &state.config.treasury_agent_key,
+            "POST",
+            "/wallet/v1/payment-check/claim",
+            Some(serde_json::json!({ "check_key": check_key })),
+        ).await;
+    }
+
+    tracing::info!(user_id, cost_cents, "Deducted from OutLayer balance for AI generation");
+
+    Ok((None, true))
+}
+
+/// Refund OutLayer balance deduction by adding credits to user's account.
+/// Money already went to treasury — we compensate with platform credits instead.
+async fn refund_balance_deduction(
+    db: &sqlx::PgPool,
+    user_id: i32,
+    cost_credits: i32,
+    reason: &str,
+) {
+    match sqlx::query(
+        "UPDATE users SET credit_balance = credit_balance + $1 WHERE id = $2"
+    )
+    .bind(cost_credits)
+    .bind(user_id)
+    .execute(db)
+    .await {
+        Ok(_) => tracing::info!(user_id, cost_credits, %reason, "Refunded as credits after balance deduction"),
+        Err(e) => tracing::error!(user_id, %reason, "Credit refund failed: {}", e),
     }
 }
 
@@ -434,8 +529,8 @@ pub async fn generate(
         }
     }
 
-    // Deduct credits (admins free, premium uses daily allowance first)
-    let deduction = deduct_credits(&state.db, claims.user_id, CREDITS_PER_SONG).await?;
+    // Try legacy credits first, then OutLayer balance ($0.12 = 12 cents)
+    let (deduction, paid_from_balance) = deduct_credits_or_balance(&state, claims.user_id, CREDITS_PER_SONG).await?;
 
     let custom_mode = req.custom_mode.unwrap_or(false);
     let model = req.model.clone().unwrap_or_else(|| "V4_5".to_string());
@@ -483,6 +578,14 @@ pub async fn generate(
                     refund_credits(&db, uid, &d, "refund_song_generation", "suno_request_error").await;
                 });
             }
+            if paid_from_balance {
+                let db = state.db.clone();
+                let uid = claims.user_id;
+                let cost = CREDITS_PER_SONG;
+                tokio::spawn(async move {
+                    refund_balance_deduction(&db, uid, cost, "suno_request_error").await;
+                });
+            }
             (StatusCode::BAD_GATEWAY, format!("Suno API error: {}", e))
         })?;
 
@@ -490,6 +593,9 @@ pub async fn generate(
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         tracing::error!("Suno API returned {}: {}", status, body);
+        if paid_from_balance {
+            refund_balance_deduction(&state.db, claims.user_id, CREDITS_PER_SONG, "suno_error").await;
+        }
         if let Some(ref d) = deduction {
             refund_credits(&state.db, claims.user_id, d, "refund_song_generation", &format!("suno_http_{}", status.as_u16())).await;
         }
@@ -508,6 +614,14 @@ pub async fn generate(
                     refund_credits(&db, uid, &d, "refund_song_generation", "suno_json_parse_error").await;
                 });
             }
+            if paid_from_balance {
+                let db = state.db.clone();
+                let uid = claims.user_id;
+                let cost = CREDITS_PER_SONG;
+                tokio::spawn(async move {
+                    refund_balance_deduction(&db, uid, cost, "suno_json_parse_error").await;
+                });
+            }
             (StatusCode::BAD_GATEWAY, format!("Invalid Suno response: {}", e))
         })?;
 
@@ -520,6 +634,9 @@ pub async fn generate(
     if task_id.is_empty() {
         let suno_msg = body["msg"].as_str().unwrap_or("").to_string();
         tracing::error!("No taskId in Suno response: {:?}", body);
+        if paid_from_balance {
+            refund_balance_deduction(&state.db, claims.user_id, CREDITS_PER_SONG, "suno_error").await;
+        }
         if let Some(ref d) = deduction {
             refund_credits(&state.db, claims.user_id, d, "refund_song_generation", "suno_no_task_id").await;
         }
@@ -814,7 +931,7 @@ pub async fn generate_lyrics(
         return Err((StatusCode::BAD_REQUEST, "Prompt too long".to_string()));
     }
 
-    let deduction = deduct_credits(&state.db, claims.user_id, CREDITS_PER_LYRICS).await?;
+    let (deduction, paid_from_balance) = deduct_credits_or_balance(&state, claims.user_id, CREDITS_PER_LYRICS).await?;
 
     let resp = state
         .suno_client
@@ -835,11 +952,22 @@ pub async fn generate_lyrics(
                     refund_credits(&db, uid, &d, "refund_lyrics_generation", "suno_request_error").await;
                 });
             }
+            if paid_from_balance {
+                let db = state.db.clone();
+                let uid = claims.user_id;
+                let cost = CREDITS_PER_LYRICS;
+                tokio::spawn(async move {
+                    refund_balance_deduction(&db, uid, cost, "suno_lyrics_request_error").await;
+                });
+            }
             (StatusCode::BAD_GATEWAY, format!("Suno API error: {}", e))
         })?;
 
     if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
+        if paid_from_balance {
+            refund_balance_deduction(&state.db, claims.user_id, CREDITS_PER_LYRICS, "suno_lyrics_error").await;
+        }
         if let Some(ref d) = deduction {
             refund_credits(&state.db, claims.user_id, d, "refund_lyrics_generation", "suno_lyrics_error").await;
         }
@@ -853,6 +981,14 @@ pub async fn generate_lyrics(
             let uid = claims.user_id;
             tokio::spawn(async move {
                 refund_credits(&db, uid, &d, "refund_lyrics_generation", "suno_json_parse_error").await;
+            });
+        }
+        if paid_from_balance {
+            let db = state.db.clone();
+            let uid = claims.user_id;
+            let cost = CREDITS_PER_LYRICS;
+            tokio::spawn(async move {
+                refund_balance_deduction(&db, uid, cost, "suno_lyrics_json_parse_error").await;
             });
         }
         (StatusCode::BAD_GATEWAY, format!("Invalid Suno response: {}", e))
