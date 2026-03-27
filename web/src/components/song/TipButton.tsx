@@ -13,6 +13,14 @@ function formatCents(cents: number): string {
   return cents % 100 === 0 ? `$${usd.toFixed(0)}` : `$${usd.toFixed(2)}`;
 }
 
+/** Convert USD string to raw USDC units (6 decimals) without floating point. */
+function usdToRaw(usd: string): string {
+  const parts = usd.split(".");
+  const whole = parts[0] || "0";
+  const frac = (parts[1] || "").padEnd(6, "0").slice(0, 6);
+  return (BigInt(whole) * BigInt(1_000_000) + BigInt(frac)).toString();
+}
+
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
   const { isAuthenticated, promptSignIn } = useAuth();
   const { showToast } = useToast();
@@ -30,17 +38,15 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     }
   }, [showModal, isAuthenticated]);
 
-  const handleTip = async (amountCents: number) => {
-    if (amountCents < 1) return;
-
+  const handleTip = async (label: string, opts: { amount_cents?: number; amount_raw?: string }) => {
     setLoading(true);
-    const toastId = showToast({ message: `Sending ${formatCents(amountCents)} tip...`, type: "loading", id: "tip" });
+    const toastId = showToast({ message: `Sending ${label} tip...`, type: "loading", id: "tip" });
     try {
-      await sendTipFromBalance(amountCents, { songUuid: song.uuid });
+      await sendTipFromBalance({ songUuid: song.uuid, ...opts });
 
       showToast({
         id: toastId,
-        message: `Tip of ${formatCents(amountCents)} sent!`,
+        message: `Tip of ${label} sent!`,
         type: "success",
         duration: 5000,
       });
@@ -95,7 +101,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
                 {TIP_AMOUNTS.map((cents) => (
                   <button
                     key={cents}
-                    onClick={() => handleTip(cents)}
+                    onClick={() => handleTip(formatCents(cents), { amount_cents: cents })}
                     disabled={loading}
                     className="flex-1 min-w-[44px] px-1.5 py-1.5 text-xs font-medium rounded-lg border transition-all disabled:opacity-50 bg-green-500/10 text-green-300 border-green-500/20 hover:bg-green-500/20"
                   >
@@ -116,7 +122,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
                 <button
                   onClick={() => {
                     const val = parseFloat(customAmount);
-                    if (val >= 0.01) handleTip(Math.round(val * 100));
+                    if (val >= 0.01) handleTip(`$${customAmount}`, { amount_raw: usdToRaw(customAmount) });
                   }}
                   disabled={loading || !customAmount || parseFloat(customAmount) < 0.01}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-all disabled:opacity-30"

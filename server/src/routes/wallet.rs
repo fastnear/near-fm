@@ -206,8 +206,8 @@ pub async fn balance(
 
     let raw_balance = data["balance"].as_str().unwrap_or("0").to_string();
     let raw_num: u64 = raw_balance.parse().unwrap_or(0);
-    let usd = raw_num as f64 / 1_000_000.0;
-    let formatted = format!("{:.2}", usd);
+    let cents = raw_num / 10_000; // floor to cents
+    let formatted = format!("{}.{:02}", cents / 100, cents % 100);
 
     Ok(Json(BalanceResponse {
         balance_usdc: raw_balance,
@@ -221,7 +221,8 @@ pub async fn balance(
 pub struct SendTipRequest {
     pub song_uuid: Option<String>,       // tip a song
     pub profile_slug: Option<String>,    // tip a profile (one of the two required)
-    pub amount_cents: u32,               // e.g. 50 = $0.50
+    pub amount_cents: Option<u32>,       // e.g. 50 = $0.50
+    pub amount_raw: Option<String>,      // exact raw USDC units (6 decimals) — takes precedence
 }
 
 #[derive(Serialize)]
@@ -241,11 +242,21 @@ pub async fn send_tip(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
+    // Determine raw amount: amount_raw takes precedence over amount_cents
+    let raw_amount: u64 = if let Some(ref raw) = req.amount_raw {
+        raw.parse().map_err(|_| (StatusCode::BAD_REQUEST, "Invalid amount_raw".to_string()))?
+    } else if let Some(cents) = req.amount_cents {
+        (cents as u64) * 10_000
+    } else {
+        return Err((StatusCode::BAD_REQUEST, "amount_cents or amount_raw required".to_string()));
+    };
+    let amount_cents_for_db = (raw_amount / 10_000) as u32;
+
     // Validation
-    if req.amount_cents < 1 {
+    if raw_amount < 10_000 {
         return Err((StatusCode::BAD_REQUEST, "Minimum tip is $0.01".to_string()));
     }
-    if req.amount_cents > 100_000 {
+    if raw_amount > 1_000_000_000 {
         return Err((StatusCode::BAD_REQUEST, "Maximum tip is $1000".to_string()));
     }
 
@@ -326,11 +337,9 @@ pub async fn send_tip(
         (StatusCode::BAD_GATEWAY, "Failed to create wallet for recipient. Try again later.".to_string())
     })?;
 
-    // Calculate amounts (1 cent = 10_000 raw USDC units, USDC has 6 decimals)
-    let commission_cents = (req.amount_cents as u64 * TIP_COMMISSION_BPS / 10_000) as u32;
-    let recipient_cents = req.amount_cents - commission_cents;
-    let raw_amount = (req.amount_cents as u64) * 10_000;
-    let raw_recipient = (recipient_cents as u64) * 10_000;
+    // Calculate amounts using raw units (6 decimals)
+    let commission_raw = raw_amount * TIP_COMMISSION_BPS / 10_000;
+    let raw_recipient = raw_amount - commission_raw;
 
     // Check sender's balance before creating check
     let balance_resp = outlayer_request(
@@ -345,6 +354,7 @@ pub async fn send_tip(
         .unwrap_or("0")
         .parse()
         .unwrap_or(0);
+    let raw_amount = adjust_for_dust(sender_balance, raw_amount);
 
     if sender_balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance. Top up first.".to_string()));
@@ -392,7 +402,7 @@ pub async fn send_tip(
     }
 
     // Step 3: Claim commission to platform treasury
-    if commission_cents > 0 && !state.config.treasury_agent_key.is_empty() {
+    if commission_raw > 0 && !state.config.treasury_agent_key.is_empty() {
         let _ = outlayer_request(
             &state.http_client,
             &state.config.treasury_agent_key,
@@ -411,15 +421,16 @@ pub async fn send_tip(
     .bind(song_id)
     .bind(claims.user_id)
     .bind(recipient_id)
-    .bind(req.amount_cents as i32)
+    .bind(amount_cents_for_db as i32)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Update USD tip totals
+    let recipient_cents_for_db = (raw_recipient / 10_000) as i32;
     if let Some(sid) = song_id {
         sqlx::query("UPDATE songs SET total_tips_usd_cents = total_tips_usd_cents + $1 WHERE id = $2")
-            .bind(recipient_cents as i32)
+            .bind(recipient_cents_for_db)
             .bind(sid)
             .execute(&state.db)
             .await
@@ -427,7 +438,7 @@ pub async fn send_tip(
     }
 
     sqlx::query("UPDATE users SET total_tips_received_usd_cents = total_tips_received_usd_cents + $1 WHERE id = $2")
-        .bind(recipient_cents as i32)
+        .bind(recipient_cents_for_db)
         .bind(recipient_id)
         .execute(&state.db)
         .await
@@ -443,7 +454,7 @@ pub async fn send_tip(
             "song_title": song_title,
             "profile_slug": req.profile_slug,
             "from_account": claims.sub,
-            "amount_usd_cents": req.amount_cents,
+            "amount_usd_cents": amount_cents_for_db,
         }),
     )
     .await
@@ -453,15 +464,16 @@ pub async fn send_tip(
         tip_id,
         sender = claims.user_id,
         recipient = recipient_id,
-        amount_cents = req.amount_cents,
+        amount_cents = amount_cents_for_db,
+        raw_amount = raw_amount,
         context = %tip_context,
         "USD tip sent via payment check"
     );
 
     Ok(Json(SendTipResponse {
         tip_id,
-        amount_cents: req.amount_cents,
-        commission_cents,
+        amount_cents: amount_cents_for_db,
+        commission_cents: (commission_raw / 10_000) as u32,
     }))
 }
 
@@ -523,6 +535,7 @@ pub async fn create_bounty(
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
 
     let sender_balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let raw_amount = adjust_for_dust(sender_balance, raw_amount);
     if sender_balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance. Top up first.".to_string()));
     }
@@ -675,6 +688,7 @@ pub async fn topup_bounty(
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
 
     let sender_balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let raw_amount = adjust_for_dust(sender_balance, raw_amount);
     if sender_balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance".to_string()));
     }
@@ -1011,6 +1025,7 @@ pub async fn buy_credits(
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
 
     let balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let raw_amount = adjust_for_dust(balance, raw_amount);
     if balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${:.2}", req.amount_cents as f64 / 100.0)));
     }
@@ -1111,6 +1126,7 @@ pub async fn buy_premium(
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
 
     let balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let raw_amount = adjust_for_dust(balance, raw_amount);
     if balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${}.00", price_cents / 100)));
     }
@@ -1264,6 +1280,7 @@ pub async fn withdraw(
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Balance check failed: {}", e)))?;
 
     let balance: u64 = balance_resp["balance"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let raw_amount = adjust_for_dust(balance, raw_amount);
     if balance < raw_amount {
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance".to_string()));
     }
@@ -1352,4 +1369,10 @@ pub async fn outlayer_request(
 
     serde_json::from_str(&text)
         .map_err(|e| format!("Parse error: {} (body: {})", e, &text[..100.min(text.len())]))
+}
+
+/// Adjust amount for dust: if balance is within 1 cent of required amount, use balance instead.
+/// Prevents failures due to rounding (e.g. balance 9999998 vs required 10000000).
+fn adjust_for_dust(balance: u64, amount: u64) -> u64 {
+    if balance < amount && balance + 10_000 > amount { balance } else { amount }
 }

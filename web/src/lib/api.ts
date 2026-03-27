@@ -733,10 +733,10 @@ export async function getWalletBalance(): Promise<{ balance_usdc: string; balanc
   return fetchApi("/api/wallet/balance");
 }
 
-export async function sendTipFromBalance(amountCents: number, opts: { songUuid?: string; profileSlug?: string }): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
+export async function sendTipFromBalance(opts: { songUuid?: string; profileSlug?: string; amount_cents?: number; amount_raw?: string }): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
   return fetchApi("/api/tips/send", {
     method: "POST",
-    body: JSON.stringify({ song_uuid: opts.songUuid, profile_slug: opts.profileSlug, amount_cents: amountCents }),
+    body: JSON.stringify({ song_uuid: opts.songUuid, profile_slug: opts.profileSlug, amount_cents: opts.amount_cents, amount_raw: opts.amount_raw }),
   });
 }
 
