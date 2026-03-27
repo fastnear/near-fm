@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import type { Language, Category } from "@/types";
+import type { Language, Category, SongRequest } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import {
@@ -17,6 +17,7 @@ import {
   type SunoSongVariant,
 } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
+import { BountyPicker } from "@/components/song/BountyPicker";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
@@ -87,6 +88,9 @@ export default function CreatePage() {
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
   const savedTimeRef = useRef<{ idx: number; time: number } | null>(null);
   const [audioProgress, setAudioProgress] = useState<Record<number, { current: number; duration: number }>>({});
+
+  // Bounty picker
+  const [pickedRequest, setPickedRequest] = useState<SongRequest | null>(null);
 
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lyricsPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -467,6 +471,7 @@ export default function CreatePage() {
         category_id: categoryId,
         genre_ids: genreIds.length > 0 ? genreIds : undefined,
         suno_task_id: taskId || undefined,
+        fulfills_request_id: pickedRequest?.id,
       });
 
       window.location.href = `https://near.fm/song/${song.uuid}`;
@@ -698,9 +703,7 @@ export default function CreatePage() {
             Generate Music
           </button>
 
-          <p className="text-xs text-slate-600 text-center">
-            Want to fulfill a bounty request? You can select one later when uploading your song.
-          </p>
+          <BountyPicker value={pickedRequest} onChange={setPickedRequest} />
         </div>
       </div>
     );
