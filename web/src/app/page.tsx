@@ -59,6 +59,7 @@ function FeedPageInner() {
     };
     if (sortRoutes[pathname]) {
       setSort(sortRoutes[pathname]);
+      setCategoryId(undefined);
     } else if (pathname === "/") {
       // Restore last selected feed tab from localStorage
       try {
@@ -178,7 +179,7 @@ function FeedPageInner() {
             )}
             <span className="hidden sm:inline">AI Radio</span>
           </button>
-          <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); setGenreSlug(undefined); setLangCode(undefined); }} isAuthenticated={!!currentUser} />
+          <FeedTabs activeSort={sort} onSortChange={(s) => { setSort(s); setPage(1); setCategoryId(undefined); setGenreSlug(undefined); setLangCode(undefined); }} isAuthenticated={!!currentUser} />
         </div>
         {sort !== "following" && sort !== "community" && (
           <FeedFilters

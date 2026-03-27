@@ -22,7 +22,8 @@ function usdToRaw(usd: string): string {
 }
 
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
-  const { isAuthenticated, promptSignIn } = useAuth();
+  const { user, isAuthenticated, promptSignIn } = useAuth();
+  const isOwnSong = user?.id === song.uploader_id;
   const { showToast } = useToast();
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,6 +62,27 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
     }
     setLoading(false);
   };
+
+  if (isOwnSong) {
+    return (
+      <div className="relative group">
+        <button disabled
+          className={compact
+            ? "p-1.5 rounded-lg text-slate-600 cursor-not-allowed"
+            : "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-xl font-medium bg-white/[0.02] text-slate-600 border border-white/[0.04] cursor-not-allowed"
+          }
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {!compact && "Tip"}
+        </button>
+        <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 px-2 py-1 text-[10px] text-slate-400 bg-slate-800 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          Can&apos;t tip your own song
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">
