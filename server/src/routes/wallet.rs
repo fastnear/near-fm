@@ -1238,9 +1238,10 @@ pub async fn buy_premium(
 
 #[derive(Deserialize)]
 pub struct WithdrawRequest {
-    pub amount_cents: u32,
-    pub chain: String,       // "near", "solana", "ethereum"
-    pub receiver: String,    // wallet address on destination chain
+    pub amount_cents: Option<u32>,
+    pub amount_raw: Option<String>,  // exact raw USDC units (6 decimals) — takes precedence
+    pub chain: String,               // "near", "solana", "ethereum"
+    pub receiver: String,            // wallet address on destination chain
 }
 
 /// POST /api/wallet/withdraw — withdraw USDC to user's wallet on any chain.
@@ -1253,11 +1254,20 @@ pub async fn withdraw(
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
-    if req.amount_cents < 1 {
-        return Err((StatusCode::BAD_REQUEST, "Minimum withdrawal is $0.01".to_string()));
-    }
     if req.receiver.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Receiver address required".to_string()));
+    }
+
+    // Determine raw amount: amount_raw takes precedence over amount_cents
+    let raw_amount: u64 = if let Some(ref raw) = req.amount_raw {
+        raw.parse().map_err(|_| (StatusCode::BAD_REQUEST, "Invalid amount_raw".to_string()))?
+    } else if let Some(cents) = req.amount_cents {
+        (cents as u64) * 10_000
+    } else {
+        return Err((StatusCode::BAD_REQUEST, "amount_cents or amount_raw required".to_string()));
+    };
+    if raw_amount < 10_000 {
+        return Err((StatusCode::BAD_REQUEST, "Minimum withdrawal is $0.01".to_string()));
     }
 
     let api_key: Option<String> = sqlx::query_scalar(
@@ -1271,8 +1281,6 @@ pub async fn withdraw(
     let api_key = api_key.ok_or_else(|| {
         (StatusCode::BAD_REQUEST, "No wallet found".to_string())
     })?;
-
-    let raw_amount = (req.amount_cents as u64) * 10_000;
 
     // Check balance
     let balance_resp = outlayer_request(
@@ -1300,7 +1308,7 @@ pub async fn withdraw(
 
     tracing::info!(
         user_id = claims.user_id,
-        amount_cents = req.amount_cents,
+        raw_amount = raw_amount,
         chain = %req.chain,
         receiver = %req.receiver,
         "USD withdrawal via OutLayer intents"
@@ -1308,7 +1316,7 @@ pub async fn withdraw(
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "amount_cents": req.amount_cents,
+        "amount_raw": raw_amount.to_string(),
         "chain": req.chain,
         "receiver": req.receiver,
         "details": withdraw_resp,

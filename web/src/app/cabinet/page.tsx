@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining, restoreWallet } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
+import { getAddress } from "@/lib/outlayer";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
 import type { Song, Notification, Playlist } from "@/types";
@@ -248,11 +249,12 @@ export default function CabinetPage() {
 function BalanceDepositSection() {
   const { isAuthenticated } = useAuth();
   const [balance, setBalance] = useState("0.00");
+  const [balanceRaw, setBalanceRaw] = useState("0");
   const [DepositForm, setDepositForm] = useState<React.ComponentType<{ onDeposited?: () => void }> | null>(null);
 
   const fetchBalance = useCallback(() => {
     import("@/lib/api").then(({ getWalletBalance }) =>
-      getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {})
+      getWalletBalance().then((b) => { setBalance(b.balance_usdc_formatted); setBalanceRaw(b.balance_usdc); }).catch(() => {})
     );
   }, []);
 
@@ -285,7 +287,7 @@ function BalanceDepositSection() {
       {parseFloat(balance) > 0 && (
         <div className="glass-card rounded-2xl p-6 space-y-3">
           <div className="text-sm font-medium text-slate-300">Withdraw</div>
-          <WithdrawInline onSuccess={fetchBalance} />
+          <WithdrawInline balance={balance} balanceRaw={balanceRaw} onSuccess={fetchBalance} />
         </div>
       )}
       <CreditsSection />
@@ -293,44 +295,91 @@ function BalanceDepositSection() {
   );
 }
 
-function WithdrawInline({ onSuccess }: { onSuccess: () => void }) {
+function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; balanceRaw: string; onSuccess: () => void }) {
   const { user } = useAuth();
   const { accountId } = useNearWallet();
   const [amount, setAmount] = useState("");
+  const [isMax, setIsMax] = useState(false);
+  const [receiver, setReceiver] = useState("");
+  const [chain, setChain] = useState<"near" | "solana">("near");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
   const solAddr = user?.solana_address || "";
   const nearAddr = accountId || user?.near_account_id || "";
-  const chain = nearAddr ? "near" : solAddr ? "solana" : "";
-  const receiver = nearAddr || solAddr;
 
-  if (!chain || !receiver) return <p className="text-xs text-slate-500">Connect a wallet to withdraw.</p>;
+  // Set defaults on mount
+  useEffect(() => {
+    if (nearAddr) { setChain("near"); setReceiver(nearAddr); }
+    else if (solAddr) { setChain("solana"); setReceiver(solAddr); }
+  }, [nearAddr, solAddr]);
+
+  const hasMultipleChains = !!nearAddr && !!solAddr;
+
+  // Max: show full precision from raw (6 decimals). E.g. 139998 → "0.139998"
+  const handleMax = () => {
+    const raw = parseInt(balanceRaw || "0");
+    const whole = Math.floor(raw / 1_000_000);
+    const frac = raw % 1_000_000;
+    const fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
+    setAmount(fracStr ? `${whole}.${fracStr}` : `${whole}`);
+    setIsMax(true);
+  };
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-slate-500">
-        Send USDC to your {chain === "near" ? "NEAR" : "Solana"} wallet: <span className="text-slate-400 font-mono">{receiver.length > 20 ? receiver.slice(0, 12) + "..." : receiver}</span>
-      </p>
+    <div className="space-y-3">
+      {/* Chain selector (only if user has both) */}
+      {hasMultipleChains && (
+        <div className="flex gap-2">
+          {(["near", "solana"] as const).map((c) => (
+            <button key={c} onClick={() => { setChain(c); setReceiver(c === "near" ? nearAddr : solAddr); }}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                chain === c
+                  ? "bg-white/[0.1] text-slate-200 border-white/[0.15]"
+                  : "bg-white/[0.04] text-slate-500 border-white/[0.06] hover:bg-white/[0.08]"
+              }`}
+            >{c === "near" ? "NEAR" : "Solana"}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Receiver address */}
+      <div>
+        <label className="text-xs text-slate-500 mb-1 block">{chain === "near" ? "NEAR" : "Solana"} address</label>
+        <input type="text" value={receiver} onChange={(e) => setReceiver(e.target.value)}
+          placeholder={chain === "near" ? "account.near" : "Solana address"}
+          disabled={loading}
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 px-3 text-sm text-slate-200 font-mono placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
+      </div>
+
+      {/* Amount + Max + Withdraw */}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
           <input type="number" min="0.01" step="0.01" placeholder="1.00" value={amount}
-            onChange={(e) => setAmount(e.target.value)} disabled={loading}
+            onChange={(e) => { setAmount(e.target.value); setIsMax(false); }} disabled={loading}
             className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 pl-7 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
         </div>
+        <button onClick={handleMax} disabled={loading}
+          className="px-3 py-2 text-xs font-medium text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition-all">
+          Max
+        </button>
         <button onClick={async () => {
           const usd = parseFloat(amount);
           if (isNaN(usd) || usd < 0.01) { setMsg({ type: "error", text: "Min $0.01" }); return; }
+          if (!receiver.trim()) { setMsg({ type: "error", text: "Enter address" }); return; }
           setLoading(true); setMsg(null);
           try {
             const { withdrawFromBalance } = await import("@/lib/api");
-            await withdrawFromBalance(Math.round(usd * 100), chain, receiver);
-            setMsg({ type: "success", text: `$${usd.toFixed(2)} sent` });
-            setAmount(""); onSuccess();
+            const opts = isMax
+              ? { amount_raw: balanceRaw }
+              : { amount_cents: Math.round(usd * 100) };
+            await withdrawFromBalance(chain, receiver.trim(), opts);
+            setMsg({ type: "success", text: `$${usd.toFixed(2)} withdrawn to ${chain === "near" ? "NEAR" : "Solana"}` });
+            setAmount(""); setIsMax(false); onSuccess();
           } catch (e: any) { setMsg({ type: "error", text: e?.message || "Failed" }); }
           setLoading(false);
-        }} disabled={loading || !amount || parseFloat(amount) < 0.01}
+        }} disabled={loading || !amount || parseFloat(amount) < 0.01 || !receiver.trim()}
           className="px-4 py-2 text-sm font-medium bg-white/[0.06] text-slate-300 border border-white/[0.08] rounded-lg hover:bg-white/[0.1] disabled:opacity-30 transition-all">
           {loading ? "..." : "Withdraw"}
         </button>
@@ -1489,6 +1538,7 @@ function WalletKeyTab() {
     const localKey = localStorage.getItem("nearfm_outlayer_api_key");
     if (localKey) {
       setApiKey(localKey);
+      getAddress(localKey).then(({ address }) => setNearAccount(address)).catch(() => {});
       setLoading(false);
       return;
     }
@@ -1498,6 +1548,9 @@ function WalletKeyTab() {
           setApiKey(data.api_key);
           setNearAccount(data.near_account_id);
           localStorage.setItem("nearfm_outlayer_api_key", data.api_key);
+          if (!data.near_account_id) {
+            getAddress(data.api_key).then(({ address }) => setNearAccount(address)).catch(() => {});
+          }
         }
       })
       .catch(() => {})
@@ -1562,8 +1615,10 @@ function WalletKeyTab() {
         </div>
 
         {nearAccount && (
-          <div className="text-xs text-slate-500">
-            NEAR account: <span className="text-slate-400 font-mono">{nearAccount}</span>
+          <div className="bg-black/20 rounded-xl p-4 space-y-1">
+            <div className="text-[10px] text-slate-600 uppercase tracking-wider">MPC NEAR Account</div>
+            <code className="text-xs text-slate-300 font-mono break-all">{nearAccount}</code>
+            <p className="text-[11px] text-slate-500 pt-1">This account was created for you in the MPC NEAR Network. Your balance and transactions live here on-chain.</p>
           </div>
         )}
       </div>

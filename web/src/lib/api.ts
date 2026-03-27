@@ -772,10 +772,10 @@ export async function buyPremiumFromBalance(months: number, recipientSlug?: stri
   });
 }
 
-export async function withdrawFromBalance(amountCents: number, chain: string, receiver: string): Promise<{ status: string }> {
+export async function withdrawFromBalance(chain: string, receiver: string, opts: { amount_cents?: number; amount_raw?: string }): Promise<{ status: string }> {
   return fetchApi("/api/wallet/withdraw", {
     method: "POST",
-    body: JSON.stringify({ amount_cents: amountCents, chain, receiver }),
+    body: JSON.stringify({ chain, receiver, ...opts }),
   });
 }
 

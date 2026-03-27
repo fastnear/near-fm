@@ -186,6 +186,7 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
               onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
             >{solanaIntent.deposit_address}</div>
             <div className="text-[10px] text-slate-600 mt-1">{copied ? "Copied!" : "Click to copy"}</div>
+            <div className="text-[10px] text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
           </div>
           <div className="flex gap-2">
             <button onClick={handleSolanaConfirmSent} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all">

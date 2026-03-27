@@ -318,6 +318,7 @@ function BalancePage() {
                       {solanaIntent.deposit_address}
                     </div>
                     <div className="text-[10px] text-slate-600 mt-1">{copied ? "Copied!" : "Click to copy"}</div>
+                    <div className="text-[10px] text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -409,6 +410,8 @@ function BalancePage() {
             <div className="text-slate-300">any amount</div>
             <div className="text-slate-400">Song request bounties</div>
             <div className="text-slate-300">$1+ bounty</div>
+            <div className="text-slate-400">Premium subscription</div>
+            <div className="text-slate-300">$10 / month</div>
           </div>
         </div>
 
@@ -446,7 +449,7 @@ function WithdrawSection({ hasSolana, hasNear, solanaAddress, nearAccountId, onS
     setSuccess("");
 
     try {
-      await withdrawFromBalance(Math.round(usd * 100), chain, receiver);
+      await withdrawFromBalance(chain, receiver, { amount_cents: Math.round(usd * 100) });
       setSuccess(`$${usd.toFixed(2)} sent to ${chain === "near" ? nearAccountId : solanaAddress.slice(0, 8) + "..."}`);
       setAmount("");
       onSuccess();
