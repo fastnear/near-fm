@@ -9,7 +9,8 @@ use sha2::Digest;
 use crate::{auth::jwt::require_auth, db::queries, AppState};
 
 const OUTLAYER_API: &str = "https://api.outlayer.fastnear.com";
-const COMMISSION_BPS: u64 = 500; // 5%
+const TIP_COMMISSION_BPS: u64 = 0;    // 0% — tips go fully to recipient
+const BOUNTY_COMMISSION_BPS: u64 = 500; // 5% — platform fee on bounty awards
 
 /// Accepted tokens for balance operations. Add more here to support additional stablecoins.
 const ACCEPTED_TOKENS: &[(&str, &str)] = &[
@@ -351,7 +352,7 @@ pub async fn send_tip(
     })?;
 
     // Calculate amounts (1 cent = 10_000 raw USDC units, USDC has 6 decimals)
-    let commission_cents = (req.amount_cents as u64 * COMMISSION_BPS / 10_000) as u32;
+    let commission_cents = (req.amount_cents as u64 * TIP_COMMISSION_BPS / 10_000) as u32;
     let recipient_cents = req.amount_cents - commission_cents;
     let raw_amount = (req.amount_cents as u64) * 10_000;
     let raw_recipient = (recipient_cents as u64) * 10_000;
@@ -829,7 +830,7 @@ pub async fn award_bounty(
     })?;
 
     // Calculate: bounty wallet → check → recipient claim (95%) + treasury claim (5%)
-    let commission_cents = (amount_cents as u64 * COMMISSION_BPS / 10_000) as i32;
+    let commission_cents = (amount_cents as u64 * BOUNTY_COMMISSION_BPS / 10_000) as i32;
     let recipient_cents = amount_cents - commission_cents;
     let raw_amount = (amount_cents as u64) * 10_000;
     let raw_recipient = (recipient_cents as u64) * 10_000;
@@ -1284,15 +1285,16 @@ pub async fn withdraw(
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance".to_string()));
     }
 
-    // Gasless withdraw via OutLayer intents
+    // Gasless withdraw via OutLayer intents (use "to" not "receiver")
+    let token_with_prefix = format!("nep141:{}", default_token());
     let withdraw_resp = outlayer_request(
         &state.http_client, &api_key, "POST",
         "/wallet/v1/intents/withdraw",
         Some(serde_json::json!({
-            "token": default_token(),
+            "token": token_with_prefix,
             "amount": raw_amount.to_string(),
             "chain": req.chain,
-            "receiver": req.receiver,
+            "to": req.receiver,
         })),
     ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Withdrawal failed: {}", e)))?;
 

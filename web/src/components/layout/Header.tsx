@@ -150,9 +150,6 @@ export function Header() {
                 <Link href="/balance" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
                   Deposit
                 </Link>
-                <Link href="/credits" className="block px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.06] transition-colors">
-                  Credits
-                </Link>
               </div>
             </div>
           ) : (

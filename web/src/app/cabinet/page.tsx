@@ -248,34 +248,123 @@ export default function CabinetPage() {
 function BalanceDepositSection() {
   const { isAuthenticated } = useAuth();
   const [balance, setBalance] = useState("0.00");
+  const [DepositForm, setDepositForm] = useState<React.ComponentType<{ onDeposited?: () => void }> | null>(null);
+
+  const fetchBalance = useCallback(() => {
+    import("@/lib/api").then(({ getWalletBalance }) =>
+      getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {})
+    );
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
-      import("@/lib/api").then(({ getWalletBalance }) =>
-        getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {})
-      );
+      fetchBalance();
+      import("@/components/balance/DepositForm").then((m) => setDepositForm(() => m.DepositForm));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchBalance]);
 
   return (
-    <div className="glass-card rounded-2xl p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm font-medium text-slate-300">Wallet Balance</div>
-          <div className="text-xs text-slate-500 mt-0.5">USDC on-chain (intents.near)</div>
+    <div className="space-y-4">
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-slate-300">Wallet Balance</div>
+            <div className="text-xs text-slate-500 mt-0.5">USDC on-chain (intents.near)</div>
+          </div>
+          <div className="text-2xl font-bold text-green-400">${balance}</div>
         </div>
-        <div className="text-2xl font-bold text-green-400">${balance}</div>
+        <p className="text-xs text-slate-500">
+          Used for tips, bounties, and premium. Deposit from any chain.
+        </p>
       </div>
+      <div className="glass-card rounded-2xl p-6 space-y-3">
+        <div className="text-sm font-medium text-slate-300">Deposit</div>
+        {DepositForm ? <DepositForm onDeposited={fetchBalance} /> : <div className="h-20 skeleton rounded-xl" />}
+      </div>
+      {/* Withdraw */}
+      {parseFloat(balance) > 0 && (
+        <div className="glass-card rounded-2xl p-6 space-y-3">
+          <div className="text-sm font-medium text-slate-300">Withdraw</div>
+          <WithdrawInline onSuccess={fetchBalance} />
+        </div>
+      )}
+      <CreditsSection />
+    </div>
+  );
+}
+
+function WithdrawInline({ onSuccess }: { onSuccess: () => void }) {
+  const { user } = useAuth();
+  const { accountId } = useNearWallet();
+  const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const solAddr = user?.solana_address || "";
+  const nearAddr = accountId || user?.near_account_id || "";
+  const chain = nearAddr ? "near" : solAddr ? "solana" : "";
+  const receiver = nearAddr || solAddr;
+
+  if (!chain || !receiver) return <p className="text-xs text-slate-500">Connect a wallet to withdraw.</p>;
+
+  return (
+    <div className="space-y-2">
       <p className="text-xs text-slate-500">
-        Used for tips, bounties, and premium. Deposit from any chain (NEAR, Solana, Ethereum).
+        Send USDC to your {chain === "near" ? "NEAR" : "Solana"} wallet: <span className="text-slate-400 font-mono">{receiver.length > 20 ? receiver.slice(0, 12) + "..." : receiver}</span>
       </p>
       <div className="flex gap-2">
-        <Link href="/balance" className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium btn-primary rounded-lg">
-          Deposit
-        </Link>
-        <Link href="/credits" className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-slate-300 bg-white/[0.06] border border-white/[0.08] rounded-lg hover:bg-white/[0.1] transition">
+        <div className="relative flex-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+          <input type="number" min="0.01" step="0.01" placeholder="1.00" value={amount}
+            onChange={(e) => setAmount(e.target.value)} disabled={loading}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 pl-7 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
+        </div>
+        <button onClick={async () => {
+          const usd = parseFloat(amount);
+          if (isNaN(usd) || usd < 0.01) { setMsg({ type: "error", text: "Min $0.01" }); return; }
+          setLoading(true); setMsg(null);
+          try {
+            const { withdrawFromBalance } = await import("@/lib/api");
+            await withdrawFromBalance(Math.round(usd * 100), chain, receiver);
+            setMsg({ type: "success", text: `$${usd.toFixed(2)} sent` });
+            setAmount(""); onSuccess();
+          } catch (e: any) { setMsg({ type: "error", text: e?.message || "Failed" }); }
+          setLoading(false);
+        }} disabled={loading || !amount || parseFloat(amount) < 0.01}
+          className="px-4 py-2 text-sm font-medium bg-white/[0.06] text-slate-300 border border-white/[0.08] rounded-lg hover:bg-white/[0.1] disabled:opacity-30 transition-all">
+          {loading ? "..." : "Withdraw"}
+        </button>
+      </div>
+      {msg && <p className={`text-xs ${msg.type === "error" ? "text-red-400" : "text-green-400"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+function CreditsSection() {
+  const { user, isPremium } = useAuth();
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-white font-semibold">AI Credits</h3>
+        <p className="text-2xl font-bold text-white">
+          {user?.credit_balance?.toLocaleString() ?? 0}
+        </p>
+      </div>
+      <p className="text-xs text-slate-400 mb-3">Used for AI music and lyrics generation (12 credits per song, 1 per lyrics)</p>
+      {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
+        <p className="text-xs text-cyan-400 mb-3">
+          + {user.daily_credits_remaining} free daily credits remaining (premium)
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
           Buy Credits
         </Link>
+        {!isPremium && (
+          <Link href="/premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/20 transition-all">
+            Get 40 free/day with Premium →
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -323,32 +412,6 @@ function BalanceTab() {
 
   return (
     <div className="space-y-6">
-      {/* AI Credits */}
-      <div className="glass-card rounded-2xl p-6">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-white font-semibold">AI Credits</h3>
-          <p className="text-2xl font-bold text-white">
-            {user?.credit_balance?.toLocaleString() ?? 0}
-          </p>
-        </div>
-        <p className="text-xs text-slate-400 mb-3">Used for AI music generation (12 credits per song)</p>
-        {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
-          <p className="text-xs text-cyan-400 mb-3">
-            + {user.daily_credits_remaining} free daily credits remaining (premium)
-          </p>
-        )}
-        <div className="flex gap-2">
-          <Link href="/balance" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
-            Top Up Balance
-          </Link>
-          {!isPremium && (
-            <Link href="/premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/20 transition-all">
-              Get 40 free/day with Premium →
-            </Link>
-          )}
-        </div>
-      </div>
-
       {/* Legacy NEAR virtual balance — only shown for NEAR users with balance > 0 */}
       {accountId && nearBalance && (
         <div className="glass-card rounded-2xl p-6 border border-amber-500/20 bg-amber-500/[0.04]">

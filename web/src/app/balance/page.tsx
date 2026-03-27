@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useSolanaWallet } from "@/contexts/SolanaWalletContext";
@@ -26,13 +27,18 @@ function toMinimalUnits(amount: string, decimals: number): string {
 
 type DepositStep = "idle" | "creating_intent" | "waiting_send" | "bridging" | "claiming" | "done" | "error";
 
-export default function BalancePage() {
+export default function BalancePageWrapper() {
+  return <Suspense><BalancePage /></Suspense>;
+}
+
+function BalancePage() {
   const { user, isAuthenticated, loading: authLoading, refreshUser, promptSignIn } = useAuth();
   const { accountId, callFunction } = useNearWallet();
   const { solanaAddress } = useSolanaWallet();
 
+  const searchParams = useSearchParams();
   const [balanceFormatted, setBalanceFormatted] = useState("0.00");
-  const [amountUsd, setAmountUsd] = useState("");
+  const [amountUsd, setAmountUsd] = useState(searchParams.get("amount") || "");
   const [step, setStep] = useState<DepositStep>("idle");
   const [error, setError] = useState("");
   const [result, setResult] = useState<string | null>(null);
@@ -41,31 +47,30 @@ export default function BalancePage() {
   const [solanaIntent, setSolanaIntent] = useState<SolanaDepositIntent | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Ensure user has OutLayer wallet (register + backup).
-  // Priority: localStorage → server backup → register new.
+  // Ensure user has OutLayer wallet.
+  // Priority: server (authoritative) → localStorage → register new.
   const ensureWallet = useCallback(async (): Promise<string> => {
-    // 1. Try localStorage
-    const localKey = localStorage.getItem("nearfm_outlayer_api_key");
-    if (localKey) {
-      // Ensure backup exists on server (best-effort, non-blocking)
-      getAddress(localKey).then(({ address }) => backupWallet(localKey, address)).catch(() => {});
-      return localKey;
-    }
-
-    // 2. Try restore from server backup
+    // 1. Try restore from server (authoritative source)
     try {
       const restored = await restoreWallet();
       if (restored.api_key) {
+        const localKey = localStorage.getItem("nearfm_outlayer_api_key");
+        if (localKey && localKey !== restored.api_key) {
+          localStorage.setItem(`nearfm_outlayer_api_key_backup_${Date.now()}`, localKey);
+        }
         localStorage.setItem("nearfm_outlayer_api_key", restored.api_key);
         return restored.api_key;
       }
     } catch {}
 
-    // 3. Double-check localStorage (another concurrent call may have set it)
-    const raceCheck = localStorage.getItem("nearfm_outlayer_api_key");
-    if (raceCheck) return raceCheck;
+    // 2. Try localStorage (no server backup yet)
+    const localKey = localStorage.getItem("nearfm_outlayer_api_key");
+    if (localKey) {
+      getAddress(localKey).then(({ address }) => backupWallet(localKey, address)).catch(() => {});
+      return localKey;
+    }
 
-    // 4. Register new OutLayer wallet
+    // 3. Register new OutLayer wallet
     const apiKey = await ensureRegistered();
 
     // 5. Backup to server

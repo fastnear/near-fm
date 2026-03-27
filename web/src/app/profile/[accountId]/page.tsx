@@ -476,11 +476,7 @@ export default function ProfilePage() {
               <>
                 <FollowButton key={followKey} accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
                 {currentUser && (
-                  <GiftPremiumButton
-                    accountId={accountId}
-                    displayName={displayName}
-                    recipientHasPremium={isProfilePremium}
-                  />
+                  <GiftPremiumButton recipientSlug={accountId} />
                 )}
                 {currentUser && !isFollowing && (
                   <button
