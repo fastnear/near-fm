@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
-import { getSongs, getRadioPlaylist, getCommunityFeed } from "@/lib/api";
+import { getSongs, getRadioPlaylist, getCommunityFeed, getCategories } from "@/lib/api";
 import type { CommunityFeedItem } from "@/lib/api";
 import { SongCard } from "@/components/song/SongCard";
 import { FeedTabs } from "@/components/feed/FeedTabs";
@@ -40,6 +40,17 @@ function FeedPageInner() {
   // So we also parse window.location.pathname directly.
   useEffect(() => {
     const pathname = window.location.pathname;
+
+    // /category/:slug or top-level (/near, /solana, etc.)
+    const categorySlugMatch = pathname.match(/^\/category\/([^/]+)$/);
+    const topLevelCategory: Record<string, string> = { "/near": "near", "/solana": "solana", "/ethereum": "ethereum", "/crypto": "crypto", "/fun": "fun", "/other": "other" };
+    const catSlug = categorySlugMatch?.[1] || topLevelCategory[pathname] || searchParams.get("category_slug");
+    if (catSlug) {
+      getCategories().then((cats) => {
+        const match = cats.find((c: any) => c.slug === catSlug);
+        if (match) setCategoryId(match.id);
+      }).catch(() => {});
+    }
 
     // /genre/:slug
     const genreMatch = pathname.match(/^\/genre\/([^/]+)$/);

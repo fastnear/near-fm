@@ -58,6 +58,31 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  // Rewrite /category/:slug to /?category_slug=slug (e.g. /category/solana)
+  const categoryMatch = pathname.match(/^\/category\/([^/]+)$/);
+  if (categoryMatch) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("category_slug", categoryMatch[1]);
+    return NextResponse.rewrite(url);
+  }
+
+  // Top-level category slugs (e.g. /near, /solana, /ethereum)
+  const categoryShortcuts: Record<string, string> = {
+    "/near": "near",
+    "/solana": "solana",
+    "/ethereum": "ethereum",
+    "/crypto": "crypto",
+    "/fun": "fun",
+    "/other": "other",
+  };
+  if (categoryShortcuts[pathname]) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.searchParams.set("category_slug", categoryShortcuts[pathname]);
+    return NextResponse.rewrite(url);
+  }
+
   // Rewrite /genre/:slug to /?genre=slug
   const genreMatch = pathname.match(/^\/genre\/([^/]+)$/);
   if (genreMatch) {
