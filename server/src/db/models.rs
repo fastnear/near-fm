@@ -270,7 +270,7 @@ pub struct SongRequest {
     pub title: String,
     pub description: String,
     pub bounty_amount_yocto: String,
-    pub bounty_tx_hash: String,
+    pub bounty_tx_hash: Option<String>,
     pub status: String,
     pub awarded_song_id: Option<i32>,
     pub award_tx_hash: Option<String>,
