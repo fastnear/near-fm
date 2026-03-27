@@ -695,15 +695,16 @@ export default function CreatePage() {
             </div>
           )}
 
+          {/* Bounty picker */}
+          <BountyPicker value={pickedRequest} onChange={setPickedRequest} />
+
           {/* Generate button */}
           <button
             onClick={handleGenerate}
             className="w-full py-3.5 btn-primary rounded-xl"
           >
-            Generate Music
+            {pickedRequest ? `Generate for "${pickedRequest.title}"` : "Generate Music"}
           </button>
-
-          <BountyPicker value={pickedRequest} onChange={setPickedRequest} />
         </div>
       </div>
     );
