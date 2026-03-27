@@ -688,10 +688,11 @@ function notificationText(notif: Notification): React.ReactNode {
     case "song_hidden":
       return "Your song has been hidden by a moderator";
     case "bounty_awarded": {
+      const bountyUsdCents = data.bounty_usd_cents as number | undefined;
       const bountyAmount = data.bounty_amount_yocto as string | undefined;
-      const nearBounty = bountyAmount ? yoctoToNear(bountyAmount) : "?";
+      const bountyDisplay = bountyUsdCents ? `$${(bountyUsdCents / 100).toFixed(2)}` : bountyAmount ? `${yoctoToNear(bountyAmount)} NEAR` : "?";
       const reqTitle = data.request_title as string | undefined;
-      return `Congratulations! Your song won the bounty of ${nearBounty} NEAR${reqTitle ? ` for "${reqTitle}"` : ""}. The reward has been added to your virtual balance.`;
+      return `Congratulations! Your song won the bounty of ${bountyDisplay}${reqTitle ? ` for "${reqTitle}"` : ""}. The reward has been added to your balance.`;
     }
     case "bounty_not_awarded": {
       const reqTitle2 = data.request_title as string | undefined;
@@ -732,7 +733,7 @@ function notificationText(notif: Notification): React.ReactNode {
           {reqTitle && reqUuid ? (
             <Link href={`/requests/${reqUuid}`} className="text-purple-400 hover:underline">&quot;{reqTitle}&quot;</Link>
           ) : reqTitle ? `"${reqTitle}"` : ""}
-          {bountyNear ? ` (${bountyNear} NEAR)` : ""}
+          {data.bounty_usd_cents ? ` ($${((data.bounty_usd_cents as number) / 100).toFixed(2)})` : bountyNear ? ` (${bountyNear} NEAR)` : ""}
         </>
       );
     }

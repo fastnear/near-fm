@@ -91,7 +91,7 @@ export default function AboutPage() {
             },
             {
               title: "Song Requests & Bounties",
-              desc: "Want a specific song? Post a request with a NEAR bounty. Creators compete to fulfill it and earn the reward.",
+              desc: "Want a specific song? Post a request with a bounty. Creators compete to fulfill it and earn the reward.",
               icon: (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
               ),
@@ -155,7 +155,7 @@ export default function AboutPage() {
           </li>
           <li className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs font-bold shrink-0">3</span>
-            <span><strong className="text-white">Earn</strong> &mdash; Listeners tip you in NEAR. Fulfill bounty requests for bigger rewards.</span>
+            <span><strong className="text-white">Earn</strong> &mdash; Listeners tip you in USDC. Fulfill bounty requests for bigger rewards.</span>
           </li>
           <li className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs font-bold shrink-0">4</span>

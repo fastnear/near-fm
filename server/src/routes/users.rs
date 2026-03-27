@@ -31,6 +31,7 @@ pub struct UserProfileResponse {
     pub following_count: i64,
     pub active_bounties_count: i64,
     pub active_bounties_total_yocto: String,
+    pub active_bounties_total_usd_cents: i64,
     pub bio: Option<String>,
     pub twitter_handle: Option<String>,
     pub is_premium: bool,
@@ -125,6 +126,14 @@ pub async fn get_profile(
     .await
     .unwrap_or((0, "0".to_string()));
 
+    let active_bounties_total_usd_cents: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(bounty_usd_cents), 0) FROM song_requests WHERE requester_id = $1 AND status = 'open' AND bounty_usd_cents IS NOT NULL"
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
     // Last premium gift
     let premium_gifted_by: Option<PremiumGiftInfo> = sqlx::query_as::<_, (String, Option<String>, i32, chrono::DateTime<chrono::Utc>)>(
         r#"SELECT u.slug, u.display_name, pp.days_added, pp.created_at
@@ -162,6 +171,7 @@ pub async fn get_profile(
         following_count,
         active_bounties_count,
         active_bounties_total_yocto,
+        active_bounties_total_usd_cents,
         bio: user.bio,
         twitter_handle: user.twitter_handle,
         is_premium: user.premium_until.map_or(false, |u| u > chrono::Utc::now()),

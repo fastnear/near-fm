@@ -322,6 +322,14 @@ export default function ProfilePage() {
   const activeBountiesCount = (profileData.active_bounties_count as number) ?? 0;
   const activeBountiesTotalYocto = profileData.active_bounties_total_yocto as string || "0";
   const activeBountiesTotalNear = (Number(activeBountiesTotalYocto) / 1e24).toFixed(1).replace(/\.0$/, "");
+  const activeBountiesTotalUsdCents = (profileData.active_bounties_total_usd_cents as number) || 0;
+  const activeBountiesTotalDisplay = activeBountiesTotalUsdCents > 0 && Number(activeBountiesTotalYocto) > 0
+    ? `$${(activeBountiesTotalUsdCents / 100).toFixed(2)} + ${activeBountiesTotalNear} NEAR`
+    : activeBountiesTotalUsdCents > 0
+    ? `$${(activeBountiesTotalUsdCents / 100).toFixed(2)}`
+    : Number(activeBountiesTotalYocto) > 0
+    ? `${activeBountiesTotalNear} NEAR`
+    : "";
   const memberSince = profileData.created_at as string;
 
   return (
@@ -700,7 +708,7 @@ export default function ProfilePage() {
       {!isOwnProfile && !isFollowing && activeBountiesCount > 0 && currentUser && (
         <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
           <p className="text-sm text-slate-200">
-            <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalNear} NEAR</span>.{" "}
+            <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span>{activeBountiesTotalDisplay && <> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalDisplay}</span></>}.{" "}
             <button onClick={async () => { try { await followUser(accountId); setIsFollowing(true); setFollowKey(k => k + 1); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
           </p>
         </div>

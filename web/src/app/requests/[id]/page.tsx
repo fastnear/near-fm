@@ -304,7 +304,7 @@ export default function RequestDetailPage() {
         {user && !isFollowingRequester && requesterBounties && (request as any).requester_account_id && user.slug !== (request as any).requester_account_id && (
           <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
             <p className="text-sm text-slate-200">
-              <Link href={`/profile/${(request as any).requester_account_id}`} className="text-purple-400 hover:text-purple-300 font-medium">{(request as any).requester_account_id}</Link> has <span className="font-bold text-purple-400">{requesterBounties.count} active {requesterBounties.count === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{requesterBounties.totalNear} NEAR</span>.{" "}
+              <Link href={`/profile/${(request as any).requester_account_id}`} className="text-purple-400 hover:text-purple-300 font-medium">{(request as any).requester_account_id}</Link> has <span className="font-bold text-purple-400">{requesterBounties.count} active {requesterBounties.count === 1 ? "bounty" : "bounties"}</span>{requesterBounties.totalNear !== "0" && <> totaling <span className="font-bold text-cyan-400">{requesterBounties.totalNear} NEAR</span></>}.{" "}
               <button onClick={async () => { try { await followUser((request as any).requester_account_id); setIsFollowingRequester(true); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
             </p>
           </div>

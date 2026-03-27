@@ -262,7 +262,7 @@ function UploadPage() {
               )}
             </div>
             <div className="text-right shrink-0">
-              <div className="text-lg font-bold text-purple-400">{formatNear(bountyRequest.bounty_amount_yocto)} NEAR</div>
+              <div className="text-lg font-bold text-purple-400">{bountyRequest.bounty_usd_cents ? `$${(bountyRequest.bounty_usd_cents / 100).toFixed(2)}` : `${formatNear(bountyRequest.bounty_amount_yocto)} NEAR`}</div>
               <div className="text-xs text-slate-500">bounty</div>
             </div>
           </div>
@@ -458,7 +458,7 @@ function UploadPage() {
                 </svg>
                 {pickedRequest ? (
                   <span className="text-purple-400">
-                    Fulfilling: {pickedRequest.title} ({formatNear(pickedRequest.bounty_amount_yocto)} NEAR)
+                    Fulfilling: {pickedRequest.title} ({pickedRequest.bounty_usd_cents ? `$${(pickedRequest.bounty_usd_cents / 100).toFixed(2)}` : `${formatNear(pickedRequest.bounty_amount_yocto)} NEAR`})
                   </span>
                 ) : (
                   "Submit for a bounty request"
@@ -504,7 +504,7 @@ function UploadPage() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm text-slate-300 truncate">{req.title}</span>
-                          <span className="text-xs text-purple-400 font-medium shrink-0">{formatNear(req.bounty_amount_yocto)} NEAR</span>
+                          <span className="text-xs text-purple-400 font-medium shrink-0">{req.bounty_usd_cents ? `$${(req.bounty_usd_cents / 100).toFixed(2)}` : `${formatNear(req.bounty_amount_yocto)} NEAR`}</span>
                         </div>
                         {req.description && (
                           <p className="text-xs text-slate-500 mt-1 line-clamp-1">{req.description}</p>
