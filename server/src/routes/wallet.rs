@@ -289,31 +289,6 @@ pub async fn send_tip(
         return Err((StatusCode::BAD_REQUEST, "Either song_uuid or profile_slug required".to_string()));
     };
 
-    // Rate limit: max 1 balance tip per target per user per minute
-    let recent_tip: bool = if let Some(sid) = song_id {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM tips WHERE tipper_id = $1 AND song_id = $2 AND payment_method = 'balance' AND created_at > NOW() - INTERVAL '1 minute')"
-        )
-        .bind(claims.user_id)
-        .bind(sid)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false)
-    } else {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM tips WHERE tipper_id = $1 AND recipient_id = $2 AND song_id IS NULL AND payment_method = 'balance' AND created_at > NOW() - INTERVAL '1 minute')"
-        )
-        .bind(claims.user_id)
-        .bind(recipient_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false)
-    };
-
-    if recent_tip {
-        return Err((StatusCode::TOO_MANY_REQUESTS, "Please wait before tipping again".to_string()));
-    }
-
     // Get both OutLayer api_keys
     let sender_key: Option<String> = sqlx::query_scalar(
         "SELECT outlayer_api_key FROM users WHERE id = $1"

@@ -9,7 +9,8 @@ import { sendTipFromBalance, getWalletBalance } from "@/lib/api";
 const TIP_AMOUNTS = [10, 50, 100, 500]; // cents: $0.10, $0.50, $1, $5
 
 function formatCents(cents: number): string {
-  return cents >= 100 ? `$${(cents / 100).toFixed(0)}` : `$${(cents / 100).toFixed(2)}`;
+  const usd = cents / 100;
+  return cents % 100 === 0 ? `$${usd.toFixed(0)}` : `$${usd.toFixed(2)}`;
 }
 
 export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact?: boolean; onTipSuccess?: () => void }) {
