@@ -178,6 +178,8 @@ pub struct SongRequestWithRequester {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub bounty_usd_cents: Option<i32>,
+    pub bounty_payment_method: Option<String>,
     pub requester_account_id: String,
     pub submission_count: Option<i64>,
 }

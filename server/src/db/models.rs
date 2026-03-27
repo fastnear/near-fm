@@ -281,6 +281,8 @@ pub struct SongRequest {
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub bounty_usd_cents: Option<i32>,
+    pub bounty_payment_method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
