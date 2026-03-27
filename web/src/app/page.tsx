@@ -22,7 +22,7 @@ function FeedPageInner() {
   const [sort, setSort] = useState<SortMode>("trending");
   const fetchVersionRef = useRef(0);
   const [period, setPeriod] = useState<TimePeriod>("all");
-  const [languageId, setLanguageId] = useState<number | undefined>();
+  const [languageId, setLanguageId] = useState<number | undefined>(1); // English by default
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [genreSlug, setGenreSlug] = useState<string | undefined>();
   const [langCode, setLangCode] = useState<string | undefined>();
@@ -74,14 +74,17 @@ function FeedPageInner() {
       setSort(sortRoutes[pathname]);
       setCategoryId(undefined);
     } else if (pathname === "/") {
-      // Restore last selected feed tab from localStorage
-      try {
-        const saved = localStorage.getItem("nearfm_feed_sort");
-        if (saved && ["trending", "latest", "top", "following", "community"].includes(saved)) {
-          setSort(saved as SortMode);
-          window.history.replaceState(null, "", `/${saved}`);
-        }
-      } catch {}
+      // Restore last selected feed tab from localStorage (but not if filters are active)
+      const hasFilters = catSlug || searchParams.get("genre") || searchParams.get("lang_code") || searchParams.get("category_slug");
+      if (!hasFilters) {
+        try {
+          const saved = localStorage.getItem("nearfm_feed_sort");
+          if (saved && ["trending", "latest", "top", "following", "community"].includes(saved)) {
+            setSort(saved as SortMode);
+            window.history.replaceState(null, "", `/${saved}`);
+          }
+        } catch {}
+      }
     }
 
     // Also check searchParams (for direct ?genre=rock etc.)
@@ -95,6 +98,14 @@ function FeedPageInner() {
     if (langCodeParam) setLangCode(langCodeParam);
     setSortReady(true);
   }, [searchParams]);
+
+  // Logged-in users see all languages by default
+  useEffect(() => {
+    if (authUser && languageId === 1) {
+      const urlHasLang = window.location.pathname.startsWith("/language/") || new URLSearchParams(window.location.search).has("lang_code");
+      if (!urlHasLang) setLanguageId(undefined);
+    }
+  }, [authUser]);
 
   const fetchSongs = useCallback(async () => {
     if (!sortReady) return;

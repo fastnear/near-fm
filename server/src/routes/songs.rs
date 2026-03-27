@@ -331,6 +331,31 @@ pub async fn vote_song(
         return Err((StatusCode::BAD_REQUEST, "Vote value must be 1, -1, or 0".to_string()));
     }
 
+    // Silent rate limit: max 10 new votes per hour (removing a vote doesn't count)
+    if req.value != 0 {
+        let recent_votes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM votes WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'"
+        )
+        .bind(claims.user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+        if recent_votes >= 10 {
+            // Silently ignore — return current state as if vote was accepted
+            let song = queries::get_song_by_uuid(&state.db, &uuid)
+                .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                .ok_or((StatusCode::NOT_FOUND, "Song not found".to_string()))?;
+            let user_has_diamond_liked = queries::get_user_diamond_like(&state.db, song.id, claims.user_id).await.unwrap_or(false);
+            return Ok(Json(VoteResponse {
+                upvotes: if req.value == 1 { song.upvotes + 1 } else { song.upvotes },
+                downvotes: if req.value == -1 { song.downvotes + 1 } else { song.downvotes },
+                user_vote: req.value,
+                diamond_like_count: song.diamond_like_count,
+                user_has_diamond_liked,
+            }));
+        }
+    }
+
     let song = queries::get_song_by_uuid(&state.db, &uuid)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
