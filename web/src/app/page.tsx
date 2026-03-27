@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Song, SortMode, TimePeriod } from "@/types";
-import { getSongs, getRadioPlaylist, getCommunityFeed, getCategories } from "@/lib/api";
+import { getSongs, getRadioPlaylist, getCommunityFeed } from "@/lib/api";
 import type { CommunityFeedItem } from "@/lib/api";
 import { SongCard } from "@/components/song/SongCard";
 import { FeedTabs } from "@/components/feed/FeedTabs";
@@ -41,15 +41,17 @@ function FeedPageInner() {
   useEffect(() => {
     const pathname = window.location.pathname;
 
+    // Category slug → ID mapping (hardcoded, update when categories change)
+    const CATEGORY_SLUGS: Record<string, number> = {
+      near: 1, solana: 8, ethereum: 10, crypto: 9, fun: 6, other: 7,
+    };
     // /category/:slug or top-level (/near, /solana, etc.)
     const categorySlugMatch = pathname.match(/^\/category\/([^/]+)$/);
     const topLevelCategory: Record<string, string> = { "/near": "near", "/solana": "solana", "/ethereum": "ethereum", "/crypto": "crypto", "/fun": "fun", "/other": "other" };
-    const catSlug = categorySlugMatch?.[1] || topLevelCategory[pathname] || searchParams.get("category_slug");
+    const catSlug = categorySlugMatch?.[1] || topLevelCategory[pathname] || searchParams.get("category_slug") || searchParams.get("category");
     if (catSlug) {
-      getCategories().then((cats) => {
-        const match = cats.find((c: any) => c.slug === catSlug);
-        if (match) setCategoryId(match.id);
-      }).catch(() => {});
+      const catId = CATEGORY_SLUGS[catSlug] || (Number(catSlug) || undefined);
+      if (catId) setCategoryId(catId);
     }
 
     // /genre/:slug
@@ -83,8 +85,6 @@ function FeedPageInner() {
     }
 
     // Also check searchParams (for direct ?genre=rock etc.)
-    const cat = searchParams.get("category");
-    if (cat) setCategoryId(Number(cat));
     const sortParam = searchParams.get("sort");
     if (sortParam && ["trending", "latest", "top", "following", "community"].includes(sortParam)) {
       setSort(sortParam as SortMode);
