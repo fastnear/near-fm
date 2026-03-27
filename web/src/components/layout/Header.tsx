@@ -30,14 +30,20 @@ export function Header() {
         setUnreadCount(notifs.filter((n) => !n.is_read).length);
       })
       .catch(() => {});
-    getWalletBalance()
-      .then((b) => setWalletBalance(b.balance_usdc_formatted))
-      .catch(() => {});
+    const refreshBalance = () =>
+      getWalletBalance()
+        .then((b) => setWalletBalance(b.balance_usdc_formatted))
+        .catch(() => {});
+    refreshBalance();
 
     // Listen for "notifications read" event from cabinet page
     const handleRead = () => setUnreadCount(0);
     window.addEventListener("nearfm_notifications_read", handleRead);
-    return () => window.removeEventListener("nearfm_notifications_read", handleRead);
+    window.addEventListener("nearfm_balance_updated", refreshBalance);
+    return () => {
+      window.removeEventListener("nearfm_notifications_read", handleRead);
+      window.removeEventListener("nearfm_balance_updated", refreshBalance);
+    };
   }, [isAuthenticated]);
 
   const displayName = user?.display_name || user?.slug || "";

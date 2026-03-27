@@ -90,6 +90,7 @@ function BalancePage() {
     try {
       const b = await getWalletBalance();
       setBalanceFormatted(b.balance_usdc_formatted);
+      window.dispatchEvent(new Event("nearfm_balance_updated"));
     } catch {
       setBalanceFormatted("0.00");
     }
@@ -311,14 +312,16 @@ function BalancePage() {
                   </div>
                   <div className="border-t border-white/[0.06] pt-3">
                     <div className="text-xs text-slate-400 mb-1.5">Send to this Solana address:</div>
-                    <div
-                      className="bg-black/30 rounded-lg px-3 py-2 font-mono text-xs text-slate-200 break-all cursor-pointer hover:bg-black/40 transition"
-                      onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                    >
-                      {solanaIntent.deposit_address}
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 bg-black/30 rounded-lg px-3 py-2 font-mono text-xs text-slate-200 break-all cursor-pointer hover:bg-black/40 transition"
+                        onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                      >{solanaIntent.deposit_address}</div>
+                      <button onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                        className="shrink-0 px-3 py-2 text-xs font-medium text-slate-300 bg-white/[0.06] border border-white/[0.1] rounded-lg hover:bg-white/[0.1] transition-all">
+                        {copied ? "Copied!" : "Copy"}
+                      </button>
                     </div>
-                    <div className="text-[10px] text-slate-600 mt-1">{copied ? "Copied!" : "Click to copy"}</div>
-                    <div className="text-[10px] text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
+                    <div className="text-xs text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
                   </div>
                   <div className="flex gap-2">
                     <button

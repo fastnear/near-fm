@@ -28,7 +28,7 @@ type DepositStep = "idle" | "creating_intent" | "waiting_send" | "bridging" | "d
 
 export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
   const { user, isAuthenticated, refreshUser } = useAuth();
-  const { accountId, callFunction } = useNearWallet();
+  const { accountId, callFunction, viewMethod } = useNearWallet();
   const { solanaAddress } = useSolanaWallet();
 
   const [amountUsd, setAmountUsd] = useState("");
@@ -37,9 +37,25 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
   const [result, setResult] = useState<string | null>(null);
   const [solanaIntent, setSolanaIntent] = useState<SolanaDepositIntent | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nearUsdcBalance, setNearUsdcBalance] = useState<string | null>(null);
 
   const hasSolana = !!solanaAddress || !!user?.solana_address;
   const hasNear = !!accountId;
+
+  // Fetch NEAR USDC balance
+  useEffect(() => {
+    if (!accountId || !viewMethod) return;
+    viewMethod({
+      contractId: USDC_CONTRACT,
+      method: "ft_balance_of",
+      args: { account_id: accountId },
+    }).then((raw) => {
+      const val = BigInt(String(raw ?? "0"));
+      const whole = val / BigInt(10 ** DECIMALS);
+      const frac = val % BigInt(10 ** DECIMALS);
+      setNearUsdcBalance(`${whole}.${frac.toString().padStart(DECIMALS, "0").replace(/0+$/, "") || "0"}`);
+    }).catch(() => {});
+  }, [accountId, viewMethod]);
 
   const ensureWallet = useCallback(async (): Promise<string> => {
     // 1. Try restore from server (authoritative source)
@@ -164,7 +180,9 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
 
       {amountUsd && parseFloat(amountUsd) > 0 && (
         <div className="text-xs text-slate-500">
-          {hasNear ? "Deposit via NEAR USDC" : hasSolana ? "Deposit via Solana USDC (bridge fee ~0.2%)" : "Connect a wallet to deposit"}
+          {hasNear
+            ? <>Deposit via NEAR USDC{nearUsdcBalance !== null && <> · balance: <span className={`font-medium ${parseFloat(nearUsdcBalance) < parseFloat(amountUsd) ? "text-red-400" : "text-slate-400"}`}>{nearUsdcBalance} USDC</span></>}</>
+            : hasSolana ? "Deposit via Solana USDC (bridge fee ~0.2%)" : "Connect a wallet to deposit"}
         </div>
       )}
 
@@ -182,11 +200,16 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
           </div>
           <div className="border-t border-white/[0.06] pt-3">
             <div className="text-xs text-slate-400 mb-1.5">Send to this Solana address:</div>
-            <div className="bg-black/30 rounded-lg px-3 py-2 font-mono text-xs text-slate-200 break-all cursor-pointer hover:bg-black/40 transition"
-              onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-            >{solanaIntent.deposit_address}</div>
-            <div className="text-[10px] text-slate-600 mt-1">{copied ? "Copied!" : "Click to copy"}</div>
-            <div className="text-[10px] text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
+            <div className="flex items-start gap-2">
+              <div className="flex-1 bg-black/30 rounded-lg px-3 py-2 font-mono text-xs text-slate-200 break-all cursor-pointer hover:bg-black/40 transition"
+                onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              >{solanaIntent.deposit_address}</div>
+              <button onClick={() => { navigator.clipboard.writeText(solanaIntent.deposit_address); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                className="shrink-0 px-3 py-2 text-xs font-medium text-slate-300 bg-white/[0.06] border border-white/[0.1] rounded-lg hover:bg-white/[0.1] transition-all">
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+            <div className="text-xs text-amber-400/80 mt-2">Important: send exactly {amountUsd} USDC. A different amount may result in lost funds.</div>
           </div>
           <div className="flex gap-2">
             <button onClick={handleSolanaConfirmSent} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all">
@@ -215,7 +238,7 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
       {step !== "waiting_send" && step !== "bridging" && (
         <button
           onClick={hasNear ? handleNearDeposit : hasSolana ? handleSolanaDeposit : undefined}
-          disabled={step === "creating_intent" || !amountUsd || parseFloat(amountUsd) < 0.01 || (!hasNear && !hasSolana)}
+          disabled={step === "creating_intent" || !amountUsd || parseFloat(amountUsd) < 0.01 || (!hasNear && !hasSolana) || (hasNear && nearUsdcBalance !== null && parseFloat(nearUsdcBalance) < parseFloat(amountUsd))}
           className="w-full py-3 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         >
           {step === "creating_intent" ? "Preparing..." : "Deposit"}

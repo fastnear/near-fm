@@ -46,7 +46,7 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
 
       setSuccess(true);
       onTipSuccess?.();
-      getWalletBalance().then((b) => setBalance(b.balance_usdc_formatted)).catch(() => {});
+      getWalletBalance().then((b) => { setBalance(b.balance_usdc_formatted); window.dispatchEvent(new Event("nearfm_balance_updated")); }).catch(() => {});
       setTimeout(() => { setSuccess(false); setShowModal(false); }, 2000);
     } catch (e: any) {
       const msg = e?.message || "Tip failed";

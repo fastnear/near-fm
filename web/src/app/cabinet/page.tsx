@@ -254,7 +254,11 @@ function BalanceDepositSection() {
 
   const fetchBalance = useCallback(() => {
     import("@/lib/api").then(({ getWalletBalance }) =>
-      getWalletBalance().then((b) => { setBalance(b.balance_usdc_formatted); setBalanceRaw(b.balance_usdc); }).catch(() => {})
+      getWalletBalance().then((b) => {
+        setBalance(b.balance_usdc_formatted);
+        setBalanceRaw(b.balance_usdc);
+        window.dispatchEvent(new Event("nearfm_balance_updated"));
+      }).catch(() => {})
     );
   }, []);
 
