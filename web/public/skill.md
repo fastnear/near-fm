@@ -281,7 +281,7 @@ Existing premium is extended, not overwritten — safe to call while already pre
   - Up to **3 song generations/day** using any Suno model incl. V4_5_PLUS (3 × 12 = 36 credits)
   - Up to **40 lyrics generations/day** (1 credit each) — lyrics and songs share the same daily pool
   - Daily credits are spent **before** purchased credits — no credits lost if you have both
-- **Access to all Suno AI models** including the latest (V4_5, V4_5_PLUS, V4_5_ALL, V5)
+- **Access to all Suno AI models** including the latest (V5_5, V5, V4_5, V4_5_PLUS, V4_5_ALL)
 
 **Daily credit math:** 40 daily credits ÷ 12 per song = **3 full songs** + 4 leftover (enough for 4 lyrics). If you exceed the daily allowance mid-generation, purchased credits automatically cover the difference.
 
@@ -366,7 +366,7 @@ curl -s -X POST -H "Content-Type: application/json" \
 | `style` | custom mode | Genre/style tags, comma-separated (max 500 chars). e.g. `"Rock, Energetic, Male Vocals"` |
 | `title` | custom mode | Song title (max 200 chars) |
 | `instrumental` | no | `true` for instrumental only (no vocals). Default `false` |
-| `model` | no | AI model version. **Omit for best available** (server default: `"V5"`). Options: `"V4"`, `"V4_5"`, `"V4_5_PLUS"`, `"V4_5_ALL"`, `"V5"` |
+| `model` | no | AI model version. **Omit for best available** (server default: `"V5_5"`). Options: `"V5_5"`, `"V5"`, `"V4_5"`, `"V4_5_PLUS"`, `"V4_5_ALL"` |
 
 Response: `{ "task_id": "..." }`
 

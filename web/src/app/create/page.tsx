@@ -31,10 +31,11 @@ type Step = "form" | "generating" | "choose" | "publish";
 
 const MODELS = [
   { value: "V4", label: "Suno V4" },
+  { value: "V5_5", label: "Suno V5.5" },
+  { value: "V5", label: "Suno V5" },
   { value: "V4_5", label: "Suno V4.5" },
   { value: "V4_5_PLUS", label: "Suno V4.5 Plus" },
   { value: "V4_5_ALL", label: "Suno V4.5 All" },
-  { value: "V5", label: "Suno V5" },
 ];
 
 export default function CreatePage() {
@@ -50,7 +51,7 @@ export default function CreatePage() {
   const [style, setStyle] = useState("");
   const [songTitle, setSongTitle] = useState("");
   const [instrumental, setInstrumental] = useState(false);
-  const [model, setModel] = useState("V5");
+  const [model, setModel] = useState("V5_5");
 
   // Generation state
   const [taskId, setTaskId] = useState("");

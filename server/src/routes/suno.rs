@@ -533,7 +533,7 @@ pub async fn generate(
     let (deduction, paid_from_balance) = deduct_credits_or_balance(&state, claims.user_id, CREDITS_PER_SONG).await?;
 
     let custom_mode = req.custom_mode.unwrap_or(false);
-    let model = req.model.clone().unwrap_or_else(|| "V4_5".to_string());
+    let model = req.model.clone().unwrap_or_else(|| "V5_5".to_string());
 
     let suno_body = if custom_mode {
         serde_json::json!({
