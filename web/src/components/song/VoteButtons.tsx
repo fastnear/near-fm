@@ -433,7 +433,7 @@ export function VoteButtons({ song, compact }: Props) {
           disabled={loading}
         >
           <ThumbDown filled={userVote === -1} className="w-5 h-5" />
-          {downvotes}
+          {downvotes > 0 && downvotes}
         </button>
       </div>
     );
@@ -452,7 +452,7 @@ export function VoteButtons({ song, compact }: Props) {
         disabled={loading}
       >
         <ThumbUp filled={userVote === 1} className="w-5 h-5" />
-        {upvotes}
+        {upvotes > 0 && upvotes}
       </button>
       <button
         onClick={() => handleVote(-1)}
@@ -464,7 +464,7 @@ export function VoteButtons({ song, compact }: Props) {
         disabled={loading}
       >
         <ThumbDown filled={userVote === -1} className="w-5 h-5" />
-        {downvotes}
+        {downvotes > 0 && downvotes}
       </button>
     </div>
   );
