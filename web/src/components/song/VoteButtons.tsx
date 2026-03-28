@@ -334,17 +334,15 @@ export function VoteButtons({ song, compact }: Props) {
           </PortalTooltip>
         )}
 
-        <span
+        {net !== 0 && <span
           className={`text-sm font-semibold min-w-[20px] text-center tabular-nums ${
             net > 0
               ? "text-[#00ec97]"
-              : net < 0
-                ? "text-rose-400"
-                : "text-slate-500"
+              : "text-rose-400"
           }`}
         >
           {net}
-        </span>
+        </span>}
 
         <button
           onClick={() => handleVote(-1)}
