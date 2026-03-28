@@ -698,8 +698,18 @@ function notificationText(notif: Notification): React.ReactNode {
       const reqTitle2 = data.request_title as string | undefined;
       return `The bounty${reqTitle2 ? ` for "${reqTitle2}"` : ""} has been awarded to another song. Thanks for participating — keep submitting to other requests!`;
     }
-    case "submission_to_request":
-      return `A new song was submitted to your request${data.song_title ? `: "${data.song_title}"` : ""}`;
+    case "submission_to_request": {
+      const songUuid = data.song_uuid as string | undefined;
+      const songTitle = data.song_title as string | undefined;
+      return (
+        <>
+          A new song was submitted to your request
+          {songTitle && songUuid ? (
+            <>: <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link></>
+          ) : songTitle ? `: "${songTitle}"` : ""}
+        </>
+      );
+    }
     case "song_validated": {
       const songTitle = data.song_title as string | undefined;
       return `Your song${songTitle ? ` "${songTitle}"` : ""} is now live!`;
