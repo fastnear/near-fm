@@ -178,10 +178,15 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
         ))}
       </div>
 
+      {hasNear && nearUsdcBalance !== null && (
+        <div className="text-xs text-slate-500">
+          NEAR wallet USDC: <span className={`font-medium ${amountUsd && parseFloat(nearUsdcBalance) < parseFloat(amountUsd) ? "text-red-400" : "text-slate-400"}`}>{nearUsdcBalance}</span>
+        </div>
+      )}
       {amountUsd && parseFloat(amountUsd) > 0 && (
         <div className="text-xs text-slate-500">
           {hasNear
-            ? <>Deposit via NEAR USDC{nearUsdcBalance !== null && <> · balance: <span className={`font-medium ${parseFloat(nearUsdcBalance) < parseFloat(amountUsd) ? "text-red-400" : "text-slate-400"}`}>{nearUsdcBalance} USDC</span></>}</>
+            ? "Deposit via NEAR USDC"
             : hasSolana ? "Deposit via Solana USDC (bridge fee ~0.2%)" : "Connect a wallet to deposit"}
         </div>
       )}

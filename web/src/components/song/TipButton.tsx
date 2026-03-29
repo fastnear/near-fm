@@ -152,11 +152,9 @@ export function TipButton({ song, compact, onTipSuccess }: { song: Song; compact
                   Tip
                 </button>
               </div>
-              {balance === "0.00" && (
-                <a href="/balance" className="block text-center text-[10px] text-purple-400 hover:text-purple-300">
-                  Top up balance →
-                </a>
-              )}
+              <a href="/balance" target="_blank" rel="noopener noreferrer" className="block text-center text-[10px] text-purple-400 hover:text-purple-300">
+                Top up balance →
+              </a>
             </div>
           )}
         </div>
