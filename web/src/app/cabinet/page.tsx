@@ -1603,7 +1603,7 @@ function WalletKeyTab() {
         </div>
 
         <div className="bg-black/20 rounded-xl p-4 space-y-3">
-          <div className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Wallet Key</div>
+          <div className="text-sm font-medium text-slate-200 mb-1">Wallet Key</div>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs text-slate-300 font-mono break-all">
               {revealed ? apiKey : maskedKey}
@@ -1632,7 +1632,13 @@ function WalletKeyTab() {
         {nearAccount && (
           <div className="bg-black/20 rounded-xl p-4 space-y-2">
             <div className="text-sm font-medium text-slate-200">MPC NEAR Account</div>
-            <code className="text-xs text-slate-300 font-mono break-all block">{nearAccount}</code>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs text-slate-300 font-mono break-all">{nearAccount}</code>
+              <button
+                onClick={() => { navigator.clipboard.writeText(nearAccount); }}
+                className="px-2 py-1 text-xs text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition shrink-0"
+              >Copy</button>
+            </div>
             <p className="text-xs text-slate-400">All tips, bounties, and payments are visible on the blockchain.</p>
             <a
               href={`https://publicintents.near.fastfs.io/publicintents.near/bd30a07fed2eb6c450c854fcd08af2422dfe80e0a119f6c4f4d2fa5fe2661efe.html?account=${nearAccount}`}
