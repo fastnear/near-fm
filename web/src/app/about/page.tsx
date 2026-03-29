@@ -185,7 +185,7 @@ export default function AboutPage() {
         <div className="glass-card rounded-xl p-4 space-y-2 text-sm">
           <div className="flex justify-between text-slate-300">
             <span>Tips</span>
-            <span className="text-[#00ec97] font-medium">0% &mdash; 100% to artist</span>
+            <span className="text-[#00ec97] font-medium">No fees</span>
           </div>
           <div className="flex justify-between text-slate-300">
             <span>Bounty awards</span>
