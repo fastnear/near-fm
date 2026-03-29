@@ -294,7 +294,7 @@ function BalancePage() {
 
               {amountUsd && parseFloat(amountUsd) > 0 && (
                 <div className="text-xs text-slate-500">
-                  {hasNear ? "Deposit via NEAR USDC" : hasSolana ? "Deposit via Solana USDC (bridge fee ~0.2%)" : "Connect a wallet to deposit"}
+                  {hasNear ? "Deposit via NEAR USDC" : hasSolana ? "Deposit via Solana USDC" : "Connect a wallet to deposit"}
                 </div>
               )}
 

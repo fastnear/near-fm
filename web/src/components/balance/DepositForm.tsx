@@ -187,7 +187,7 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
         <div className="text-xs text-slate-500">
           {hasNear
             ? "Deposit via NEAR USDC"
-            : hasSolana ? "Deposit via Solana USDC (bridge fee ~0.2%)" : "Connect a wallet to deposit"}
+            : hasSolana ? "Deposit via Solana USDC" : "Connect a wallet to deposit"}
         </div>
       )}
 
