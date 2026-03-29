@@ -35,7 +35,7 @@ import type { AdminComment, AdminSongScore, AdminUser, CreditsSummary, CreditTra
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments" | "credits";
+type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments" | "credits" | "tips";
 
 interface Report {
   id: number;
@@ -1965,6 +1965,72 @@ function CreditsPanel() {
   );
 }
 
+function TipsPanel() {
+  const [tips, setTips] = useState<import("@/lib/api").AdminTip[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    import("@/lib/api").then(({ getAdminTips }) =>
+      getAdminTips().then(setTips).catch(console.error).finally(() => setLoading(false))
+    );
+  }, []);
+
+  const totalUsd = tips.reduce((s, t) => s + (t.amount_usd_cents || 0), 0);
+  const totalNear = tips.reduce((s, t) => s + (t.amount_yocto ? Number(t.amount_yocto) / 1e24 : 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-4 text-sm">
+        <span className="text-slate-400">Total: <span className="text-green-400 font-bold">${(totalUsd / 100).toFixed(2)} USD</span></span>
+        {totalNear > 0 && <span className="text-slate-400">+ <span className="text-cyan-400 font-bold">{totalNear.toFixed(2)} NEAR</span></span>}
+        <span className="text-slate-500">{tips.length} tips</span>
+      </div>
+      {loading ? (
+        <div className="text-slate-500">Loading...</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500 border-b border-white/[0.06]">
+                <th className="pb-2 pr-3">From</th>
+                <th className="pb-2 pr-3">To</th>
+                <th className="pb-2 pr-3">Song</th>
+                <th className="pb-2 pr-3">Amount</th>
+                <th className="pb-2">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tips.map((t) => (
+                <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                  <td className="py-2 pr-3">
+                    <a href={`/profile/${t.tipper_slug}`} className="text-purple-400 hover:underline">{t.tipper_slug}</a>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <a href={`/profile/${t.recipient_slug}`} className="text-cyan-400 hover:underline">{t.recipient_slug}</a>
+                  </td>
+                  <td className="py-2 pr-3 max-w-[200px] truncate">
+                    {t.song_uuid ? (
+                      <a href={`/song/${t.song_uuid}`} className="text-slate-300 hover:underline">{t.song_title || "—"}</a>
+                    ) : <span className="text-slate-600">profile tip</span>}
+                  </td>
+                  <td className="py-2 pr-3 font-medium">
+                    {t.amount_usd_cents ? (
+                      <span className="text-green-400">${(t.amount_usd_cents / 100).toFixed(2)}</span>
+                    ) : t.amount_yocto ? (
+                      <span className="text-cyan-400">{(Number(t.amount_yocto) / 1e24).toFixed(2)} N</span>
+                    ) : "—"}
+                  </td>
+                  <td className="py-2 text-slate-500 text-xs">{new Date(t.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, isAuthenticated, loading, signInWithGoogle } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("reports");
@@ -2015,6 +2081,7 @@ export default function AdminPage() {
     { key: "genres", label: "Genres" },
     { key: "languages", label: "Languages" },
     { key: "credits", label: "Credits" },
+    { key: "tips", label: "Tips" },
   ];
 
   return (
@@ -2066,6 +2133,7 @@ export default function AdminPage() {
         {activeTab === "genres" && <GenresPanel />}
         {activeTab === "languages" && <LanguagesPanel />}
         {activeTab === "credits" && <CreditsPanel />}
+        {activeTab === "tips" && <TipsPanel />}
       </div>
     </div>
   );

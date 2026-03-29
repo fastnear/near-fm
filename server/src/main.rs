@@ -337,6 +337,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/credits/summary", get(routes::admin::credits_summary))
         .route("/api/admin/credits/transactions", get(routes::admin::credits_transactions))
         // Video generation
+        .route("/api/admin/tips", get(routes::admin::list_tips))
         .route("/api/songs/:uuid/video", get(routes::admin::video_status))
         .route("/api/songs/:uuid/video/generate", post(routes::admin::generate_video_premium))
         .route("/api/admin/songs/:uuid/video", post(routes::admin::generate_video).delete(routes::admin::delete_video))

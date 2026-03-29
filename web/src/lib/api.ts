@@ -702,6 +702,24 @@ export async function deleteSong(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, { method: "DELETE" });
 }
 
+// ── Admin Tips ──
+
+export interface AdminTip {
+  id: number;
+  tipper_slug: string;
+  recipient_slug: string;
+  song_title: string | null;
+  song_uuid: string | null;
+  amount_yocto: string | null;
+  amount_usd_cents: number | null;
+  payment_method: string | null;
+  created_at: string;
+}
+
+export async function getAdminTips(): Promise<AdminTip[]> {
+  return fetchApi("/api/admin/tips");
+}
+
 // ── Video ──
 
 export async function getVideoStatus(uuid: string): Promise<{ exists: boolean; url: string | null }> {

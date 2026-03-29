@@ -936,6 +936,46 @@ pub async fn credits_transactions(
     Ok(Json(rows))
 }
 
+// ── Tips list (admin) ──
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct AdminTipRow {
+    pub id: i32,
+    pub tipper_slug: String,
+    pub recipient_slug: String,
+    pub song_title: Option<String>,
+    pub song_uuid: Option<String>,
+    pub amount_yocto: Option<String>,
+    pub amount_usd_cents: Option<i32>,
+    pub payment_method: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_tips(
+    State(state): State<AppState>,
+    extensions: Extensions,
+) -> Result<Json<Vec<AdminTipRow>>, (StatusCode, String)> {
+    require_admin(&extensions)
+        .map_err(|s| (s, "Admin required".to_string()))?;
+
+    let rows = sqlx::query_as::<_, AdminTipRow>(
+        r#"SELECT t.id, u1.slug AS tipper_slug, u2.slug AS recipient_slug,
+           s.title AS song_title, s.uuid AS song_uuid,
+           t.amount_yocto, t.amount_usd_cents, t.payment_method, t.created_at
+           FROM tips t
+           JOIN users u1 ON u1.id = t.tipper_id
+           JOIN users u2 ON u2.id = t.recipient_id
+           LEFT JOIN songs s ON s.id = t.song_id
+           ORDER BY t.created_at DESC
+           LIMIT 200"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(rows))
+}
+
 // ── Video Generation ──
 
 #[derive(Serialize)]
