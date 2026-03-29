@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 const FEATURES = [
   {
     title: "40 free daily AI credits",
-    desc: "Generate up to 3 songs per day for free — resets every midnight UTC. Uses any Suno model including the latest V5.",
+    desc: "Generate up to 3 songs per day for free — resets every midnight UTC. Uses any Suno model including the latest V5.5.",
   },
   {
     title: "Diamond Likes",
@@ -20,6 +20,10 @@ const FEATURES = [
   {
     title: "Premium badge",
     desc: "Stand out with a premium badge on your profile and comments.",
+  },
+  {
+    title: "Video generation",
+    desc: "Generate promo videos for any song with visualizer and cover art — download and share on social media.",
   },
   {
     title: "Early access",
