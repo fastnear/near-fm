@@ -1630,10 +1630,21 @@ function WalletKeyTab() {
         </div>
 
         {nearAccount && (
-          <div className="bg-black/20 rounded-xl p-4 space-y-1">
-            <div className="text-[10px] text-slate-600 uppercase tracking-wider">MPC NEAR Account</div>
-            <code className="text-xs text-slate-300 font-mono break-all">{nearAccount}</code>
-            <p className="text-[11px] text-slate-500 pt-1">This account was created for you in the MPC NEAR Network. Your balance and transactions live here on-chain.</p>
+          <div className="bg-black/20 rounded-xl p-4 space-y-2">
+            <div className="text-sm font-medium text-slate-200">MPC NEAR Account</div>
+            <code className="text-xs text-slate-300 font-mono break-all block">{nearAccount}</code>
+            <p className="text-xs text-slate-400">All tips, bounties, and payments are visible on the blockchain.</p>
+            <a
+              href={`https://publicintents.near.fastfs.io/publicintents.near/bd30a07fed2eb6c450c854fcd08af2422dfe80e0a119f6c4f4d2fa5fe2661efe.html?account=${nearAccount}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+            >
+              View transaction history
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+            </a>
           </div>
         )}
       </div>
