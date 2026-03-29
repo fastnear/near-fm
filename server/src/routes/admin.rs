@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    auth::jwt::require_admin,
+    auth::jwt::{require_admin, require_auth},
     db::models::{Category, Genre, Language, Report, PlatformConfig},
     db::queries,
     AppState,
@@ -946,14 +946,71 @@ pub struct VideoStatus {
 
 /// Check whether a generated video exists for this song.
 pub async fn video_status(
+    State(state): State<AppState>,
     Path(uuid): Path<String>,
 ) -> Json<VideoStatus> {
+    // Check DB first
+    let db_url: Option<String> = sqlx::query_scalar(
+        "SELECT video_url FROM songs WHERE uuid = $1 AND NOT is_deleted"
+    ).bind(&uuid).fetch_optional(&state.db).await.ok().flatten();
+    if let Some(url) = db_url {
+        return Json(VideoStatus { exists: true, url: Some(url) });
+    }
+    // Fallback: filesystem check (for in-progress generations)
     let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
     let exists = std::path::Path::new(&path).exists();
-    Json(VideoStatus {
-        exists,
-        url: if exists { Some(format!("/video/{}.mp4", uuid)) } else { None },
-    })
+    if exists {
+        // Backfill DB
+        let token = generate_video_token();
+        let url = format!("/video/{}_{}.mp4", uuid, token);
+        // Rename file to include token
+        let new_path = format!("{}/{}_{}.mp4", VIDEO_DIR, uuid, token);
+        let _ = std::fs::rename(&path, &new_path);
+        let _ = sqlx::query("UPDATE songs SET video_url = $1, video_token = $2 WHERE uuid = $3")
+            .bind(&url).bind(&token).bind(&uuid).execute(&state.db).await;
+        return Json(VideoStatus { exists: true, url: Some(url) });
+    }
+    Json(VideoStatus { exists: false, url: None })
+}
+
+fn generate_video_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    format!("{:x}", t)
+}
+
+/// Internal helper: spawn video generation and save to DB when done.
+pub fn spawn_video_generation(db: sqlx::PgPool, uuid: String, audio_url: String, cover_url: Option<String>) {
+    let token = generate_video_token();
+    let filename = format!("{}_{}.mp4", uuid, token);
+    let output_path = format!("{}/{}", VIDEO_DIR, filename);
+    let video_url = format!("/video/{}", filename);
+
+    tokio::task::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new("/app/scripts/generate-video.sh");
+        cmd.arg(&audio_url);
+        cmd.arg(cover_url.as_deref().unwrap_or(""));
+        cmd.arg(&output_path);
+        match cmd.output() {
+            Ok(output) => {
+                if output.status.success() {
+                    tracing::info!(uuid = %uuid, "Video generated: {}", filename);
+                    // Save to DB in a new runtime context
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        let _ = sqlx::query("UPDATE songs SET video_url = $1, video_token = $2 WHERE uuid = $3")
+                            .bind(&video_url).bind(&token).bind(&uuid).execute(&db).await;
+                    });
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!(uuid = %uuid, "Video generation failed: {}", stderr.trim());
+                }
+            }
+            Err(e) => {
+                tracing::error!(uuid = %uuid, "Failed to run generate-video.sh: {}", e);
+            }
+        }
+    });
 }
 
 /// Generate a promo video for a song (admin only). Runs ffmpeg in background.
@@ -965,10 +1022,12 @@ pub async fn generate_video(
     require_admin(&extensions)
         .map_err(|s| (s, "Admin required".to_string()))?;
 
-    // Check if already exists
-    let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
-    if std::path::Path::new(&path).exists() {
-        return Ok(Json(serde_json::json!({ "status": "exists", "url": format!("/video/{}.mp4", uuid) })));
+    // Check if already exists in DB
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT video_url FROM songs WHERE uuid = $1 AND NOT is_deleted"
+    ).bind(&uuid).fetch_optional(&state.db).await.ok().flatten();
+    if let Some(url) = existing {
+        return Ok(Json(serde_json::json!({ "status": "exists", "url": url })));
     }
 
     // Fetch song data
@@ -984,44 +1043,75 @@ pub async fn generate_video(
         return Err((StatusCode::NOT_FOUND, "Song not found".to_string()));
     };
 
-    // Spawn ffmpeg in background
-    let uuid_clone = uuid.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new("/app/scripts/generate-video.sh");
-        cmd.arg(&audio_url);
-        cmd.arg(cover_url.as_deref().unwrap_or(""));
-        cmd.arg(&format!("{}/{}.mp4", VIDEO_DIR, uuid_clone));
-        match cmd.output() {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if output.status.success() {
-                    tracing::info!(uuid = %uuid_clone, "Video generated: {}", stdout.trim());
-                } else {
-                    tracing::error!(uuid = %uuid_clone, "Video generation failed: {} {}", stdout.trim(), stderr.trim());
-                }
-            }
-            Err(e) => {
-                tracing::error!(uuid = %uuid_clone, "Failed to run generate-video.sh: {}", e);
-            }
-        }
-    });
+    spawn_video_generation(state.db.clone(), uuid, audio_url, cover_url);
+    Ok(Json(serde_json::json!({ "status": "generating" })))
+}
 
+/// Generate video for premium users (any song that doesn't have video yet).
+pub async fn generate_video_premium(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Auth required".to_string()))?;
+
+    // Check premium
+    let is_premium: bool = sqlx::query_scalar(
+        "SELECT is_premium FROM users WHERE id = $1"
+    ).bind(claims.user_id).fetch_one(&state.db).await.unwrap_or(false);
+    if !is_premium {
+        return Err((StatusCode::FORBIDDEN, "Premium required".to_string()));
+    }
+
+    // Check if already exists
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT video_url FROM songs WHERE uuid = $1 AND NOT is_deleted"
+    ).bind(&uuid).fetch_optional(&state.db).await.ok().flatten();
+    if let Some(url) = existing {
+        return Ok(Json(serde_json::json!({ "status": "exists", "url": url })));
+    }
+
+    // Fetch song data
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT audio_url, cover_image_url FROM songs WHERE uuid = $1 AND NOT is_deleted",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let Some((audio_url, cover_url)) = row else {
+        return Err((StatusCode::NOT_FOUND, "Song not found".to_string()));
+    };
+
+    spawn_video_generation(state.db.clone(), uuid, audio_url, cover_url);
     Ok(Json(serde_json::json!({ "status": "generating" })))
 }
 
 /// Delete a generated video (admin only).
 pub async fn delete_video(
+    State(state): State<AppState>,
     extensions: Extensions,
     Path(uuid): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     require_admin(&extensions)
         .map_err(|s| (s, "Admin required".to_string()))?;
 
+    // Delete from filesystem (both old and new format)
     let path = format!("{}/{}.mp4", VIDEO_DIR, uuid);
-    if std::path::Path::new(&path).exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let _ = std::fs::remove_file(&path);
+    // Also try token-based filename
+    let token: Option<String> = sqlx::query_scalar(
+        "SELECT video_token FROM songs WHERE uuid = $1"
+    ).bind(&uuid).fetch_optional(&state.db).await.ok().flatten();
+    if let Some(t) = token {
+        let path2 = format!("{}/{}_{}.mp4", VIDEO_DIR, uuid, t);
+        let _ = std::fs::remove_file(&path2);
     }
+    // Clear DB
+    let _ = sqlx::query("UPDATE songs SET video_url = NULL, video_token = NULL WHERE uuid = $1")
+        .bind(&uuid).execute(&state.db).await;
+
     Ok(Json(serde_json::json!({ "status": "deleted" })))
 }

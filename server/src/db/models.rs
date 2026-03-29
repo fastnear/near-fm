@@ -111,6 +111,8 @@ pub struct Song {
     pub created_on_nearfm: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub video_url: Option<String>,
+    pub video_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -152,6 +154,8 @@ pub struct SongWithUploader {
     pub created_on_nearfm: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub video_url: Option<String>,
+    pub video_token: Option<String>,
     pub uploader_account_id: String,
     pub uploader_near_account_id: Option<String>,
     pub uploader_display_name: Option<String>,
@@ -212,6 +216,8 @@ impl<'r> sqlx::FromRow<'r, PgRow> for SongWithUploader {
             uploader_is_agent: row.try_get("uploader_is_agent").unwrap_or(false),
             category_name: row.try_get("category_name")?,
             category_slug: row.try_get("category_slug")?,
+            video_url: row.try_get("video_url").unwrap_or(None),
+            video_token: row.try_get("video_token").unwrap_or(None),
             comment_count: row.try_get("comment_count")?,
             genres,
             language_code: row.try_get("language_code").unwrap_or(None),

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { Song, Category, Language, Playlist } from "@/types";
-import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, deleteComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist, getVideoStatus, generateVideo, deleteVideo } from "@/lib/api";
+import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, deleteComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist, getVideoStatus, generateVideo, generateVideoPremium, deleteVideo } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -728,8 +728,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </div>
                 )}
 
-                {/* Admin: Video */}
-                {isAdmin && (
+                {/* Video: premium + admin */}
+                {(isAdmin || user?.is_premium) && (
                   videoStatus.exists ? (
                     <div className="flex items-center gap-1.5">
                       <a
@@ -742,30 +742,34 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                         </svg>
                         Download Video
                       </a>
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm("Delete generated video?")) return;
-                          try {
-                            await deleteVideo(song.uuid);
-                            setVideoStatus({ exists: false, url: null });
-                          } catch (e) { console.error("Delete video failed:", e); }
-                        }}
-                        className="btn-ghost px-2 py-1.5 text-sm rounded-xl hover:!text-rose-400"
-                        title="Delete video"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm("Delete generated video?")) return;
+                            try {
+                              await deleteVideo(song.uuid);
+                              setVideoStatus({ exists: false, url: null });
+                            } catch (e) { console.error("Delete video failed:", e); }
+                          }}
+                          className="btn-ghost px-2 py-1.5 text-sm rounded-xl hover:!text-rose-400"
+                          title="Delete video"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <button
                       onClick={async () => {
                         setVideoGenerating(true);
                         try {
-                          const res = await generateVideo(song.uuid);
+                          const genFn = isAdmin ? generateVideo : generateVideoPremium;
+                          const res = await genFn(song.uuid);
                           if (res.status === "exists") {
                             setVideoStatus({ exists: true, url: res.url || null });
+                            setVideoGenerating(false);
                           } else {
                             // Poll for completion
                             const poll = setInterval(async () => {

@@ -712,6 +712,10 @@ export async function generateVideo(uuid: string): Promise<{ status: string; url
   return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "POST" });
 }
 
+export async function generateVideoPremium(uuid: string): Promise<{ status: string; url?: string }> {
+  return fetchApi(`/api/songs/${uuid}/video/generate`, { method: "POST" });
+}
+
 export async function deleteVideo(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "DELETE" });
 }
