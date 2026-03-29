@@ -613,6 +613,8 @@ export async function getStats(): Promise<{
   total_tips_yocto: string;
   total_bounties_yocto: string;
   total_transactions: number;
+  total_tips_usd_cents: number;
+  total_bounties_usd_cents: number;
 }> {
   return fetchApi("/api/stats");
 }

@@ -170,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/stats",
             get(|state: axum::extract::State<AppState>| async move {
-                let row: (i64, i64, String, String, i64) = sqlx::query_as(
+                let row: (i64, i64, String, String, i64, i64, i64) = sqlx::query_as(
                     r#"SELECT
                         (SELECT COUNT(*) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_songs,
                         (SELECT COALESCE(SUM(play_count), 0) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_plays,
@@ -180,7 +180,9 @@ async fn main() -> anyhow::Result<()> {
                           + (SELECT COUNT(*) FROM credit_topups)
                           + (SELECT COUNT(*) FROM song_requests WHERE bounty_amount_yocto != '0')
                           + (SELECT COUNT(*) FROM premium_purchases)
-                          AS total_transactions
+                          AS total_transactions,
+                        (SELECT COALESCE(SUM(amount_usd_cents), 0) FROM tips WHERE amount_usd_cents IS NOT NULL) AS total_tips_usd_cents,
+                        (SELECT COALESCE(SUM(bounty_usd_cents), 0) FROM song_requests WHERE bounty_usd_cents IS NOT NULL) AS total_bounties_usd_cents
                     "#,
                 )
                 .fetch_one(&state.db)
@@ -192,6 +194,8 @@ async fn main() -> anyhow::Result<()> {
                     "total_tips_yocto": row.2,
                     "total_bounties_yocto": row.3,
                     "total_transactions": row.4,
+                    "total_tips_usd_cents": row.5,
+                    "total_bounties_usd_cents": row.6,
                 })))
             }),
         )
