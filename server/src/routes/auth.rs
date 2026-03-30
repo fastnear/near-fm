@@ -59,6 +59,7 @@ pub struct UserResponse {
     pub auth_provider: String,
     pub near_account_id: Option<String>,
     pub solana_address: Option<String>,
+    pub eth_address: Option<String>,
     pub credit_balance: i32,
     pub daily_credits_remaining: i32,
 }
@@ -178,6 +179,7 @@ pub async fn verify(
         user.is_admin,
         user.account_id.as_deref(),
         user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| {
         (
@@ -216,6 +218,7 @@ pub async fn verify(
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
             solana_address: user.solana_address,
+            eth_address: user.eth_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -407,6 +410,7 @@ pub async fn google_callback(
         user.is_admin,
         user.account_id.as_deref(),
         user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -653,6 +657,7 @@ pub async fn link_wallet(
         is_admin,
         Some(&req.account_id),
         user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -675,6 +680,7 @@ pub async fn link_wallet(
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),
             solana_address: user.solana_address,
+            eth_address: user.eth_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -844,7 +850,7 @@ pub async fn agent_auth(
     }
 
     // Issue JWT
-    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref(), user.solana_address.as_deref())
+    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref(), user.solana_address.as_deref(), user.eth_address.as_deref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Token error: {}", e), "Try again later")))?;
 
     let (is_premium, premium_until) = compute_premium(&user);
@@ -866,6 +872,7 @@ pub async fn agent_auth(
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
             solana_address: user.solana_address,
+            eth_address: user.eth_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -973,6 +980,7 @@ pub async fn solana_verify(
         user.is_admin,
         user.account_id.as_deref(),
         user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -1002,6 +1010,7 @@ pub async fn solana_verify(
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
             solana_address: user.solana_address,
+            eth_address: user.eth_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1069,6 +1078,7 @@ pub async fn link_solana(
         user.is_admin,
         user.account_id.as_deref(),
         user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
@@ -1098,6 +1108,7 @@ pub async fn link_solana(
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
             solana_address: user.solana_address,
+            eth_address: user.eth_address,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1106,10 +1117,220 @@ pub async fn link_solana(
     Ok(([(header::SET_COOKIE, cookie)], body))
 }
 
-/// Generate a slug from a Solana address: first 8 chars + UUID suffix.
+/// Generate a slug from a Solana address: first 12 chars + UUID suffix.
 fn generate_solana_slug(address: &str) -> String {
-    // Use first 12 chars of the Solana address (lowercase) for recognizability
     let addr_part = &address[..12.min(address.len())];
     let suffix = &uuid::Uuid::new_v4().to_string()[..4];
     format!("{}-{}", addr_part.to_lowercase(), suffix)
+}
+
+/// Generate a slug from an Ethereum address: "0x" + first 8 hex chars + UUID suffix.
+fn generate_eth_slug(address: &str) -> String {
+    let addr = address.strip_prefix("0x").unwrap_or(address);
+    let addr_part = &addr[..8.min(addr.len())];
+    let suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    format!("0x{}-{}", addr_part.to_lowercase(), suffix)
+}
+
+// ── Ethereum Auth ──
+
+#[derive(Debug, Deserialize)]
+pub struct EthVerifyRequest {
+    pub eth_address: String,
+    pub signature: String,   // "0x..." hex
+    pub message: String,
+}
+
+/// POST /api/auth/ethereum/verify — sign in with Ethereum wallet
+pub async fn ethereum_verify(
+    State(state): State<AppState>,
+    Json(req): Json<EthVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    // 1. Validate message structure
+    validate_auth_message(&req.message, "sign_in")?;
+
+    // 2. Verify EIP-191 signature
+    let valid = crate::auth::ethereum::verify_eth_signature(
+        &req.eth_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Ethereum signature".to_string()));
+    }
+
+    // Normalize to lowercase for consistent lookups
+    let eth_addr_lower = req.eth_address.to_lowercase();
+
+    // 3. Find or create user
+    let user = match sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE LOWER(eth_address) = $1",
+    )
+    .bind(&eth_addr_lower)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        Some(u) => u,
+        None => {
+            let slug = generate_eth_slug(&eth_addr_lower);
+            sqlx::query_as::<_, crate::db::models::User>(
+                "INSERT INTO users (slug, eth_address, auth_provider) VALUES ($1, $2, 'ethereum') RETURNING *",
+            )
+            .bind(&slug)
+            .bind(&eth_addr_lower)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create user: {}", e)))?
+        }
+    };
+
+    if user.is_banned {
+        return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 4. Create JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// POST /api/auth/link-ethereum — link Ethereum wallet to existing account
+pub async fn link_ethereum(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<EthVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // 1. Validate message
+    validate_auth_message(&req.message, "link_wallet")?;
+
+    // 2. Verify EIP-191 signature
+    let valid = crate::auth::ethereum::verify_eth_signature(
+        &req.eth_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Ethereum signature".to_string()));
+    }
+
+    let eth_addr_lower = req.eth_address.to_lowercase();
+
+    // 3. Check if address already linked to another user
+    let existing: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE LOWER(eth_address) = $1",
+    )
+    .bind(&eth_addr_lower)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if let Some((eid,)) = existing {
+        if eid != claims.user_id {
+            return Err((StatusCode::CONFLICT, "This Ethereum address is already linked to another account".to_string()));
+        }
+    }
+
+    // 4. Link Ethereum address
+    sqlx::query("UPDATE users SET eth_address = $1 WHERE id = $2")
+        .bind(&eth_addr_lower)
+        .bind(claims.user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 5. Reload user and issue new JWT
+    let user = sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE id = $1",
+    )
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
 }

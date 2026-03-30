@@ -299,26 +299,39 @@ function BalanceDepositSection() {
   );
 }
 
+const WITHDRAW_CHAINS = [
+  { id: "near", name: "NEAR", placeholder: "account.near" },
+  { id: "solana", name: "Solana", placeholder: "So1ana..." },
+  { id: "ethereum", name: "Ethereum", placeholder: "0x..." },
+  { id: "base", name: "Base", placeholder: "0x..." },
+  { id: "arbitrum", name: "Arbitrum", placeholder: "0x..." },
+  { id: "bsc", name: "BSC", placeholder: "0x..." },
+  { id: "polygon", name: "Polygon", placeholder: "0x..." },
+  { id: "optimism", name: "Optimism", placeholder: "0x..." },
+] as const;
+
 function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; balanceRaw: string; onSuccess: () => void }) {
   const { user } = useAuth();
   const { accountId } = useNearWallet();
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [receiver, setReceiver] = useState("");
-  const [chain, setChain] = useState<"near" | "solana">("near");
+  const [chain, setChain] = useState("near");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
 
   const solAddr = user?.solana_address || "";
   const nearAddr = accountId || user?.near_account_id || "";
+  const ethAddr = user?.eth_address || "";
 
   // Set defaults on mount
   useEffect(() => {
     if (nearAddr) { setChain("near"); setReceiver(nearAddr); }
     else if (solAddr) { setChain("solana"); setReceiver(solAddr); }
-  }, [nearAddr, solAddr]);
+    else if (ethAddr) { setChain("ethereum"); setReceiver(ethAddr); }
+  }, [nearAddr, solAddr, ethAddr]);
 
-  const hasMultipleChains = !!nearAddr && !!solAddr;
+  const chainMeta = WITHDRAW_CHAINS.find((c) => c.id === chain) || WITHDRAW_CHAINS[0];
 
   // Max: show full precision from raw (6 decimals). E.g. 139998 → "0.139998"
   const handleMax = () => {
@@ -330,28 +343,37 @@ function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; b
     setIsMax(true);
   };
 
+  const handleChainChange = (newChain: string) => {
+    setChain(newChain);
+    if (newChain === "near") setReceiver(nearAddr);
+    else if (newChain === "solana") setReceiver(solAddr);
+    else if (ethAddr && ["ethereum", "base", "arbitrum", "bsc", "polygon", "optimism"].includes(newChain)) setReceiver(ethAddr);
+    else setReceiver("");
+  };
+
   return (
     <div className="space-y-3">
-      {/* Chain selector (only if user has both) */}
-      {hasMultipleChains && (
-        <div className="flex gap-2">
-          {(["near", "solana"] as const).map((c) => (
-            <button key={c} onClick={() => { setChain(c); setReceiver(c === "near" ? nearAddr : solAddr); }}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                chain === c
-                  ? "bg-white/[0.1] text-slate-200 border-white/[0.15]"
-                  : "bg-white/[0.04] text-slate-500 border-white/[0.06] hover:bg-white/[0.08]"
-              }`}
-            >{c === "near" ? "NEAR" : "Solana"}</button>
+      {/* Chain selector */}
+      <div>
+        <label className="text-xs text-slate-500 mb-1 block">Chain</label>
+        <select
+          value={chain}
+          onChange={(e) => handleChainChange(e.target.value)}
+          disabled={loading}
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-white/[0.2] appearance-none cursor-pointer"
+          style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`, backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em", paddingRight: "2.5rem" }}
+        >
+          {WITHDRAW_CHAINS.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
           ))}
-        </div>
-      )}
+        </select>
+      </div>
 
       {/* Receiver address */}
       <div>
-        <label className="text-xs text-slate-500 mb-1 block">{chain === "near" ? "NEAR" : "Solana"} address</label>
+        <label className="text-xs text-slate-500 mb-1 block">{chainMeta.name} address</label>
         <input type="text" value={receiver} onChange={(e) => setReceiver(e.target.value)}
-          placeholder={chain === "near" ? "account.near" : "Solana address"}
+          placeholder={chainMeta.placeholder}
           disabled={loading}
           className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 px-3 text-sm text-slate-200 font-mono placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
       </div>
@@ -379,7 +401,7 @@ function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; b
               ? { amount_raw: balanceRaw }
               : { amount_cents: Math.round(usd * 100) };
             await withdrawFromBalance(chain, receiver.trim(), opts);
-            setMsg({ type: "success", text: `$${usd.toFixed(2)} withdrawn to ${chain === "near" ? "NEAR" : "Solana"}` });
+            setMsg({ type: "success", text: `$${usd.toFixed(2)} withdrawn to ${chainMeta.name}` });
             setAmount(""); setIsMax(false); onSuccess();
           } catch (e: any) { setMsg({ type: "error", text: e?.message || "Failed" }); }
           setLoading(false);

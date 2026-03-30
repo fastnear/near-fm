@@ -4,11 +4,13 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useSolanaWallet } from "@/contexts/SolanaWalletContext";
+import { useEthWallet } from "@/contexts/EthWalletContext";
 
 export function SignInModal() {
   const { showSignInModal, closeSignInModal, signInWithGoogle } = useAuth();
   const { connectAndSignIn } = useNearWallet();
   const { connectAndSignIn: connectSolana } = useSolanaWallet();
+  const { connectAndSignIn: connectEth } = useEthWallet();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,7 +31,7 @@ export function SignInModal() {
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
     >
       <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/[0.1] shadow-2xl p-6 bg-slate-900/95 backdrop-blur-xl">
-        <h2 className="text-lg font-semibold text-white mb-2">Sign in to NEAR FM</h2>
+        <h2 className="text-lg font-semibold text-white mb-2">Sign in to AI RADIO</h2>
         <ul className="text-sm text-slate-400 mb-6 space-y-1.5">
           <li className="flex items-center gap-2"><span className="text-purple-400">&#x2022;</span> Vote and comment on songs</li>
           <li className="flex items-center gap-2"><span className="text-purple-400">&#x2022;</span> Follow your favorite artists</li>
@@ -53,6 +55,25 @@ export function SignInModal() {
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
             </svg>
             Sign in with Google
+          </button>
+
+          {/* Ethereum */}
+          <button
+            onClick={() => {
+              closeSignInModal();
+              connectEth();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.06] border border-white/[0.1] text-sm text-slate-200 hover:bg-white/[0.1] transition-all"
+          >
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 784 784" fill="none">
+              <path d="M392 0L387.5 15.3V536.2L392 540.7L633.6 398.2L392 0Z" fill="#343434"/>
+              <path d="M392 0L150.4 398.2L392 540.7V289.6V0Z" fill="#8C8C8C"/>
+              <path d="M392 586.4L389.5 589.4V779.3L392 784L633.8 444L392 586.4Z" fill="#3C3C3C"/>
+              <path d="M392 784V586.4L150.4 444L392 784Z" fill="#8C8C8C"/>
+              <path d="M392 540.7L633.6 398.2L392 289.6V540.7Z" fill="#141414"/>
+              <path d="M150.4 398.2L392 540.7V289.6L150.4 398.2Z" fill="#393939"/>
+            </svg>
+            Sign in with Ethereum
           </button>
 
           {/* NEAR */}

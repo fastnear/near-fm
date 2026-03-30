@@ -553,7 +553,7 @@ pub async fn update_profile(
 
     // If slug changed, issue new JWT with updated sub
     if let Some(ref slug) = new_slug {
-        let token = jwt::create_token(&state.config.jwt_secret, slug, claims.user_id, claims.is_admin, claims.account_id.as_deref(), claims.solana_address.as_deref())
+        let token = jwt::create_token(&state.config.jwt_secret, slug, claims.user_id, claims.is_admin, claims.account_id.as_deref(), claims.solana_address.as_deref(), claims.eth_address.as_deref())
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
         let cookie = super::auth::build_session_cookie(&token, &state.config.frontend_url);

@@ -128,6 +128,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/auth/link-wallet", post(routes::auth::link_wallet))
         .route("/api/auth/solana/verify", post(routes::auth::solana_verify))
         .route("/api/auth/link-solana", post(routes::auth::link_solana))
+        .route("/api/auth/ethereum/verify", post(routes::auth::ethereum_verify))
+        .route("/api/auth/link-ethereum", post(routes::auth::link_ethereum))
         .route("/api/auth/logout", post(routes::auth::logout))
         .route("/api/songs", post(routes::songs::create_song))
         .route("/api/requests", post(routes::requests::create_request))
