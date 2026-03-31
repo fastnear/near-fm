@@ -119,6 +119,41 @@ export async function saveExternalAddresses(
   });
 }
 
+// ── Intents swap ──
+
+export interface SwapQuote {
+  amount_out: string;
+  min_amount_out: string;
+  time_estimate_seconds: number;
+}
+
+export async function getSwapQuote(
+  apiKey: string,
+  tokenIn: string,
+  tokenOut: string,
+  amountIn: string,
+): Promise<SwapQuote> {
+  return outlayerFetch("/wallet/v1/intents/swap/quote", apiKey, {
+    method: "POST",
+    body: JSON.stringify({ token_in: tokenIn, token_out: tokenOut, amount_in: amountIn }),
+  });
+}
+
+export async function executeSwap(
+  apiKey: string,
+  tokenIn: string,
+  tokenOut: string,
+  amountIn: string,
+  minAmountOut: string,
+): Promise<{ intent_hash: string }> {
+  return outlayerFetch("/wallet/v1/intents/swap", apiKey, {
+    method: "POST",
+    body: JSON.stringify({ token_in: tokenIn, token_out: tokenOut, amount_in: amountIn, min_amount_out: minAmountOut }),
+  });
+}
+
+// ── Payment checks ──
+
 export async function createCheck(
   apiKey: string,
   token: string,

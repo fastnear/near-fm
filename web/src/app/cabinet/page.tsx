@@ -356,9 +356,11 @@ function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; b
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
-        {["ethereum", "base", "arbitrum", "bsc", "polygon", "optimism"].includes(chain) && (
-          <div className="text-[11px] text-slate-500 mt-1">Same 0x address works on all EVM chains</div>
-        )}
+        <div className="text-[11px] text-slate-500 mt-1">
+          {chain === "near" ? "Withdraws to NEAR Intents balance of the recipient"
+            : chain === "solana" ? ""
+            : "Same 0x address works on all EVM chains"}
+        </div>
       </div>
 
       {/* Receiver address */}

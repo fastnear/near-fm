@@ -49,6 +49,13 @@ interface NearWalletContextType {
     gas?: string;
     deposit?: string;
   }) => Promise<string>;
+  callBatch: (txns: Array<{
+    contractId: string;
+    method: string;
+    args: Record<string, unknown>;
+    gas?: string;
+    deposit?: string;
+  }>) => Promise<void>;
   viewMethod: (params: {
     contractId: string;
     method: string;
@@ -77,6 +84,7 @@ const NearWalletContext = createContext<NearWalletContextType>({
   completeSignIn: async () => false,
   linkWallet: async () => false,
   callFunction: async () => "",
+  callBatch: async () => {},
   viewMethod: async () => null,
 });
 
@@ -405,6 +413,34 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     [wallet]
   );
 
+  // Batch multiple transactions in a single wallet popup
+  const callBatch = useCallback(
+    async (txns: Array<{
+      contractId: string;
+      method: string;
+      args: Record<string, unknown>;
+      gas?: string;
+      deposit?: string;
+    }>) => {
+      if (!wallet) throw new Error("Please connect your NEAR wallet");
+
+      await wallet.signAndSendTransactions({
+        transactions: txns.map((tx) => ({
+          receiverId: tx.contractId,
+          actions: [
+            actionCreators.functionCall(
+              tx.method,
+              tx.args,
+              BigInt(tx.gas || "30000000000000"),
+              BigInt(tx.deposit || "0"),
+            ),
+          ],
+        })),
+      });
+    },
+    [wallet]
+  );
+
   const viewMethod = useCallback(
     async (params: {
       contractId: string;
@@ -461,6 +497,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         completeSignIn,
         linkWallet,
         callFunction,
+        callBatch,
         viewMethod,
       }}
     >
