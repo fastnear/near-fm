@@ -18,6 +18,8 @@ pub struct UserProfileResponse {
     pub account_id: String, // slug (backward compat field name)
     pub near_account_id: Option<String>,
     pub solana_address: Option<String>,
+    pub eth_address: Option<String>,
+    pub eth_chain_id: Option<i32>,
     pub auth_provider: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
@@ -158,6 +160,8 @@ pub async fn get_profile(
         account_id: user.slug.clone(),
         near_account_id: user.account_id,
         solana_address: user.solana_address,
+        eth_address: user.eth_address,
+        eth_chain_id: user.eth_chain_id,
         auth_provider: user.auth_provider.clone(),
         display_name: user.display_name,
         avatar_url: user.avatar_url,

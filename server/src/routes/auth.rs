@@ -60,6 +60,7 @@ pub struct UserResponse {
     pub near_account_id: Option<String>,
     pub solana_address: Option<String>,
     pub eth_address: Option<String>,
+    pub eth_chain_id: Option<i32>,
     pub credit_balance: i32,
     pub daily_credits_remaining: i32,
 }
@@ -219,6 +220,7 @@ pub async fn verify(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -513,6 +515,8 @@ pub struct MeResponse {
     pub auth_provider: String,
     pub reputation_score: String,
     pub solana_address: Option<String>,
+    pub eth_address: Option<String>,
+    pub eth_chain_id: Option<i32>,
     pub credit_balance: i32,
     pub daily_credits_remaining: i32,
 }
@@ -551,6 +555,8 @@ pub async fn get_me(
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
         solana_address: user.solana_address,
+        eth_address: user.eth_address,
+        eth_chain_id: user.eth_chain_id,
         credit_balance: user.credit_balance,
         daily_credits_remaining,
     }))
@@ -563,24 +569,17 @@ pub async fn logout(
     State(state): State<AppState>,
     extensions: Extensions,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    if let Ok(claims) = require_auth(&extensions) {
-        // Clear linked NEAR wallet
-        sqlx::query("UPDATE users SET account_id = NULL WHERE id = $1")
-            .bind(claims.user_id)
-            .execute(&state.db)
-            .await
-            .ok();
-    }
+    let is_prod = state.config.frontend_url.contains("near.fm");
 
-    // Clear session cookie
-    let clear_cookie = "nearfm_session=; Domain=.near.fm; Path=/; HttpOnly; Max-Age=0";
-    let clear_cookie_local = "nearfm_session=; Path=/; HttpOnly; Max-Age=0";
+    // Clear session cookie — must match attributes from build_session_cookie
+    let clear_cookie = if is_prod {
+        "nearfm_session=; Domain=.near.fm; Path=/; SameSite=Lax; Secure; HttpOnly; Max-Age=0".to_string()
+    } else {
+        "nearfm_session=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0".to_string()
+    };
 
     Ok((
-        [
-            (header::SET_COOKIE, clear_cookie.to_string()),
-            (header::SET_COOKIE, clear_cookie_local.to_string()),
-        ],
+        [(header::SET_COOKIE, clear_cookie)],
         StatusCode::OK,
     ))
 }
@@ -681,6 +680,7 @@ pub async fn link_wallet(
             near_account_id: Some(req.account_id),
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -873,6 +873,7 @@ pub async fn agent_auth(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1011,6 +1012,7 @@ pub async fn solana_verify(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1109,6 +1111,7 @@ pub async fn link_solana(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1139,6 +1142,7 @@ pub struct EthVerifyRequest {
     pub eth_address: String,
     pub signature: String,   // "0x..." hex
     pub message: String,
+    pub chain_id: Option<i32>,  // EVM chain ID (1=mainnet, 8453=base, 42161=arbitrum, etc.)
 }
 
 /// POST /api/auth/ethereum/verify — sign in with Ethereum wallet
@@ -1175,10 +1179,11 @@ pub async fn ethereum_verify(
         None => {
             let slug = generate_eth_slug(&eth_addr_lower);
             sqlx::query_as::<_, crate::db::models::User>(
-                "INSERT INTO users (slug, eth_address, auth_provider) VALUES ($1, $2, 'ethereum') RETURNING *",
+                "INSERT INTO users (slug, eth_address, eth_chain_id, auth_provider) VALUES ($1, $2, $3, 'ethereum') RETURNING *",
             )
             .bind(&slug)
             .bind(&eth_addr_lower)
+            .bind(req.chain_id)
             .fetch_one(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create user: {}", e)))?
@@ -1187,6 +1192,12 @@ pub async fn ethereum_verify(
 
     if user.is_banned {
         return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+
+    // Update chain_id on every login (user may switch networks)
+    if let Some(cid) = req.chain_id {
+        sqlx::query("UPDATE users SET eth_chain_id = $1 WHERE id = $2")
+            .bind(cid).bind(user.id).execute(&state.db).await.ok();
     }
 
     let (is_premium, premium_until) = compute_premium(&user);
@@ -1231,6 +1242,7 @@ pub async fn ethereum_verify(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },
@@ -1327,6 +1339,7 @@ pub async fn link_ethereum(
             near_account_id: user.account_id,
             solana_address: user.solana_address,
             eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
             credit_balance: user.credit_balance,
             daily_credits_remaining,
         },

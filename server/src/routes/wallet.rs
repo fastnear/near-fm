@@ -377,20 +377,29 @@ pub async fn send_tip(
         .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
         .to_string();
 
-    // Step 2: Claim recipient's share from the check
-    let claim_result = outlayer_request(
-        &state.http_client,
-        &recipient_key,
-        "POST",
-        "/wallet/v1/payment-check/claim",
-        Some(serde_json::json!({
-            "check_key": check_key,
-            "amount": raw_recipient.to_string(),
-        })),
-    ).await;
+    // Step 2: Claim recipient's share (with retry on transient failures)
+    let mut claim_result = Err("not attempted".to_string());
+    for attempt in 0..3 {
+        claim_result = outlayer_request(
+            &state.http_client,
+            &recipient_key,
+            "POST",
+            "/wallet/v1/payment-check/claim",
+            Some(serde_json::json!({
+                "check_key": check_key,
+                "amount": raw_recipient.to_string(),
+            })),
+        ).await;
+        if claim_result.is_ok() { break; }
+        if attempt < 2 {
+            tracing::warn!(attempt, "Tip claim retry after failure");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    }
 
     if let Err(e) = claim_result {
-        // Reclaim the check back to sender if claim fails
+        // Reclaim the check back to sender if all retries failed
+        tracing::error!("Tip claim failed after 3 attempts, reclaiming: {}", e);
         let _ = outlayer_request(
             &state.http_client,
             &sender_key,

@@ -109,8 +109,8 @@ function UploadPage() {
     );
   }
 
-  // Logged in but no NEAR wallet and no Solana → need to connect a wallet
-  if (!accountId && !user?.solana_address) {
+  // Logged in but no wallet at all (Google-only user without any chain wallet)
+  if (!accountId && !user?.solana_address && !user?.eth_address) {
     return (
       <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">

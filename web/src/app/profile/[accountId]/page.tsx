@@ -34,6 +34,21 @@ function formatNear(yocto: string): string {
   return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+const EVM_CHAINS: Record<number, string> = {
+  1: "Ethereum", 5: "Goerli", 11155111: "Sepolia",
+  10: "Optimism", 56: "BSC", 100: "Gnosis", 137: "Polygon",
+  250: "Fantom", 324: "zkSync Era", 8453: "Base",
+  42161: "Arbitrum", 42170: "Arbitrum Nova", 43114: "Avalanche",
+  59144: "Linea", 534352: "Scroll", 7777777: "Zora",
+  81457: "Blast", 5000: "Mantle", 1101: "Polygon zkEVM",
+  1313161554: "Aurora",
+};
+
+function evmChainName(chainId: number | null): string {
+  if (!chainId) return "EVM";
+  return EVM_CHAINS[chainId] || `EVM (${chainId})`;
+}
+
 function truncateId(id: string, max = 30): string {
   if (id.length <= max) return id;
   return `${id.slice(0, 12)}...${id.slice(-8)}`;
@@ -308,6 +323,8 @@ export default function ProfilePage() {
   const premiumGift = profileData.premium_gifted_by as { gifted_by_slug: string; gifted_by_display_name: string | null; days_added: number; created_at: string } | null;
   const nearAccountId = profileData.near_account_id as string | null;
   const solanaAddress = profileData.solana_address as string | null;
+  const ethAddress = profileData.eth_address as string | null;
+  const ethChainId = profileData.eth_chain_id as number | null;
   const authProvider = profileData.auth_provider as string;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
@@ -445,6 +462,17 @@ export default function ProfilePage() {
                     Solana
                   </span>
                 )}
+                {authProvider === "ethereum" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <svg className="w-3 h-3" viewBox="0 0 784 784" fill="currentColor">
+                      <path d="M392 0L387.5 15.3V536.2L392 540.7L633.6 398.2L392 0Z" opacity=".6"/>
+                      <path d="M392 0L150.4 398.2L392 540.7V289.6V0Z"/>
+                      <path d="M392 586.4L389.5 589.4V779.3L392 784L633.8 444L392 586.4Z" opacity=".6"/>
+                      <path d="M392 784V586.4L150.4 444L392 784Z"/>
+                    </svg>
+                    {evmChainName(ethChainId)}
+                  </span>
+                )}
                 {solanaAddress && authProvider !== "solana" && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/10 text-purple-300 border border-purple-500/20">
                     + Solana
@@ -503,7 +531,7 @@ export default function ProfilePage() {
             )}
             {isOwnProfile && (
               <>
-                {authUser && !authUser.near_account_id && !authUser.solana_address && (
+                {authUser && !authUser.near_account_id && !authUser.solana_address && !authUser.eth_address && (
                   <button
                     onClick={() => linkWallet()}
                     className="px-4 py-2 text-sm text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/30 rounded-xl transition-all"

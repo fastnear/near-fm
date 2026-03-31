@@ -85,8 +85,7 @@ pub async fn recalculate_feed_scores(pool: &PgPool) -> Result<(), sqlx::Error> {
     let top_result = sqlx::query(
         r#"
         UPDATE songs
-        SET top_score = sub.new_score,
-            updated_at = NOW()
+        SET top_score = sub.new_score
         FROM (
             SELECT
                 s.id,

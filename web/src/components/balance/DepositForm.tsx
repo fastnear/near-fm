@@ -22,7 +22,17 @@ const BRIDGE_CHAINS = [
   { id: "ethereum", name: "Ethereum", estSecs: 45 },
   { id: "base", name: "Base", estSecs: 35 },
   { id: "arbitrum", name: "Arbitrum", estSecs: 25 },
+  { id: "polygon", name: "Polygon", estSecs: 35 },
+  { id: "optimism", name: "Optimism", estSecs: 35 },
+  { id: "avalanche", name: "Avalanche", estSecs: 35 },
 ] as const;
+
+// Map EVM chain_id to bridge chain id (for deposit pre-selection)
+const CHAIN_ID_TO_BRIDGE: Record<number, string> = {
+  1: "ethereum", 8453: "base", 42161: "arbitrum",
+  10: "optimism", 137: "polygon", 43114: "avalanche",
+  56: "ethereum", // BSC deposit not available yet
+};
 
 function toMinimalUnits(amount: string, decimals: number): string {
   const parts = amount.split(".");
@@ -49,12 +59,18 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
 
   const hasSolana = !!solanaAddress || !!user?.solana_address;
   const hasNear = !!accountId;
+  const hasEth = !!user?.eth_address;
 
-  // Set default bridge chain based on connected wallet
+  // Set default bridge chain based on connected wallet/chain
   useEffect(() => {
-    if (hasSolana) setBridgeChain("solana");
-    else setBridgeChain("ethereum");
-  }, [hasSolana]);
+    if (hasEth && user?.eth_chain_id) {
+      setBridgeChain(CHAIN_ID_TO_BRIDGE[user.eth_chain_id] || "ethereum");
+    } else if (hasSolana) {
+      setBridgeChain("solana");
+    } else {
+      setBridgeChain("ethereum");
+    }
+  }, [hasSolana, hasEth, user?.eth_chain_id]);
 
   // Fetch NEAR USDC balance
   useEffect(() => {

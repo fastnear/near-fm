@@ -488,15 +488,15 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                       />
                     </label>
                   )}
-                  {coverFile && !accountId && !user?.solana_address && (
-                    <p className="text-xs text-amber-400 mt-1">Connect NEAR wallet to upload cover image</p>
+                  {coverFile && !accountId && !user?.solana_address && !user?.eth_address && (
+                    <p className="text-xs text-amber-400 mt-1">Connect a wallet to upload cover image</p>
                   )}
                 </div>
               )}
               <div className="flex gap-2">
                 <button
                   onClick={saveEdit}
-                  disabled={editSaving || coverUploading || (!!coverFile && !accountId && !user?.solana_address)}
+                  disabled={editSaving || coverUploading || (!!coverFile && !accountId && !user?.solana_address && !user?.eth_address)}
                   className="px-5 py-2 btn-primary rounded-xl text-sm disabled:opacity-50"
                 >
                   {coverUploading ? "Uploading cover..." : editSaving ? "Saving..." : "Save"}

@@ -69,7 +69,7 @@ const ADMIN_TABS: { key: TabKey; label: string }[] = [
 // ── Main component ──
 
 export default function CabinetPage() {
-  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut: authSignOut } = useAuth();
+  const { user, isAuthenticated, loading: authLoading, promptSignIn, signOut: authSignOut } = useAuth();
   const { accountId, connectAndSignIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
   const [diamondRemaining, setDiamondRemaining] = useState<number | null>(null);
@@ -106,24 +106,12 @@ export default function CabinetPage() {
           <p className="text-slate-400 text-sm mb-6">
             Sign in to access your dashboard, manage your balance, and view your songs.
           </p>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={signInWithGoogle}
-              className="btn-primary px-6 py-3 rounded-xl flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
-                <path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              </svg>
-              Sign in with Google
-            </button>
-            <button
-              onClick={connectAndSignIn}
-              className="px-6 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
-            >
-              Sign in with NEAR Wallet
-            </button>
-          </div>
+          <button
+            onClick={promptSignIn}
+            className="btn-primary px-8 py-3 rounded-xl text-sm font-medium"
+          >
+            Sign In
+          </button>
         </div>
       </div>
     );
@@ -308,6 +296,7 @@ const WITHDRAW_CHAINS = [
   { id: "bsc", name: "BSC", placeholder: "0x..." },
   { id: "polygon", name: "Polygon", placeholder: "0x..." },
   { id: "optimism", name: "Optimism", placeholder: "0x..." },
+  { id: "avalanche", name: "Avalanche", placeholder: "0x..." },
 ] as const;
 
 function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; balanceRaw: string; onSuccess: () => void }) {
@@ -367,6 +356,9 @@ function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; b
             <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
+        {["ethereum", "base", "arbitrum", "bsc", "polygon", "optimism"].includes(chain) && (
+          <div className="text-[11px] text-slate-500 mt-1">Same 0x address works on all EVM chains</div>
+        )}
       </div>
 
       {/* Receiver address */}
@@ -1201,7 +1193,7 @@ function PlaylistsTab() {
             )}
             <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
               <span className="text-xs text-white font-medium">{coverUploading ? "Uploading..." : "Change Cover"}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || (!accountId && !user?.solana_address)} />
+              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || (!accountId && !user?.solana_address && !user?.eth_address)} />
             </label>
           </div>
 

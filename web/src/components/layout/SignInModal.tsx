@@ -73,7 +73,10 @@ export function SignInModal() {
               <path d="M392 540.7L633.6 398.2L392 289.6V540.7Z" fill="#141414"/>
               <path d="M150.4 398.2L392 540.7V289.6L150.4 398.2Z" fill="#393939"/>
             </svg>
-            Sign in with Ethereum
+            <span className="flex flex-col items-start">
+              <span>Sign in with EVM Wallet</span>
+              <span className="text-[10px] text-slate-500 font-normal">Ethereum, Base, Arbitrum, Polygon, BSC, Optimism</span>
+            </span>
           </button>
 
           {/* NEAR */}

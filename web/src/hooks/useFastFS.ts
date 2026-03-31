@@ -14,10 +14,9 @@ export function useFastFS() {
   const { accountId } = useNearWallet();
 
   const hasNearWallet = !!accountId;
-  const hasSolanaWallet = !!user?.solana_address;
-  // Future: const hasEthWallet = !!user?.eth_address;
+  const hasAnyWallet = !!user?.solana_address || !!user?.eth_address;
 
-  const canUseFastFS = hasNearWallet || hasSolanaWallet;
+  const canUseFastFS = hasNearWallet || hasAnyWallet;
   const useRelayer = !hasNearWallet && canUseFastFS;
 
   return { canUseFastFS, useRelayer, hasNearWallet };

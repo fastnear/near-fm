@@ -1024,12 +1024,12 @@ export default function CreatePage() {
           />
         </div>
 
-        {/* No wallet connected (only for non-Solana users) */}
-        {!accountId && !user?.solana_address && (
+        {/* No wallet connected (Google-only users) */}
+        {!accountId && !user?.solana_address && !user?.eth_address && (
           <div className="glass-card rounded-2xl p-6 mb-8 text-center">
-            <p className="text-slate-400 mb-4">Connect a NEAR wallet to publish (files are stored on-chain via FastFS).</p>
+            <p className="text-slate-400 mb-4">Connect a wallet to publish (files are stored on-chain via FastFS).</p>
             <button onClick={linkWallet} className="btn-primary px-6 py-2.5 rounded-xl text-sm">
-              Connect NEAR Wallet
+              Connect Wallet
             </button>
           </div>
         )}
@@ -1148,7 +1148,7 @@ export default function CreatePage() {
             </button>
             <button
               onClick={handlePublish}
-              disabled={publishing || !pubTitle.trim() || (!accountId && !user?.solana_address)}
+              disabled={publishing || !pubTitle.trim() || (!accountId && !user?.solana_address && !user?.eth_address)}
               className="flex-1 py-3.5 btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {publishing ? "Publishing..." : "Publish Song"}

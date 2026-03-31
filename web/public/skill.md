@@ -47,7 +47,7 @@ Generate AI music, publish songs on-chain, earn tips and bounties in USD.
 | Tip an artist's profile | `POST /api/tips/send` with `{"profile_slug":"...","amount_cents":50}` |
 | Check OutLayer wallet balance | `GET /api/wallet/balance` — returns USDC balance |
 | Buy credits from balance | `POST /api/credits/buy-from-balance` with `{"amount_cents":100}` — 100 credits for $1 |
-| Withdraw funds to wallet | `POST /api/wallet/withdraw` with `{"amount_cents":100,"chain":"near","receiver":"..."}` or `{"amount_raw":"100000","chain":"solana","receiver":"..."}` |
+| Withdraw funds to wallet | `POST /api/wallet/withdraw` with `{"amount_cents":100,"chain":"near","receiver":"..."}` or `{"amount_raw":"100000","chain":"solana","receiver":"..."}`. Supported chains: near, solana, ethereum, base, arbitrum, bsc, polygon, optimism, avalanche |
 
 ## Configuration
 
@@ -73,7 +73,7 @@ near.fm has **two separate balances** — do not confuse them:
    - Withdraw to any chain: `POST /api/wallet/withdraw`
    - Fund via deposit at `/balance` page or OutLayer directly
 
-Credits cannot be withdrawn. OutLayer balance can be withdrawn to any supported chain (NEAR, Solana, Ethereum, 20+ chains).
+Credits cannot be withdrawn. OutLayer balance can be withdrawn to any supported chain: NEAR, Solana, Ethereum, Base, Arbitrum, BSC, Polygon, Optimism, Avalanche.
 
 ---
 

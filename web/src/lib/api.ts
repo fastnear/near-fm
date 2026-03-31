@@ -40,6 +40,7 @@ export interface AuthUser {
   near_account_id: string | null;
   solana_address: string | null;
   eth_address: string | null;
+  eth_chain_id: number | null;
   display_name: string | null;
   avatar_url: string | null;
   is_admin: boolean;

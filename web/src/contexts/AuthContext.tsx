@@ -90,13 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    // Clear wallet link on server before clearing cookie
     try {
       await fetch(`${API_URL}/api/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
     } catch {}
+    // Clear OutLayer key so next login gets fresh key from server
+    localStorage.removeItem("nearfm_outlayer_api_key");
     setUser(null);
     window.dispatchEvent(new Event("nearfm_signed_out"));
   }, []);
