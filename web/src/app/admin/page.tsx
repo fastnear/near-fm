@@ -26,12 +26,16 @@ import {
   createLanguage,
   deleteLanguage,
   getAdminUsers,
+  getAdminCreditsSummary,
+  getAdminCreditsTransactions,
+  getVideoStatus,
+  generateVideo,
 } from "@/lib/api";
-import type { AdminComment, AdminSongScore, AdminUser } from "@/lib/api";
+import type { AdminComment, AdminSongScore, AdminUser, CreditsSummary, CreditTransaction } from "@/lib/api";
 import { getTotalCommission, getCommissionRate } from "@/lib/near/contract";
 import { GenrePicker } from "@/components/song/GenrePicker";
 
-type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments";
+type Tab = "reports" | "users" | "categories" | "genres" | "languages" | "songs" | "requests" | "comments" | "credits" | "tips";
 
 interface Report {
   id: number;
@@ -908,6 +912,76 @@ function LanguagesPanel() {
 
 // NOTE: Moderation actions (hide/unhide, delete, genre picker) should be available
 // in ALL admin song views (By Score, Search & Moderate), not just search.
+function VideoButton({ uuid }: { uuid: string }) {
+  const [status, setStatus] = useState<"unknown" | "none" | "generating" | "ready">("unknown");
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVideoStatus(uuid).then((s) => {
+      setStatus(s.exists ? "ready" : "none");
+      setUrl(s.url);
+    }).catch(() => setStatus("none"));
+  }, [uuid]);
+
+  if (status === "unknown") return null;
+
+  if (status === "ready") {
+    return (
+      <a
+        href={url!}
+        download
+        className="p-1.5 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 rounded-lg border border-purple-500/20 transition"
+        title="Download video"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      </a>
+    );
+  }
+
+  return (
+    <button
+      onClick={async () => {
+        setStatus("generating");
+        try {
+          const res = await generateVideo(uuid);
+          if (res.status === "exists") {
+            setStatus("ready");
+            setUrl(res.url || null);
+          } else {
+            const poll = setInterval(async () => {
+              const s = await getVideoStatus(uuid);
+              if (s.exists) {
+                setStatus("ready");
+                setUrl(s.url);
+                clearInterval(poll);
+              }
+            }, 5000);
+            setTimeout(() => { clearInterval(poll); if (status === "generating") setStatus("none"); }, 300000);
+          }
+        } catch {
+          setStatus("none");
+        }
+      }}
+      disabled={status === "generating"}
+      className="p-1.5 text-slate-500 hover:text-purple-400 hover:bg-purple-500/10 disabled:opacity-50 rounded-lg border border-white/[0.08] transition"
+      title={status === "generating" ? "Generating..." : "Generate video"}
+    >
+      {status === "generating" ? (
+        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function SongsPanel() {
   const [mode, setMode] = useState<"scores" | "search">("scores");
   const [scoreSort, setScoreSort] = useState<"score" | "latest" | "top">("score");
@@ -1164,6 +1238,7 @@ function SongsPanel() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <VideoButton uuid={song.uuid} />
                     <a
                       href={`/song/${song.uuid}`}
                       target="_blank"
@@ -1754,6 +1829,208 @@ function yoctoToNear(yocto: string): string {
   return near < 0.01 ? near.toFixed(6) : near.toFixed(2);
 }
 
+// ── Credits Panel ──
+
+function CreditsPanel() {
+  const [summary, setSummary] = useState<CreditsSummary | null>(null);
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      getAdminCreditsSummary(),
+      getAdminCreditsTransactions(100),
+    ]).then(([s, t]) => {
+      setSummary(s);
+      setTransactions(t);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div className="text-slate-500 text-sm py-8 text-center">Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Top-ups</div>
+            <div className="text-lg font-bold text-green-400">
+              +{summary.total_topup_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Spent</div>
+            <div className="text-lg font-bold text-orange-400">
+              -{summary.total_spent_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Total Refunded</div>
+            <div className="text-lg font-bold text-cyan-400">
+              +{summary.total_refunded_credits.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Net Balance</div>
+            <div className="text-lg font-bold text-slate-100">
+              {summary.net_balance.toLocaleString()}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Premium Purchases</div>
+            <div className="text-lg font-bold text-purple-400">
+              {summary.total_premium_purchases}
+            </div>
+          </div>
+          <div className="glass-card rounded-xl px-4 py-3">
+            <div className="text-xs text-slate-500">Premium Days Sold</div>
+            <div className="text-lg font-bold text-purple-400">
+              {summary.total_premium_days}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transactions table */}
+      <div className="glass-card rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-4">
+          Transactions
+        </h3>
+        {transactions.length === 0 ? (
+          <p className="text-slate-500 text-sm">No transactions yet</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-500 border-b border-white/[0.06]">
+                  <th className="text-left py-2 pr-4">Date</th>
+                  <th className="text-left py-2 pr-4">User</th>
+                  <th className="text-left py-2 pr-4">Type</th>
+                  <th className="text-left py-2 pr-4">Detail</th>
+                  <th className="text-right py-2">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((t, i) => (
+                  <tr key={i} className="border-b border-white/[0.04]">
+                    <td className="py-2 pr-4 text-slate-400">
+                      {new Date(t.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-2 pr-4 text-slate-300 font-mono">
+                      {t.slug}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          t.type === "topup"
+                            ? "bg-green-500/10 text-green-400"
+                            : t.type === "refund"
+                            ? "bg-cyan-500/10 text-cyan-400"
+                            : t.type === "premium"
+                            ? "bg-purple-500/10 text-purple-400"
+                            : "bg-orange-500/10 text-orange-400"
+                        }`}
+                      >
+                        {t.type}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 text-slate-500">
+                      {t.detail.replace(/_/g, " ")}
+                    </td>
+                    <td
+                      className={`py-2 text-right font-mono ${
+                        t.type === "topup"
+                          ? "text-green-400"
+                          : t.type === "refund"
+                          ? "text-cyan-400"
+                          : t.type === "premium"
+                          ? "text-purple-400"
+                          : "text-orange-400"
+                      }`}
+                    >
+                      {t.type === "premium" ? `${t.amount}d` : `${t.type === "usage" ? "-" : "+"}${Math.abs(t.amount)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TipsPanel() {
+  const [tips, setTips] = useState<import("@/lib/api").AdminTip[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    import("@/lib/api").then(({ getAdminTips }) =>
+      getAdminTips().then(setTips).catch(console.error).finally(() => setLoading(false))
+    );
+  }, []);
+
+  const totalUsd = tips.reduce((s, t) => s + (t.amount_usd_cents || 0), 0);
+  const totalNear = tips.reduce((s, t) => s + (t.amount_yocto ? Number(t.amount_yocto) / 1e24 : 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-4 text-sm">
+        <span className="text-slate-400">Total: <span className="text-green-400 font-bold">${(totalUsd / 100).toFixed(2)} USD</span></span>
+        {totalNear > 0 && <span className="text-slate-400">+ <span className="text-cyan-400 font-bold">{totalNear.toFixed(2)} NEAR</span></span>}
+        <span className="text-slate-500">{tips.length} tips</span>
+      </div>
+      {loading ? (
+        <div className="text-slate-500">Loading...</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500 border-b border-white/[0.06]">
+                <th className="pb-2 pr-3">From</th>
+                <th className="pb-2 pr-3">To</th>
+                <th className="pb-2 pr-3">Song</th>
+                <th className="pb-2 pr-3">Amount</th>
+                <th className="pb-2">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tips.map((t) => (
+                <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                  <td className="py-2 pr-3">
+                    <a href={`/profile/${t.tipper_slug}`} className="text-purple-400 hover:underline">{t.tipper_slug}</a>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <a href={`/profile/${t.recipient_slug}`} className="text-cyan-400 hover:underline">{t.recipient_slug}</a>
+                  </td>
+                  <td className="py-2 pr-3 max-w-[200px] truncate">
+                    {t.song_uuid ? (
+                      <a href={`/song/${t.song_uuid}`} className="text-slate-300 hover:underline">{t.song_title || "—"}</a>
+                    ) : <span className="text-slate-600">profile tip</span>}
+                  </td>
+                  <td className="py-2 pr-3 font-medium">
+                    {t.amount_usd_cents ? (
+                      <span className="text-green-400">${(t.amount_usd_cents / 100).toFixed(2)}</span>
+                    ) : t.amount_yocto ? (
+                      <span className="text-cyan-400">{(Number(t.amount_yocto) / 1e24).toFixed(2)} N</span>
+                    ) : "—"}
+                  </td>
+                  <td className="py-2 text-slate-500 text-xs">{new Date(t.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, isAuthenticated, loading, signInWithGoogle } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("reports");
@@ -1803,6 +2080,8 @@ export default function AdminPage() {
     { key: "categories", label: "Categories" },
     { key: "genres", label: "Genres" },
     { key: "languages", label: "Languages" },
+    { key: "credits", label: "Credits" },
+    { key: "tips", label: "Tips" },
   ];
 
   return (
@@ -1853,6 +2132,8 @@ export default function AdminPage() {
         {activeTab === "categories" && <CategoriesPanel />}
         {activeTab === "genres" && <GenresPanel />}
         {activeTab === "languages" && <LanguagesPanel />}
+        {activeTab === "credits" && <CreditsPanel />}
+        {activeTab === "tips" && <TipsPanel />}
       </div>
     </div>
   );

@@ -3,10 +3,14 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
+import { useSolanaWallet } from "@/contexts/SolanaWalletContext";
+import { useEthWallet } from "@/contexts/EthWalletContext";
 
 export function SignInModal() {
   const { showSignInModal, closeSignInModal, signInWithGoogle } = useAuth();
   const { connectAndSignIn } = useNearWallet();
+  const { connectAndSignIn: connectSolana } = useSolanaWallet();
+  const { connectAndSignIn: connectEth } = useEthWallet();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,8 +30,8 @@ export function SignInModal() {
       onClick={(e) => { if (e.target === overlayRef.current) closeSignInModal(); }}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
     >
-      <div className="w-full max-w-sm mx-4 glass-card rounded-2xl border border-white/[0.1] shadow-2xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-2">Sign in to NEAR FM</h2>
+      <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/[0.1] shadow-2xl p-6 bg-slate-900/95 backdrop-blur-xl">
+        <h2 className="text-lg font-semibold text-white mb-2">Sign in to AI RADIO</h2>
         <ul className="text-sm text-slate-400 mb-6 space-y-1.5">
           <li className="flex items-center gap-2"><span className="text-purple-400">&#x2022;</span> Vote and comment on songs</li>
           <li className="flex items-center gap-2"><span className="text-purple-400">&#x2022;</span> Follow your favorite artists</li>
@@ -53,6 +57,28 @@ export function SignInModal() {
             Sign in with Google
           </button>
 
+          {/* Ethereum */}
+          <button
+            onClick={() => {
+              closeSignInModal();
+              connectEth();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.06] border border-white/[0.1] text-sm text-slate-200 hover:bg-white/[0.1] transition-all"
+          >
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 784 784" fill="none">
+              <path d="M392 0L387.5 15.3V536.2L392 540.7L633.6 398.2L392 0Z" fill="#343434"/>
+              <path d="M392 0L150.4 398.2L392 540.7V289.6V0Z" fill="#8C8C8C"/>
+              <path d="M392 586.4L389.5 589.4V779.3L392 784L633.8 444L392 586.4Z" fill="#3C3C3C"/>
+              <path d="M392 784V586.4L150.4 444L392 784Z" fill="#8C8C8C"/>
+              <path d="M392 540.7L633.6 398.2L392 289.6V540.7Z" fill="#141414"/>
+              <path d="M150.4 398.2L392 540.7V289.6L150.4 398.2Z" fill="#393939"/>
+            </svg>
+            <span className="flex flex-col items-start">
+              <span>Sign in with EVM Wallet</span>
+              <span className="text-[10px] text-slate-500 font-normal">Ethereum, Base, Arbitrum, Polygon, BSC, Optimism</span>
+            </span>
+          </button>
+
           {/* NEAR */}
           <button
             onClick={() => {
@@ -65,6 +91,26 @@ export function SignInModal() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3" />
             </svg>
             Sign in with NEAR
+          </button>
+
+          {/* Solana */}
+          <button
+            onClick={() => {
+              closeSignInModal();
+              connectSolana();
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.06] border border-white/[0.1] text-sm text-slate-200 hover:bg-white/[0.1] transition-all"
+          >
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 397.7 311.7" fill="none">
+              <linearGradient id="sol-a" x1="360.9" y1="351.5" x2="141.2" y2="-69.2" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 -25)">
+                <stop offset="0" stopColor="#00FFA3" />
+                <stop offset="1" stopColor="#DC1FFF" />
+              </linearGradient>
+              <path fill="url(#sol-a)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z" />
+              <path fill="url(#sol-a)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z" />
+              <path fill="url(#sol-a)" d="M333.1 120c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1L333.1 120z" />
+            </svg>
+            Sign in with Solana
           </button>
         </div>
 

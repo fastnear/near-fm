@@ -166,6 +166,36 @@ export async function computeFileHash(content: Uint8Array): Promise<string> {
 }
 
 /**
+ * Upload a file to FastFS via the server-side relayer.
+ * For users without a NEAR wallet (Solana, Google).
+ */
+export async function uploadToFastFSViaRelayer(
+  file: File,
+): Promise<{ url: string; hash: string; relativePath: string }> {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const resp = await fetch(`${API_URL}/api/fastfs/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `Upload failed: ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  return {
+    url: data.url,
+    hash: data.hash,
+    relativePath: data.relative_path,
+  };
+}
+
+/**
  * Construct the FastFS URL for a file.
  * Uses main.fastfs.io path-based format to avoid SSL/DNS issues with subdomains.
  */

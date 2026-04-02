@@ -17,6 +17,10 @@ pub struct Config {
     pub google_redirect_uri: String,
     pub frontend_url: String,
     pub suno_api_key: String,
+    pub treasury_agent_key: String,
+    pub fastfs_relayer_account_id: Option<String>,
+    pub fastfs_relayer_private_key: Option<String>,
+    pub fastfs_relayer_rpc_url: Option<String>,
 }
 
 impl Config {
@@ -75,6 +79,10 @@ impl Config {
             google_redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_default(),
             frontend_url: env::var("FRONTEND_URL").unwrap_or_else(|_| "https://near.fm".to_string()),
             suno_api_key: env::var("SUNO_API_KEY").unwrap_or_default(),
+            treasury_agent_key: env::var("TREASURY_AGENT_KEY").unwrap_or_default(),
+            fastfs_relayer_account_id: env::var("FASTFS_RELAYER_ACCOUNT_ID").ok(),
+            fastfs_relayer_private_key: env::var("FASTFS_RELAYER_PRIVATE_KEY").ok(),
+            fastfs_relayer_rpc_url: env::var("FASTFS_RELAYER_RPC_URL").ok(),
         }
     }
 

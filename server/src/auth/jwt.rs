@@ -17,6 +17,10 @@ pub struct Claims {
     pub exp: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,  // NEAR wallet account, if linked
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solana_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eth_address: Option<String>,
 }
 
 pub fn create_token(
@@ -25,6 +29,8 @@ pub fn create_token(
     user_id: i32,
     is_admin: bool,
     account_id: Option<&str>,
+    solana_address: Option<&str>,
+    eth_address: Option<&str>,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(365))
@@ -37,6 +43,8 @@ pub fn create_token(
         is_admin,
         exp: expiration,
         account_id: account_id.map(|s| s.to_string()),
+        solana_address: solana_address.map(|s| s.to_string()),
+        eth_address: eth_address.map(|s| s.to_string()),
     };
 
     encode(
@@ -55,7 +63,7 @@ pub fn decode_token(secret: &str, token: &str) -> Result<Claims, jsonwebtoken::e
     Ok(token_data.claims)
 }
 
-/// Auth middleware — extracts JWT from Authorization header, sets claims as extension.
+/// Auth middleware — extracts JWT from Authorization header or cookie, sets claims as extension.
 /// Does NOT reject unauthenticated requests — routes check claims themselves.
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -88,6 +96,7 @@ pub async fn auth_middleware(
         }
     }
 
+    // 3. JWT decode
     if let Some(token) = token_found {
         if let Ok(claims) = decode_token(&state.config.jwt_secret, &token) {
             req.extensions_mut().insert(claims);

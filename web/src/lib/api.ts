@@ -38,6 +38,9 @@ export interface AuthUser {
   slug: string;
   account_id: string; // slug for backward compat
   near_account_id: string | null;
+  solana_address: string | null;
+  eth_address: string | null;
+  eth_chain_id: number | null;
   display_name: string | null;
   avatar_url: string | null;
   is_admin: boolean;
@@ -46,6 +49,8 @@ export interface AuthUser {
   premium_until: string | null;
   auth_provider: string;
   reputation_score: string;
+  credit_balance: number;
+  daily_credits_remaining: number;
 }
 
 export async function verifyAuth(payload: {
@@ -71,6 +76,11 @@ export async function getCurrentUser(): Promise<AuthUser> {
 
 export async function linkWallet(payload: {
   account_id: string;
+  public_key: string;
+  signature: string;
+  message: string;
+  nonce: number[];
+  recipient: string;
 }): Promise<{
   token: string;
   user: AuthUser;
@@ -350,6 +360,193 @@ export async function updateUserProfile(accountId: string, data: {
   });
 }
 
+// ── Premium ──
+
+export async function premiumSubscribe(checkKey: string, accountId: string): Promise<{
+  premium_until: string;
+  days_added: number;
+  is_gift: boolean;
+}> {
+  return fetchApi("/api/premium/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ check_key: checkKey, account_id: accountId }),
+  });
+}
+
+// ── Profile Comments ──
+
+export interface ProfileComment {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  amount_yocto: string | null;
+  reply_count: number;
+}
+
+export async function getProfileComments(accountId: string): Promise<ProfileComment[]> {
+  return fetchApi(`/api/users/${accountId}/comments`);
+}
+
+export interface SongTipEntry {
+  id: number;
+  song_uuid: string | null;
+  song_title: string | null;
+  song_cover_image_url: string | null;
+  tipper_slug: string;
+  tipper_display_name: string | null;
+  tipper_avatar_url: string | null;
+  amount_yocto: string | null;
+  amount_usd_cents: number | null;
+  payment_method: string;
+  created_at: string;
+}
+
+export async function getSongTips(accountId: string): Promise<SongTipEntry[]> {
+  return fetchApi(`/api/users/${accountId}/song-tips`);
+}
+
+export interface PremiumGiftEntry {
+  id: number;
+  gifted_by_slug: string;
+  gifted_by_display_name: string | null;
+  gifted_by_avatar_url: string | null;
+  days_added: number;
+  created_at: string;
+}
+
+export async function getPremiumGifts(accountId: string): Promise<PremiumGiftEntry[]> {
+  return fetchApi(`/api/users/${accountId}/premium-gifts`);
+}
+
+export async function createProfileComment(accountId: string, body: string): Promise<ProfileComment> {
+  return fetchApi(`/api/users/${accountId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteProfileComment(accountId: string, id: number): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/comments/${id}`, { method: "DELETE" });
+}
+
+export async function recordProfileTip(accountId: string, data: {
+  tx_hash: string;
+  amount_yocto: string;
+  from_balance: boolean;
+  body?: string;
+}): Promise<ProfileComment> {
+  return fetchApi(`/api/users/${accountId}/tip`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// ── Blog Posts ──
+
+export interface BlogPost {
+  id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  updated_at: string | null;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  reply_count: number;
+}
+
+export async function getBlogPosts(accountId: string): Promise<BlogPost[]> {
+  return fetchApi(`/api/users/${accountId}/blog`);
+}
+
+export async function getBlogPost(accountId: string, postId: number): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`);
+}
+
+export async function createBlogPost(accountId: string, body: string): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function updateBlogPost(accountId: string, postId: number, body: string): Promise<BlogPost> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteBlogPost(accountId: string, postId: number): Promise<void> {
+  return fetchApi(`/api/users/${accountId}/blog/${postId}`, { method: "DELETE" });
+}
+
+// ── Community Feed ──
+
+export interface CommunityFeedItem {
+  id: number;
+  item_type: "blog_post" | "song_comment";
+  body: string;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+  song_uuid: string | null;
+  song_title: string | null;
+  song_cover_image_url: string | null;
+  reply_count: number | null;
+  updated_at: string | null;
+  blog_post_id: number | null;
+}
+
+export async function getCommunityFeed(page?: number, limit?: number): Promise<{ items: CommunityFeedItem[]; page: number; limit: number }> {
+  const params = new URLSearchParams();
+  if (page) params.set("page", String(page));
+  if (limit) params.set("limit", String(limit));
+  return fetchApi(`/api/feed/community?${params.toString()}`);
+}
+
+// ── Post Replies ──
+
+export interface PostReply {
+  id: number;
+  parent_type: string;
+  parent_id: number;
+  body: string;
+  is_hidden: boolean;
+  created_at: string;
+  author_account_id: string;
+  author_display_name: string | null;
+  author_avatar_url: string | null;
+  author_is_premium: boolean;
+  author_is_agent: boolean;
+}
+
+export async function getReplies(parentType: string, parentId: number): Promise<PostReply[]> {
+  return fetchApi(`/api/posts/${parentType}/${parentId}/replies`);
+}
+
+export async function createReply(parentType: string, parentId: number, body: string): Promise<PostReply> {
+  return fetchApi(`/api/posts/${parentType}/${parentId}/replies`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function deleteReply(replyId: number): Promise<void> {
+  return fetchApi(`/api/replies/${replyId}`, { method: "DELETE" });
+}
+
 // ── User Blocks ──
 
 export async function blockUser(accountId: string): Promise<void> {
@@ -417,6 +614,9 @@ export async function getStats(): Promise<{
   total_plays: number;
   total_tips_yocto: string;
   total_bounties_yocto: string;
+  total_transactions: number;
+  total_tips_usd_cents: number;
+  total_bounties_usd_cents: number;
 }> {
   return fetchApi("/api/stats");
 }
@@ -504,6 +704,105 @@ export async function moderateSong(uuid: string, data: { is_hidden?: boolean; ca
 
 export async function deleteSong(uuid: string): Promise<void> {
   return fetchApi(`/api/admin/songs/${uuid}`, { method: "DELETE" });
+}
+
+// ── Admin Tips ──
+
+export interface AdminTip {
+  id: number;
+  tipper_slug: string;
+  recipient_slug: string;
+  song_title: string | null;
+  song_uuid: string | null;
+  amount_yocto: string | null;
+  amount_usd_cents: number | null;
+  payment_method: string | null;
+  created_at: string;
+}
+
+export async function getAdminTips(): Promise<AdminTip[]> {
+  return fetchApi("/api/admin/tips");
+}
+
+// ── Video ──
+
+export async function getVideoStatus(uuid: string): Promise<{ exists: boolean; url: string | null }> {
+  return fetchApi(`/api/songs/${uuid}/video`);
+}
+
+export async function generateVideo(uuid: string): Promise<{ status: string; url?: string }> {
+  return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "POST" });
+}
+
+export async function generateVideoPremium(uuid: string): Promise<{ status: string; url?: string }> {
+  return fetchApi(`/api/songs/${uuid}/video/generate`, { method: "POST" });
+}
+
+export async function deleteVideo(uuid: string): Promise<void> {
+  return fetchApi(`/api/admin/songs/${uuid}/video`, { method: "DELETE" });
+}
+
+// ── Wallet ──
+
+export async function backupWallet(apiKey: string, nearAccountId: string): Promise<void> {
+  return fetchApi("/api/wallet/backup", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey, near_account_id: nearAccountId }),
+  });
+}
+
+export async function restoreWallet(): Promise<{ api_key: string | null; near_account_id: string | null }> {
+  return fetchApi("/api/wallet/restore");
+}
+
+export async function getWalletBalance(): Promise<{ balance_usdc: string; balance_usdc_formatted: string }> {
+  return fetchApi("/api/wallet/balance");
+}
+
+export async function sendTipFromBalance(opts: { songUuid?: string; profileSlug?: string; amount_cents?: number; amount_raw?: string }): Promise<{ tip_id: number; amount_cents: number; commission_cents: number }> {
+  return fetchApi("/api/tips/send", {
+    method: "POST",
+    body: JSON.stringify({ song_uuid: opts.songUuid, profile_slug: opts.profileSlug, amount_cents: opts.amount_cents, amount_raw: opts.amount_raw }),
+  });
+}
+
+export async function createBountyFromBalance(title: string, description: string, amountCents: number, languageId?: number): Promise<{ uuid: string; request_id: number }> {
+  return fetchApi("/api/bounties/create", {
+    method: "POST",
+    body: JSON.stringify({ title, description, amount_cents: amountCents, language_id: languageId }),
+  });
+}
+
+export async function topupBountyFromBalance(uuid: string, amountCents: number): Promise<{ status: string }> {
+  return fetchApi(`/api/bounties/${uuid}/topup`, {
+    method: "POST",
+    body: JSON.stringify({ amount_cents: amountCents }),
+  });
+}
+
+export async function awardBountyFromBalance(uuid: string, awardedSongId: number): Promise<{ status: string; recipient_cents: number }> {
+  return fetchApi(`/api/bounties/${uuid}/award`, {
+    method: "POST",
+    body: JSON.stringify({ awarded_song_id: awardedSongId }),
+  });
+}
+
+export async function withdrawBountyFromBalance(uuid: string): Promise<{ status: string; refund_cents: number; penalty_cents: number }> {
+  return fetchApi(`/api/bounties/${uuid}/withdraw`, { method: "POST" });
+}
+
+export async function buyPremiumFromBalance(months: number, recipientSlug?: string): Promise<{ status: string; days_added: number; price_cents: number; is_gift: boolean }> {
+  return fetchApi("/api/premium/buy", {
+    method: "POST",
+    body: JSON.stringify({ months, recipient_slug: recipientSlug }),
+  });
+}
+
+export async function withdrawFromBalance(chain: string, receiver: string, opts: { amount_cents?: number; amount_raw?: string }): Promise<{ status: string }> {
+  return fetchApi("/api/wallet/withdraw", {
+    method: "POST",
+    body: JSON.stringify({ chain, receiver, ...opts }),
+  });
 }
 
 // ── Comments ──
@@ -741,4 +1040,78 @@ export interface SunoLyricsResponse {
 
 export async function sunoLyricsStatus(taskId: string): Promise<SunoLyricsResponse> {
   return fetchApi(`/api/suno/lyrics-status?taskId=${encodeURIComponent(taskId)}`);
+}
+
+// ── Credits ──
+
+export async function creditTopup(checkKey: string, accountId: string): Promise<{
+  credits_added: number;
+  new_balance: number;
+}> {
+  return fetchApi("/api/credits/topup", {
+    method: "POST",
+    body: JSON.stringify({ check_key: checkKey, account_id: accountId }),
+  });
+}
+
+export async function creditBalance(): Promise<{ credit_balance: number }> {
+  return fetchApi("/api/credits/balance");
+}
+
+export interface TopupRecord {
+  token: string;
+  amount: string;
+  credits_added: number;
+  created_at: string;
+}
+
+export async function creditHistory(limit?: number): Promise<TopupRecord[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi(`/api/credits/history${params}`);
+}
+
+export interface UsageRecord {
+  credits_spent: number;
+  from_daily: number;
+  from_purchased: number;
+  action: string;
+  reference_id: string | null;
+  created_at: string;
+}
+
+export async function creditUsage(limit?: number): Promise<UsageRecord[]> {
+  const params = limit ? `?limit=${limit}` : "";
+  return fetchApi(`/api/credits/usage${params}`);
+}
+
+// ── Admin Credits ──
+
+export interface CreditsSummary {
+  total_topup_credits: number;
+  total_spent_credits: number;
+  total_refunded_credits: number;
+  net_balance: number;
+  total_premium_purchases: number;
+  total_premium_days: number;
+}
+
+export interface CreditTransaction {
+  type: string;
+  slug: string;
+  amount: number;
+  detail: string;
+  created_at: string;
+}
+
+export async function getAdminCreditsSummary(): Promise<CreditsSummary> {
+  return fetchApi("/api/admin/credits/summary");
+}
+
+export async function getAdminCreditsTransactions(
+  limit = 50,
+  offset = 0
+): Promise<CreditTransaction[]> {
+  return fetchApi(
+    `/api/admin/credits/transactions?limit=${limit}&offset=${offset}`
+  );
 }

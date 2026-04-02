@@ -7,9 +7,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { createSong, getSongs, getLanguages, getCategories, getRequest } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
+import { BountyPicker } from "@/components/song/BountyPicker";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -29,7 +31,7 @@ export default function UploadPageWrapper() {
 }
 
 function UploadPage() {
-  const { user, isAuthenticated, signInWithGoogle } = useAuth();
+  const { user, isAuthenticated, promptSignIn } = useAuth();
   const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction } = useNearWallet();
   const searchParams = useSearchParams();
   const fulfillsRequestId = searchParams.get("fulfills_request_id");
@@ -53,6 +55,9 @@ function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState("");
   const [error, setError] = useState("");
   const [signing, setSigning] = useState(false);
+
+  // Bounty picker
+  const [pickedRequest, setPickedRequest] = useState<SongRequest | null>(null);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -91,29 +96,21 @@ function UploadPage() {
           </div>
           <h1 className="text-2xl font-bold text-white mb-3">Upload a Song</h1>
           <p className="text-slate-400 mb-8">
-            Sign in and connect a NEAR wallet to upload AI-generated music.
+            Sign in to upload AI-generated music.
           </p>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={connectAndSignIn}
-              className="btn-primary px-8 py-3 rounded-xl text-sm"
-            >
-              Sign in with NEAR Wallet
-            </button>
-            <button
-              onClick={signInWithGoogle}
-              className="px-8 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
-            >
-              Sign in with Google
-            </button>
-          </div>
+          <button
+            onClick={promptSignIn}
+            className="btn-primary px-8 py-3 rounded-xl text-sm"
+          >
+            Sign In
+          </button>
         </div>
       </div>
     );
   }
 
-  // Logged in but no wallet connected → need to link/connect wallet
-  if (!accountId) {
+  // Logged in but no wallet at all (Google-only user without any chain wallet)
+  if (!accountId && !user?.solana_address && !user?.eth_address) {
     return (
       <div className="px-4 py-16 text-center">
         <div className="glass-card rounded-3xl p-12 max-w-md mx-auto">
@@ -150,8 +147,29 @@ function UploadPage() {
     setSigning(false);
   };
 
+  // Upload bytes to FastFS — uses relayer if no NEAR wallet
+  const uploadBytes = async (bytes: Uint8Array, mime: string): Promise<{ url: string; hash: string }> => {
+    const hash = await computeFileHash(bytes);
+    const relPath = getRelativePath(hash, mime);
+
+    if (accountId) {
+      const parts = prepareFastFSUpload(relPath, mime, bytes);
+      await uploadToFastFS(
+        (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
+        parts,
+        (done, total) => setUploadProgress(`Uploading (${done}/${total} chunks)...`),
+      );
+      return { url: getFastFSUrl(accountId, relPath), hash };
+    } else {
+      const blob = new Blob([bytes as BlobPart], { type: mime });
+      const file = new File([blob], relPath, { type: mime });
+      const result = await uploadToFastFSViaRelayer(file);
+      return { url: result.url, hash: result.hash };
+    }
+  };
+
   const handleUpload = async () => {
-    if (!accountId) { linkWallet(); return; }
+    if (!isAuthenticated) { promptSignIn(); return; }
 
     if (!audioFile || !title.trim() || !lyrics.trim()) {
       setError("Title, lyrics, and audio file are required");
@@ -162,40 +180,16 @@ function UploadPage() {
     setError("");
 
     try {
-      // Upload cover first (small file) — gives FastFS more time to index
-      // while the larger audio file uploads after
       let coverUrl: string | undefined;
       if (coverFile) {
         setUploadProgress("Uploading cover image...");
-        const coverBuffer = await coverFile.arrayBuffer();
-        const coverBytes = new Uint8Array(coverBuffer);
-        const coverHash = await computeFileHash(coverBytes);
-        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
-        const coverParts = prepareFastFSUpload(
-          coverRelPath,
-          coverFile.type || "image/jpeg",
-          coverBytes
-        );
-
-        await uploadToFastFS(
-          (params) =>
-            callFunction({
-              contractId: params.contractId,
-              method: params.method,
-              args: params.args,
-              gas: params.gas,
-            }),
-          coverParts
-        );
-
-        coverUrl = getFastFSUrl(accountId, coverRelPath);
+        const coverBytes = new Uint8Array(await coverFile.arrayBuffer());
+        const coverResult = await uploadBytes(coverBytes, coverFile.type || "image/jpeg");
+        coverUrl = coverResult.url;
       }
 
-      setUploadProgress("Reading audio file...");
-      const audioBuffer = await audioFile.arrayBuffer();
-      const audioBytes = new Uint8Array(audioBuffer);
-
       setUploadProgress("Checking for duplicates...");
+      const audioBytes = new Uint8Array(await audioFile.arrayBuffer());
       const audioHash = await computeFileHash(audioBytes);
       try {
         await getSongs({ audio_hash: audioHash });
@@ -207,31 +201,9 @@ function UploadPage() {
         }
       }
 
-      const audioRelPath = getRelativePath(audioHash, audioFile.type || "audio/mpeg");
-      const audioParts = prepareFastFSUpload(
-        audioRelPath,
-        audioFile.type || "audio/mpeg",
-        audioBytes
-      );
-
-      setUploadProgress(
-        `Uploading audio (0/${audioParts.length} chunks)...`
-      );
-
-      await uploadToFastFS(
-        (params) =>
-          callFunction({
-            contractId: params.contractId,
-            method: params.method,
-            args: params.args,
-            gas: params.gas,
-          }),
-        audioParts,
-        (done, total) =>
-          setUploadProgress(`Uploading audio (${done}/${total} chunks)...`)
-      );
-
-      const audioUrl = getFastFSUrl(accountId, audioRelPath);
+      setUploadProgress("Uploading audio...");
+      const audioResult = await uploadBytes(audioBytes, audioFile.type || "audio/mpeg");
+      const audioUrl = audioResult.url;
 
       setUploadProgress("Saving song...");
       const song = await createSong({
@@ -246,7 +218,7 @@ function UploadPage() {
         cover_image_url: coverUrl,
         language_id: languageId,
         category_id: categoryId,
-        fulfills_request_id: fulfillsRequestId ? Number(fulfillsRequestId) : undefined,
+        fulfills_request_id: fulfillsRequestId ? Number(fulfillsRequestId) : pickedRequest ? pickedRequest.id : undefined,
         genre_ids: genreIds.length > 0 ? genreIds : undefined,
       });
 
@@ -278,7 +250,7 @@ function UploadPage() {
               )}
             </div>
             <div className="text-right shrink-0">
-              <div className="text-lg font-bold text-purple-400">{formatNear(bountyRequest.bounty_amount_yocto)} NEAR</div>
+              <div className="text-lg font-bold text-purple-400">{bountyRequest.bounty_usd_cents ? `$${(bountyRequest.bounty_usd_cents / 100).toFixed(2)}` : `${formatNear(bountyRequest.bounty_amount_yocto)} NEAR`}</div>
               <div className="text-xs text-slate-500">bounty</div>
             </div>
           </div>
@@ -459,6 +431,11 @@ function UploadPage() {
             Songs with genres, correct language, and cover image get higher visibility in trending feed.
           </p>
         </div>
+
+        {/* Bounty request picker — hidden when already fulfilling via query param */}
+        {!fulfillsRequestId && (
+          <BountyPicker value={pickedRequest} onChange={setPickedRequest} />
+        )}
 
         {/* Error */}
         {error && (

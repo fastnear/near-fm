@@ -19,12 +19,12 @@ pub fn build_session_cookie(token: &str, frontend_url: &str) -> String {
     let is_prod = frontend_url.contains("near.fm");
     if is_prod {
         format!(
-            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; Max-Age=31536000",
+            "nearfm_session={}; Domain=.near.fm; Path=/; SameSite=Lax; Secure; HttpOnly; Max-Age=31536000",
             token
         )
     } else {
         format!(
-            "nearfm_session={}; Path=/; SameSite=Lax; Max-Age=31536000",
+            "nearfm_session={}; Path=/; SameSite=Lax; HttpOnly; Max-Age=31536000",
             token
         )
     }
@@ -58,6 +58,11 @@ pub struct UserResponse {
     pub reputation_score: String,
     pub auth_provider: String,
     pub near_account_id: Option<String>,
+    pub solana_address: Option<String>,
+    pub eth_address: Option<String>,
+    pub eth_chain_id: Option<i32>,
+    pub credit_balance: i32,
+    pub daily_credits_remaining: i32,
 }
 
 fn compute_premium(user: &crate::db::models::User) -> (bool, Option<String>) {
@@ -66,22 +71,41 @@ fn compute_premium(user: &crate::db::models::User) -> (bool, Option<String>) {
     (is_premium, premium_until)
 }
 
-pub async fn verify(
-    State(state): State<AppState>,
-    Json(req): Json<VerifyRequest>,
-) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 0. Parse and validate JSON message
-    let msg: serde_json::Value = serde_json::from_str(&req.message).map_err(|_| {
+fn compute_daily_remaining(user: &crate::db::models::User, is_premium: bool) -> i32 {
+    if !is_premium {
+        return 0;
+    }
+    let used_today = if user.daily_credits_date == chrono::Utc::now().date_naive() {
+        user.daily_credits_used
+    } else {
+        0
+    };
+    (super::suno::DAILY_PREMIUM_ALLOWANCE - used_today).max(0)
+}
+
+/// Verify wallet ownership via NEP-413 signature + RPC key check.
+/// `expected_action` is the required "action" field in the signed message (e.g. "sign_in", "link_wallet").
+async fn verify_wallet_ownership(
+    rpc_url: &str,
+    account_id: &str,
+    public_key: &str,
+    signature: &str,
+    message: &str,
+    nonce: &[u8],
+    recipient: &str,
+    expected_action: &str,
+) -> Result<(), (StatusCode, String)> {
+    // Parse and validate JSON message
+    let msg: serde_json::Value = serde_json::from_str(message).map_err(|_| {
         (StatusCode::BAD_REQUEST, "Message must be JSON".to_string())
     })?;
 
-    if msg.get("action").and_then(|v| v.as_str()) != Some("sign_in")
+    if msg.get("action").and_then(|v| v.as_str()) != Some(expected_action)
         || msg.get("domain").and_then(|v| v.as_str()) != Some("near.fm")
     {
         return Err((StatusCode::BAD_REQUEST, "Invalid message format".to_string()));
     }
 
-    // Version check — only accept v1+
     let version = msg.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
     if version < 1 {
         return Err((StatusCode::BAD_REQUEST, "Unsupported message version".to_string()));
@@ -97,28 +121,18 @@ pub async fn verify(
         return Err((StatusCode::BAD_REQUEST, "Signature expired".to_string()));
     }
 
-    // 1. Verify NEP-413 signature
-    let valid = nep413::verify_nep413_signature(
-        &req.public_key,
-        &req.signature,
-        &req.message,
-        &req.nonce,
-        &req.recipient,
-    )
-    .map_err(|e| (StatusCode::BAD_REQUEST, format!("Signature error: {}", e)))?;
+    // Verify NEP-413 signature
+    let valid = nep413::verify_nep413_signature(public_key, signature, message, nonce, recipient)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Signature error: {}", e)))?;
 
     if !valid {
         return Err((StatusCode::UNAUTHORIZED, "Invalid signature".to_string()));
     }
 
-    // 2. Verify public key belongs to account via NEAR RPC
-    let key_valid = nep413::verify_access_key(
-        &state.config.near_rpc_url,
-        &req.account_id,
-        &req.public_key,
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // Verify public key belongs to account via NEAR RPC
+    let key_valid = nep413::verify_access_key(rpc_url, account_id, public_key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     if !key_valid {
         return Err((
@@ -126,6 +140,25 @@ pub async fn verify(
             "Public key does not belong to account".to_string(),
         ));
     }
+
+    Ok(())
+}
+
+pub async fn verify(
+    State(state): State<AppState>,
+    Json(req): Json<VerifyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    verify_wallet_ownership(
+        &state.config.near_rpc_url,
+        &req.account_id,
+        &req.public_key,
+        &req.signature,
+        &req.message,
+        &req.nonce,
+        &req.recipient,
+        "sign_in",
+    )
+    .await?;
 
     // 3. Get or create user
     let is_admin = state.config.is_admin(&req.account_id);
@@ -146,6 +179,8 @@ pub async fn verify(
         user.id,
         user.is_admin,
         user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| {
         (
@@ -156,7 +191,19 @@ pub async fn verify(
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
+    // Auto-provision OutLayer wallet in background (non-blocking)
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
     let (is_premium, premium_until) = compute_premium(&user);
+
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
 
     let body = Json(VerifyResponse {
         token,
@@ -171,6 +218,11 @@ pub async fn verify(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
         },
     });
 
@@ -359,10 +411,22 @@ pub async fn google_callback(
         user.id,
         user.is_admin,
         user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
 
     // Build response with session cookie + clear oauth_state cookie + redirect
     let response = axum::response::Response::builder()
@@ -450,6 +514,11 @@ pub struct MeResponse {
     pub premium_until: Option<String>,
     pub auth_provider: String,
     pub reputation_score: String,
+    pub solana_address: Option<String>,
+    pub eth_address: Option<String>,
+    pub eth_chain_id: Option<i32>,
+    pub credit_balance: i32,
+    pub daily_credits_remaining: i32,
 }
 
 /// GET /api/auth/me — get current authenticated user
@@ -470,6 +539,8 @@ pub async fn get_me(
 
     let (is_premium, premium_until) = compute_premium(&user);
 
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
     Ok(Json(MeResponse {
         id: user.id,
         slug: user.slug.clone(),
@@ -483,6 +554,11 @@ pub async fn get_me(
         premium_until,
         auth_provider: user.auth_provider,
         reputation_score: user.reputation_score.to_string(),
+        solana_address: user.solana_address,
+        eth_address: user.eth_address,
+        eth_chain_id: user.eth_chain_id,
+        credit_balance: user.credit_balance,
+        daily_credits_remaining,
     }))
 }
 
@@ -493,24 +569,17 @@ pub async fn logout(
     State(state): State<AppState>,
     extensions: Extensions,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    if let Ok(claims) = require_auth(&extensions) {
-        // Clear linked NEAR wallet
-        sqlx::query("UPDATE users SET account_id = NULL WHERE id = $1")
-            .bind(claims.user_id)
-            .execute(&state.db)
-            .await
-            .ok();
-    }
+    let is_prod = state.config.frontend_url.contains("near.fm");
 
-    // Clear session cookie
-    let clear_cookie = "nearfm_session=; Domain=.near.fm; Path=/; Max-Age=0";
-    let clear_cookie_local = "nearfm_session=; Path=/; Max-Age=0";
+    // Clear session cookie — must match attributes from build_session_cookie
+    let clear_cookie = if is_prod {
+        "nearfm_session=; Domain=.near.fm; Path=/; SameSite=Lax; Secure; HttpOnly; Max-Age=0".to_string()
+    } else {
+        "nearfm_session=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0".to_string()
+    };
 
     Ok((
-        [
-            (header::SET_COOKIE, clear_cookie.to_string()),
-            (header::SET_COOKIE, clear_cookie_local.to_string()),
-        ],
+        [(header::SET_COOKIE, clear_cookie)],
         StatusCode::OK,
     ))
 }
@@ -520,11 +589,15 @@ pub async fn logout(
 #[derive(Debug, Deserialize)]
 pub struct LinkWalletRequest {
     pub account_id: String,
+    pub public_key: String,
+    pub signature: String,
+    pub message: String,
+    pub nonce: Vec<u8>,
+    pub recipient: String,
 }
 
-/// POST /api/auth/link-wallet — link a NEAR wallet to an authenticated account
-/// No signature needed — user is already authenticated via JWT (Google or NEAR).
-/// Wallet ownership is enforced at transaction time by wallet-selector.
+/// POST /api/auth/link-wallet — link a NEAR wallet to an authenticated account.
+/// Requires NEP-413 signature to prove wallet ownership.
 pub async fn link_wallet(
     State(state): State<AppState>,
     extensions: Extensions,
@@ -536,6 +609,19 @@ pub async fn link_wallet(
     if req.account_id.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "account_id is required".to_string()));
     }
+
+    // Verify wallet ownership via NEP-413 signature
+    verify_wallet_ownership(
+        &state.config.near_rpc_url,
+        &req.account_id,
+        &req.public_key,
+        &req.signature,
+        &req.message,
+        &req.nonce,
+        &req.recipient,
+        "link_wallet",
+    )
+    .await?;
 
     // Check if this NEAR account is already linked to another user
     if let Some(existing) = queries::get_user_by_account(&state.db, &req.account_id)
@@ -569,12 +655,15 @@ pub async fn link_wallet(
         user.id,
         is_admin,
         Some(&req.account_id),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
 
     let cookie = build_session_cookie(&token, &state.config.frontend_url);
 
     let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
 
     let body = Json(VerifyResponse {
         token,
@@ -589,6 +678,670 @@ pub async fn link_wallet(
             reputation_score: user.reputation_score.to_string(),
             auth_provider: user.auth_provider,
             near_account_id: Some(req.account_id),
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+// ── Agent auth via NEP-413 signature ──
+
+/// Check if an account_id is a 64-char hex string (implicit NEAR account / Outlayer agent).
+fn is_hex_account(account_id: &str) -> bool {
+    account_id.len() == 64 && account_id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// For hex accounts, derive the expected public key from the account_id itself.
+/// The hex address IS the public key bytes.
+fn hex_account_to_public_key(account_id: &str) -> Result<String, String> {
+    let bytes = hex::decode(account_id)
+        .map_err(|e| format!("Invalid hex account: {}", e))?;
+    Ok(format!("ed25519:{}", bs58::encode(&bytes).into_string()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentAuthRequest {
+    // All fields optional — empty request returns instructions
+    pub account_id: Option<String>,
+    pub public_key: Option<String>,
+    pub signature: Option<String>,
+    pub message: Option<String>,
+    pub nonce: Option<Vec<u8>>,
+    pub recipient: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum AgentAuthResponse {
+    Instructions {
+        instructions: &'static str,
+        message_template: AgentMessageTemplate,
+        example_curl: &'static str,
+    },
+    Success {
+        token: String,
+        user: UserResponse,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentMessageTemplate {
+    pub action: &'static str,
+    pub domain: &'static str,
+    pub version: u32,
+    pub timestamp: &'static str,
+}
+
+/// POST /api/auth/agent — self-service agent registration via NEP-413 signature.
+///
+/// - Empty body → returns instructions on what to sign
+/// - With signature → verifies and returns JWT token
+pub async fn agent_auth(
+    State(state): State<AppState>,
+    Json(req): Json<AgentAuthRequest>,
+) -> Result<Json<AgentAuthResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // If no message provided, return instructions
+    let message = match &req.message {
+        Some(m) if !m.is_empty() => m.clone(),
+        _ => {
+            return Ok(Json(AgentAuthResponse::Instructions {
+                instructions: "Sign a NEP-413 message to authenticate. \
+                    Use Outlayer's /wallet/v1/sign-message or any NEAR wallet. \
+                    Then POST the signed payload back to this endpoint.",
+                message_template: AgentMessageTemplate {
+                    action: "sign_in",
+                    domain: "near.fm",
+                    version: 1,
+                    timestamp: "<current unix timestamp in milliseconds>",
+                },
+                example_curl: r#"curl -X POST https://api.near.fm/api/auth/agent -H "Content-Type: application/json" -d '{"account_id":"<your_account_id>","public_key":"ed25519:...","signature":"ed25519:...","message":"{\"action\":\"sign_in\",\"domain\":\"near.fm\",\"version\":1,\"timestamp\":1710000000000}","nonce":[<32 bytes>],"recipient":"near.fm"}"#,
+            }));
+        }
+    };
+
+    // Require all fields for verification
+    let account_id = req.account_id.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("account_id is required", "Include the account_id from your wallet or Outlayer sign-message response")))?;
+    let public_key = req.public_key.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("public_key is required", "Include the public_key from the sign-message response")))?;
+    let signature = req.signature.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("signature is required", "Include the signature from the sign-message response")))?;
+    let nonce = req.nonce.as_ref().filter(|n| !n.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("nonce is required", "Include the nonce (32 bytes) from the sign-message response")))?;
+    let recipient = req.recipient.as_deref().filter(|s| !s.is_empty())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("recipient is required", "Use \"near.fm\" as recipient")))?;
+
+    // Parse and validate message
+    let msg: serde_json::Value = serde_json::from_str(&message)
+        .map_err(|_| (StatusCode::BAD_REQUEST, agent_error("message must be valid JSON", "Format: {\"action\":\"sign_in\",\"domain\":\"near.fm\",\"version\":1,\"timestamp\":<ms>}")))?;
+
+    if msg.get("action").and_then(|v| v.as_str()) != Some("sign_in")
+        || msg.get("domain").and_then(|v| v.as_str()) != Some("near.fm")
+    {
+        return Err((StatusCode::BAD_REQUEST, agent_error(
+            "message must contain action=sign_in and domain=near.fm",
+            "Use the message_template from the instructions response",
+        )));
+    }
+
+    // Validate timestamp
+    let ts = msg.get("timestamp").and_then(|v| v.as_i64())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, agent_error("missing timestamp in message", "Include current unix timestamp in milliseconds")))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let age_ms = now - ts;
+    if age_ms > 5 * 60 * 1000 || age_ms < -30_000 {
+        return Err((StatusCode::BAD_REQUEST, agent_error(
+            "signature expired (older than 5 minutes)",
+            &format!("Use a fresh timestamp. Current server time: {} ms", now),
+        )));
+    }
+
+    // Verify NEP-413 signature
+    let valid = nep413::verify_nep413_signature(public_key, signature, &message, nonce, recipient)
+        .map_err(|e| (StatusCode::BAD_REQUEST, agent_error(&format!("signature verification failed: {}", e), "Check that public_key, signature, message, nonce, and recipient are all correct")))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, agent_error("invalid signature", "The signature does not match the message and public key")));
+    }
+
+    // For hex accounts (Outlayer agents): verify that public_key matches account_id
+    // For named accounts: verify via NEAR RPC
+    if is_hex_account(account_id) {
+        let expected_pk = hex_account_to_public_key(account_id)
+            .map_err(|e| (StatusCode::BAD_REQUEST, agent_error(&e, "account_id must be a valid 64-char hex string")))?;
+        if public_key != expected_pk {
+            return Err((StatusCode::UNAUTHORIZED, agent_error(
+                "public_key does not match account_id",
+                &format!("For hex accounts, public_key must be derived from account_id. Expected: {}", expected_pk),
+            )));
+        }
+    } else {
+        let key_valid = nep413::verify_access_key(&state.config.near_rpc_url, account_id, public_key)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("RPC error: {}", e), "Try again later")))?;
+        if !key_valid {
+            return Err((StatusCode::UNAUTHORIZED, agent_error("public key does not belong to account", "Verify that the public_key is an access key on the account")));
+        }
+    }
+
+    // Get or create user
+    let is_admin = state.config.is_admin(account_id);
+    let user = queries::get_or_create_user(&state.db, account_id, is_admin)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_or_create_user failed for {}: {:?}", account_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Database error: {}", e), "Try again later"))
+        })?;
+
+    // Mark as agent if not already set
+    if !user.is_agent {
+        if let Err(e) = sqlx::query("UPDATE users SET is_agent = true WHERE id = $1")
+            .bind(user.id)
+            .execute(&state.db)
+            .await
+        {
+            tracing::warn!(user_id = user.id, "Failed to set is_agent flag: {}", e);
+        }
+    }
+
+    // Issue JWT
+    let token = jwt::create_token(&state.config.jwt_secret, &user.slug, user.id, user.is_admin, user.account_id.as_deref(), user.solana_address.as_deref(), user.eth_address.as_deref())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, agent_error(&format!("Token error: {}", e), "Try again later")))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    tracing::info!(user_id = user.id, account_id = %account_id, "Agent authenticated");
+
+    Ok(Json(AgentAuthResponse::Success {
+        token,
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    }))
+}
+
+fn agent_error(error: &str, hint: &str) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "error": error,
+        "hint": hint,
+    }))
+}
+
+// ── Solana Auth ──
+
+#[derive(Debug, Deserialize)]
+pub struct SolanaVerifyRequest {
+    pub solana_address: String,
+    pub signature: String,  // base58
+    pub message: String,
+}
+
+/// Validate the signed message JSON structure and timestamp.
+fn validate_auth_message(message: &str, expected_action: &str) -> Result<(), (StatusCode, String)> {
+    let msg: serde_json::Value = serde_json::from_str(message)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid message JSON".to_string()))?;
+
+    let action = msg["action"].as_str()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing action".to_string()))?;
+    if action != expected_action {
+        return Err((StatusCode::BAD_REQUEST, format!("Expected action '{}', got '{}'", expected_action, action)));
+    }
+
+    let domain = msg["domain"].as_str()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing domain".to_string()))?;
+    if domain != "near.fm" {
+        return Err((StatusCode::BAD_REQUEST, "Invalid domain".to_string()));
+    }
+
+    let ts = msg["timestamp"].as_i64()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing timestamp".to_string()))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let age_ms = now - ts;
+    if age_ms > 5 * 60 * 1000 || age_ms < -30_000 {
+        return Err((StatusCode::BAD_REQUEST, "Message expired or too far in the future".to_string()));
+    }
+
+    Ok(())
+}
+
+/// POST /api/auth/solana/verify — sign in with Solana wallet
+pub async fn solana_verify(
+    State(state): State<AppState>,
+    Json(req): Json<SolanaVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    // 1. Validate message structure
+    validate_auth_message(&req.message, "sign_in")?;
+
+    // 2. Verify Solana signature
+    let valid = crate::auth::solana::verify_solana_signature(
+        &req.solana_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Solana signature".to_string()));
+    }
+
+    // 3. Find or create user
+    let user = match sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE solana_address = $1",
+    )
+    .bind(&req.solana_address)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        Some(u) => u,
+        None => {
+            // Create new user with generated slug
+            let slug = generate_solana_slug(&req.solana_address);
+            sqlx::query_as::<_, crate::db::models::User>(
+                "INSERT INTO users (slug, solana_address, auth_provider) VALUES ($1, $2, 'solana') RETURNING *",
+            )
+            .bind(&slug)
+            .bind(&req.solana_address)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create user: {}", e)))?
+        }
+    };
+
+    if user.is_banned {
+        return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 4. Create JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// POST /api/auth/link-solana — link Solana wallet to existing account
+pub async fn link_solana(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<SolanaVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // 1. Validate message
+    validate_auth_message(&req.message, "link_wallet")?;
+
+    // 2. Verify Solana signature
+    let valid = crate::auth::solana::verify_solana_signature(
+        &req.solana_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Solana signature".to_string()));
+    }
+
+    // 3. Check if Solana address already linked to another user
+    let existing: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE solana_address = $1",
+    )
+    .bind(&req.solana_address)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if let Some((eid,)) = existing {
+        if eid != claims.user_id {
+            return Err((StatusCode::CONFLICT, "This Solana address is already linked to another account".to_string()));
+        }
+    }
+
+    // 4. Link Solana wallet
+    let user = sqlx::query_as::<_, crate::db::models::User>(
+        "UPDATE users SET solana_address = $1 WHERE id = $2 RETURNING *",
+    )
+    .bind(&req.solana_address)
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 5. Issue new JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// Generate a slug from a Solana address: first 12 chars + UUID suffix.
+fn generate_solana_slug(address: &str) -> String {
+    let addr_part = &address[..12.min(address.len())];
+    let suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    format!("{}-{}", addr_part.to_lowercase(), suffix)
+}
+
+/// Generate a slug from an Ethereum address: "0x" + first 8 hex chars + UUID suffix.
+fn generate_eth_slug(address: &str) -> String {
+    let addr = address.strip_prefix("0x").unwrap_or(address);
+    let addr_part = &addr[..8.min(addr.len())];
+    let suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    format!("0x{}-{}", addr_part.to_lowercase(), suffix)
+}
+
+// ── Ethereum Auth ──
+
+#[derive(Debug, Deserialize)]
+pub struct EthVerifyRequest {
+    pub eth_address: String,
+    pub signature: String,   // "0x..." hex
+    pub message: String,
+    pub chain_id: Option<i32>,  // EVM chain ID (1=mainnet, 8453=base, 42161=arbitrum, etc.)
+}
+
+/// POST /api/auth/ethereum/verify — sign in with Ethereum wallet
+pub async fn ethereum_verify(
+    State(state): State<AppState>,
+    Json(req): Json<EthVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    // 1. Validate message structure
+    validate_auth_message(&req.message, "sign_in")?;
+
+    // 2. Verify EIP-191 signature
+    let valid = crate::auth::ethereum::verify_eth_signature(
+        &req.eth_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Ethereum signature".to_string()));
+    }
+
+    // Normalize to lowercase for consistent lookups
+    let eth_addr_lower = req.eth_address.to_lowercase();
+
+    // 3. Find or create user
+    let user = match sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE LOWER(eth_address) = $1",
+    )
+    .bind(&eth_addr_lower)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        Some(u) => u,
+        None => {
+            let slug = generate_eth_slug(&eth_addr_lower);
+            sqlx::query_as::<_, crate::db::models::User>(
+                "INSERT INTO users (slug, eth_address, eth_chain_id, auth_provider) VALUES ($1, $2, $3, 'ethereum') RETURNING *",
+            )
+            .bind(&slug)
+            .bind(&eth_addr_lower)
+            .bind(req.chain_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create user: {}", e)))?
+        }
+    };
+
+    if user.is_banned {
+        return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+
+    // Update chain_id on every login (user may switch networks)
+    if let Some(cid) = req.chain_id {
+        sqlx::query("UPDATE users SET eth_chain_id = $1 WHERE id = $2")
+            .bind(cid).bind(user.id).execute(&state.db).await.ok();
+    }
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    // 4. Create JWT
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    // Auto-provision OutLayer wallet in background
+    {
+        let pool = state.db.clone();
+        let client = state.http_client.clone();
+        let uid = user.id;
+        tokio::spawn(async move {
+            super::wallet::ensure_wallet(&pool, &client, uid).await;
+        });
+    }
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
+        },
+    });
+
+    Ok(([(header::SET_COOKIE, cookie)], body))
+}
+
+/// POST /api/auth/link-ethereum — link Ethereum wallet to existing account
+pub async fn link_ethereum(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Json(req): Json<EthVerifyRequest>,
+) -> Result<([(axum::http::HeaderName, String); 1], Json<VerifyResponse>), (StatusCode, String)> {
+    let claims = require_auth(&extensions)
+        .map_err(|s| (s, "Authentication required".to_string()))?;
+
+    // 1. Validate message
+    validate_auth_message(&req.message, "link_wallet")?;
+
+    // 2. Verify EIP-191 signature
+    let valid = crate::auth::ethereum::verify_eth_signature(
+        &req.eth_address,
+        &req.signature,
+        &req.message,
+    ).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    if !valid {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid Ethereum signature".to_string()));
+    }
+
+    let eth_addr_lower = req.eth_address.to_lowercase();
+
+    // 3. Check if address already linked to another user
+    let existing: Option<(i32,)> = sqlx::query_as(
+        "SELECT id FROM users WHERE LOWER(eth_address) = $1",
+    )
+    .bind(&eth_addr_lower)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if let Some((eid,)) = existing {
+        if eid != claims.user_id {
+            return Err((StatusCode::CONFLICT, "This Ethereum address is already linked to another account".to_string()));
+        }
+    }
+
+    // 4. Link Ethereum address
+    sqlx::query("UPDATE users SET eth_address = $1 WHERE id = $2")
+        .bind(&eth_addr_lower)
+        .bind(claims.user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // 5. Reload user and issue new JWT
+    let user = sqlx::query_as::<_, crate::db::models::User>(
+        "SELECT * FROM users WHERE id = $1",
+    )
+    .bind(claims.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let (is_premium, premium_until) = compute_premium(&user);
+    let daily_credits_remaining = compute_daily_remaining(&user, is_premium);
+
+    let token = jwt::create_token(
+        &state.config.jwt_secret,
+        &user.slug,
+        user.id,
+        user.is_admin,
+        user.account_id.as_deref(),
+        user.solana_address.as_deref(),
+        user.eth_address.as_deref(),
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Token error: {}", e)))?;
+
+    let cookie = build_session_cookie(&token, &state.config.frontend_url);
+
+    let body = Json(VerifyResponse {
+        token: token.clone(),
+        user: UserResponse {
+            id: user.id,
+            account_id: user.slug.clone(),
+            slug: user.slug,
+            display_name: user.display_name,
+            is_admin: user.is_admin,
+            is_premium,
+            premium_until,
+            reputation_score: user.reputation_score.to_string(),
+            auth_provider: user.auth_provider,
+            near_account_id: user.account_id,
+            solana_address: user.solana_address,
+            eth_address: user.eth_address,
+            eth_chain_id: user.eth_chain_id,
+            credit_balance: user.credit_balance,
+            daily_credits_remaining,
         },
     });
 

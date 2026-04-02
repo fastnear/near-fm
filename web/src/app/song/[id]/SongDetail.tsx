@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { Song, Category, Language, Playlist } from "@/types";
-import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, deleteComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist } from "@/lib/api";
+import { getSong, updateSong, reportSong, moderateSong, getComments, createComment, moderateComment, deleteComment, getCategories, getLanguages, getPlaylists, addSongToPlaylist, getVideoStatus, generateVideo, generateVideoPremium, deleteVideo } from "@/lib/api";
 import { GenrePicker } from "@/components/song/GenrePicker";
 import type { Comment } from "@/lib/api";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -13,6 +13,7 @@ import { getRadioPlaylist } from "@/lib/api";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -21,6 +22,12 @@ import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
 import { renderWithMentions } from "@/lib/mentions";
+import { useToast } from "@/components/ui/Toast";
+
+function truncateId(id: string, max = 30): string {
+  if (id.length <= max) return id;
+  return `${id.slice(0, 12)}...${id.slice(-8)}`;
+}
 
 export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [activeUuid, setActiveUuid] = useState(initialUuid);
@@ -46,9 +53,12 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
+  const [videoStatus, setVideoStatus] = useState<{ exists: boolean; url: string | null }>({ exists: false, url: null });
+  const [videoGenerating, setVideoGenerating] = useState(false);
   const { currentSong, isPlaying, togglePlay, playMode, setPlayMode, next, previous, startRadio, queue } = useAudioPlayer();
   const { user, isAuthenticated, promptSignIn } = useAuth();
   const { accountId, callFunction } = useNearWallet();
+  const { showToast } = useToast();
 
   // Track whether the user navigated here manually (should not auto-follow currentSong)
   // vs. the song changed automatically via radio/queue (should follow)
@@ -97,6 +107,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       .then((data) => setSong(data.song))
       .catch(console.error)
       .finally(() => setLoading(false));
+    getVideoStatus(activeUuid).then(setVideoStatus).catch(() => {});
   }, [activeUuid]);
 
   // Poll for validation status updates
@@ -180,15 +191,22 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       let cover_image_url: string | undefined;
 
       // Upload cover to FastFS if a new one was selected
-      if (coverFile && accountId) {
+      if (coverFile && (accountId || user?.solana_address)) {
         setCoverUploading(true);
-        const coverBuffer = await coverFile.arrayBuffer();
-        const coverBytes = new Uint8Array(coverBuffer);
-        const coverHash = await computeFileHash(coverBytes);
-        const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
-        const coverParts = prepareFastFSUpload(coverRelPath, coverFile.type || "image/jpeg", coverBytes);
-        await uploadToFastFS((params) => callFunction(params), coverParts);
-        cover_image_url = getFastFSUrl(accountId, coverRelPath);
+        if (accountId) {
+          // Direct upload via NEAR wallet
+          const coverBuffer = await coverFile.arrayBuffer();
+          const coverBytes = new Uint8Array(coverBuffer);
+          const coverHash = await computeFileHash(coverBytes);
+          const coverRelPath = getRelativePath(coverHash, coverFile.type || "image/jpeg");
+          const coverParts = prepareFastFSUpload(coverRelPath, coverFile.type || "image/jpeg", coverBytes);
+          await uploadToFastFS((params) => callFunction(params), coverParts);
+          cover_image_url = getFastFSUrl(accountId, coverRelPath);
+        } else {
+          // Upload via server relayer
+          const result = await uploadToFastFSViaRelayer(coverFile);
+          cover_image_url = result.url;
+        }
         setCoverUploading(false);
       }
 
@@ -206,6 +224,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       setCoverFile(null);
       setCoverPreview(null);
       setEditing(false);
+      if (cover_image_url && !accountId) {
+        showToast({ message: "Song updated! Cover image may take 1-2 minutes to appear.", type: "success", id: "cover-upload" });
+      }
     } catch (e) {
       console.error("Update failed:", e);
       setCoverUploading(false);
@@ -467,15 +488,15 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                       />
                     </label>
                   )}
-                  {coverFile && !accountId && (
-                    <p className="text-xs text-amber-400 mt-1">Connect NEAR wallet to upload cover image</p>
+                  {coverFile && !accountId && !user?.solana_address && !user?.eth_address && (
+                    <p className="text-xs text-amber-400 mt-1">Connect a wallet to upload cover image</p>
                   )}
                 </div>
               )}
               <div className="flex gap-2">
                 <button
                   onClick={saveEdit}
-                  disabled={editSaving || coverUploading || (!!coverFile && !accountId)}
+                  disabled={editSaving || coverUploading || (!!coverFile && !accountId && !user?.solana_address && !user?.eth_address)}
                   className="px-5 py-2 btn-primary rounded-xl text-sm disabled:opacity-50"
                 >
                   {coverUploading ? "Uploading cover..." : editSaving ? "Saving..." : "Save"}
@@ -504,13 +525,17 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Link
                   href={`/profile/${song.uploader_account_id}`}
                   className="text-slate-400 hover:text-purple-400 transition-colors"
+                  title={!song.uploader_display_name && song.uploader_account_id.length > 30 ? song.uploader_account_id : undefined}
                 >
-                  {song.uploader_display_name || song.uploader_account_id}
+                  {song.uploader_display_name || truncateId(song.uploader_account_id)}
                 </Link>
+                {song.uploader_is_agent && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">⚡ Agent</span>
+                )}
                 {userSlug && userSlug !== song.uploader_account_id && (
                   <FollowButton accountId={song.uploader_account_id} currentUser={userSlug} />
                 )}
@@ -589,7 +614,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
 
                 {/* Share on X */}
                 <a
-                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title}${song.uploader_twitter_handle ? ` by @${song.uploader_twitter_handle}` : ""} — listen on near.fm, decentralized platform for AI-generated music on NEAR\n\n${window.location.href}`)}`}
+                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title}${song.uploader_twitter_handle ? ` by @${song.uploader_twitter_handle}` : ""} — listen on near.fm, decentralized platform for AI-generated music\n\n${window.location.href}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5"
@@ -703,6 +728,76 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </div>
                 )}
 
+                {/* Video: premium + admin */}
+                {(isAdmin || user?.is_premium) && (
+                  videoStatus.exists ? (
+                    <div className="flex items-center gap-1.5">
+                      <a
+                        href={videoStatus.url!}
+                        download
+                        className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5 !text-purple-400 !border-purple-500/20 !bg-purple-500/10"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        Download Video
+                      </a>
+                      {isAdmin && (
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm("Delete generated video?")) return;
+                            try {
+                              await deleteVideo(song.uuid);
+                              setVideoStatus({ exists: false, url: null });
+                            } catch (e) { console.error("Delete video failed:", e); }
+                          }}
+                          className="btn-ghost px-2 py-1.5 text-sm rounded-xl hover:!text-rose-400"
+                          title="Delete video"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        setVideoGenerating(true);
+                        try {
+                          const genFn = isAdmin ? generateVideo : generateVideoPremium;
+                          const res = await genFn(song.uuid);
+                          if (res.status === "exists") {
+                            setVideoStatus({ exists: true, url: res.url || null });
+                            setVideoGenerating(false);
+                          } else {
+                            // Poll for completion
+                            const poll = setInterval(async () => {
+                              const s = await getVideoStatus(song.uuid);
+                              if (s.exists) {
+                                setVideoStatus(s);
+                                setVideoGenerating(false);
+                                clearInterval(poll);
+                              }
+                            }, 5000);
+                            setTimeout(() => { clearInterval(poll); setVideoGenerating(false); }, 300000);
+                          }
+                        } catch (e) {
+                          console.error("Generate video failed:", e);
+                          setVideoGenerating(false);
+                        }
+                      }}
+                      disabled={videoGenerating}
+                      className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5 hover:!text-purple-400 hover:!border-purple-500/20 hover:!bg-purple-500/10 disabled:opacity-50"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      {videoGenerating ? "Generating..." : "Generate Video"}
+                    </button>
+                  )
+                )}
+
                 {/* Admin: Hide */}
                 {isAdmin && (
                   <button
@@ -774,14 +869,18 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
                   </svg>
-                  {song.upvotes} upvotes
+                  {song.upvotes + (song.diamond_like_count || 0)} upvotes
                 </span>
-                {song.total_tips_yocto !== "0" && (
+                {(song.total_tips_yocto !== "0" || song.total_tips_usd_cents > 0) && (
                   <span className="flex items-center gap-1.5 text-amber-500/80">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {(Number(song.total_tips_yocto) / 1e24).toFixed(2)} NEAR
+                    {song.total_tips_usd_cents > 0
+                      ? `$${(song.total_tips_usd_cents / 100).toFixed(2)}`
+                      : `${(Number(song.total_tips_yocto) / 1e24).toFixed(2)} NEAR`}
+                    {song.total_tips_usd_cents > 0 && song.total_tips_yocto !== "0" &&
+                      ` + ${(Number(song.total_tips_yocto) / 1e24).toFixed(2)} NEAR`}
                   </span>
                 )}
               </div>

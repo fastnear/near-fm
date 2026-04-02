@@ -31,6 +31,7 @@ export interface Song {
   downvotes: number;
   play_count: number;
   total_tips_yocto: string;
+  total_tips_usd_cents: number;
   is_validated: boolean;
   is_hidden: boolean;
   is_deleted: boolean;
@@ -45,6 +46,7 @@ export interface Song {
   uploader_display_name: string | null;
   uploader_reputation: string;
   uploader_twitter_handle: string | null;
+  uploader_is_agent: boolean;
   // Category join fields
   category_name: string | null;
   category_slug: string | null;
@@ -90,6 +92,8 @@ export interface SongRequest {
   description: string;
   bounty_amount_yocto: string;
   bounty_tx_hash: string;
+  bounty_usd_cents: number | null;
+  bounty_payment_method: string;
   status: string;
   awarded_song_id: number | null;
   award_tx_hash: string | null;
@@ -128,5 +132,5 @@ export interface Playlist {
   contains_song?: boolean;
 }
 
-export type SortMode = "trending" | "latest" | "top" | "following";
+export type SortMode = "trending" | "latest" | "top" | "community" | "following";
 export type TimePeriod = "day" | "week" | "month" | "all";

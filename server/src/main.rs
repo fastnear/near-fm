@@ -25,8 +25,10 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+    pub suno_client: reqwest::Client,
     pub suno_cache: routes::suno::SunoTaskCache,
     pub suno_lyrics_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, routes::suno::SunoLyricsCallbackData>>>,
+    pub fastfs_upload_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[tokio::main]
@@ -58,13 +60,20 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(feed::start_feed_scoring_loop(db.clone()));
     tokio::spawn(reputation::start_reputation_loop(db.clone()));
     tokio::spawn(validation::revalidate_pending(db.clone()));
+    tokio::spawn(reset_daily_credits_at_midnight(db.clone()));
+
+    let suno_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600)) // 10 min for Suno generation
+        .build()?;
 
     let state = AppState {
         db,
         config: Arc::new(config.clone()),
         http_client: reqwest::Client::new(),
+        suno_client,
         suno_cache: routes::suno::new_task_cache(),
         suno_lyrics_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        fastfs_upload_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     // CORS
@@ -99,7 +108,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tips", post(routes::tips::record_tip))
         .route("/api/songs/:uuid/comments", post(routes::comments::create_comment))
         .route("/api/comments/:id", delete(routes::comments::delete_comment))
+        .route("/api/users/:account_id/comments", post(routes::users::create_profile_comment))
+        .route("/api/users/:account_id/comments/:id", delete(routes::users::delete_profile_comment))
+        .route("/api/users/:account_id/tip", post(routes::users::record_profile_tip))
+        .route("/api/users/:account_id/blog", post(routes::blog::create_blog_post))
+        .route("/api/users/:account_id/blog/:id", delete(routes::blog::delete_blog_post).patch(routes::blog::update_blog_post))
+        .route("/api/posts/:parent_type/:parent_id/replies", post(routes::blog::create_reply))
+        .route("/api/replies/:id", delete(routes::blog::delete_reply))
         .route("/api/requests/:uuid", patch(routes::requests::update_request))
+        .route("/api/fastfs/upload", post(routes::fastfs::upload).layer(DefaultBodyLimit::max(25 * 1024 * 1024)))
         .layer(middleware::from_fn_with_state(
             strict_limiter,
             rate_limit::rate_limit_middleware,
@@ -109,6 +126,9 @@ async fn main() -> anyhow::Result<()> {
     let moderate_routes = Router::new()
         .route("/api/auth/verify", post(routes::auth::verify))
         .route("/api/auth/link-wallet", post(routes::auth::link_wallet))
+        .route("/api/auth/solana/verify", post(routes::auth::solana_verify))
+        .route("/api/auth/link-solana", post(routes::auth::link_solana))
+        .route("/api/auth/ethereum/verify", post(routes::auth::ethereum_verify))
         .route("/api/auth/logout", post(routes::auth::logout))
         .route("/api/songs", post(routes::songs::create_song))
         .route("/api/requests", post(routes::requests::create_request))
@@ -122,6 +142,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/reorder", put(routes::playlists::reorder_playlist_songs))
         .route("/api/suno/generate", post(routes::suno::generate))
         .route("/api/suno/generate-lyrics", post(routes::suno::generate_lyrics))
+        .route("/api/credits/topup", post(routes::credits::topup))
+        .route("/api/premium/subscribe", post(routes::premium::subscribe))
+        .route("/api/auth/agent", post(routes::auth::agent_auth))
+        .route("/api/wallet/backup", post(routes::wallet::backup))
+        .route("/api/wallet/restore", get(routes::wallet::restore))
+        .route("/api/wallet/balance", get(routes::wallet::balance))
+        .route("/api/tips/send", post(routes::wallet::send_tip))
+        .route("/api/bounties/create", post(routes::wallet::create_bounty))
+        .route("/api/bounties/:uuid/award", post(routes::wallet::award_bounty))
+        .route("/api/bounties/:uuid/topup", post(routes::wallet::topup_bounty))
+        .route("/api/bounties/:uuid/withdraw", post(routes::wallet::withdraw_bounty))
+        .route("/api/wallet/withdraw", post(routes::wallet::withdraw))
+        .route("/api/credits/buy-from-balance", post(routes::wallet::buy_credits))
+        .route("/api/premium/buy", post(routes::wallet::buy_premium))
         .layer(middleware::from_fn_with_state(
             moderate_limiter,
             rate_limit::rate_limit_middleware,
@@ -137,12 +171,19 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/stats",
             get(|state: axum::extract::State<AppState>| async move {
-                let row: (i64, i64, String, String) = sqlx::query_as(
+                let row: (i64, i64, String, String, i64, i64, i64) = sqlx::query_as(
                     r#"SELECT
                         (SELECT COUNT(*) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_songs,
                         (SELECT COALESCE(SUM(play_count), 0) FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_plays,
                         (SELECT COALESCE(SUM(CAST(total_tips_yocto AS NUMERIC)), 0)::TEXT FROM songs WHERE NOT is_deleted AND NOT is_hidden) AS total_tips_yocto,
-                        (SELECT COALESCE(SUM(CAST(bounty_amount_yocto AS NUMERIC)), 0)::TEXT FROM song_requests) AS total_bounties_yocto
+                        (SELECT COALESCE(SUM(CAST(bounty_amount_yocto AS NUMERIC)), 0)::TEXT FROM song_requests) AS total_bounties_yocto,
+                        (SELECT COUNT(*) FROM tips)
+                          + (SELECT COUNT(*) FROM credit_topups)
+                          + (SELECT COUNT(*) FROM song_requests WHERE bounty_amount_yocto != '0')
+                          + (SELECT COUNT(*) FROM premium_purchases)
+                          AS total_transactions,
+                        (SELECT COALESCE(SUM(amount_usd_cents), 0) FROM tips WHERE amount_usd_cents IS NOT NULL) AS total_tips_usd_cents,
+                        (SELECT COALESCE(SUM(bounty_usd_cents), 0) FROM song_requests WHERE bounty_usd_cents IS NOT NULL) AS total_bounties_usd_cents
                     "#,
                 )
                 .fetch_one(&state.db)
@@ -153,6 +194,9 @@ async fn main() -> anyhow::Result<()> {
                     "total_plays": row.1,
                     "total_tips_yocto": row.2,
                     "total_bounties_yocto": row.3,
+                    "total_transactions": row.4,
+                    "total_tips_usd_cents": row.5,
+                    "total_bounties_usd_cents": row.6,
                 })))
             }),
         )
@@ -164,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs", get(routes::songs::list_songs))
         .route("/api/songs/:uuid", get(routes::songs::get_song).put(routes::songs::update_song))
         .route("/api/songs/:uuid/play", post(routes::songs::increment_play))
+        .route("/api/songs/:uuid/my-stats", get(routes::songs::get_song_my_stats))
         .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
         .route("/api/songs/:uuid/diamond-likers", get(routes::songs::get_diamond_likers))
         .route("/api/me/diamond-likes-remaining", get(routes::songs::get_diamond_likes_remaining))
@@ -175,6 +220,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/requests/:uuid/submissions", get(routes::requests::list_submissions).post(routes::requests::submit_to_request))
         // Comments (GET not rate-limited)
         .route("/api/songs/:uuid/comments", get(routes::comments::list_comments))
+        .route("/api/users/:account_id/comments", get(routes::users::list_profile_comments))
+        .route("/api/feed/community", get(routes::blog::community_feed))
+        .route("/api/users/:account_id/blog", get(routes::blog::list_blog_posts))
+        .route("/api/users/:account_id/blog/:id", get(routes::blog::get_blog_post))
+        .route("/api/posts/:parent_type/:parent_id/replies", get(routes::blog::list_replies))
+        .route("/api/users/:account_id/song-tips", get(routes::users::list_song_tips))
+        .route("/api/users/:account_id/premium-gifts", get(routes::users::list_premium_gifts))
         // Users
         .route("/api/users/:account_id", get(routes::users::get_profile))
         .route("/api/users/:account_id/profile", patch(routes::users::update_profile))
@@ -271,6 +323,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/playlists/:uuid/songs", get(routes::playlists::list_playlist_songs))
         // RSS feed
         .route("/feed/:feed_token", get(routes::rss::playlist_feed))
+        // Credits & Premium
+        .route("/api/credits/balance", get(routes::credits::balance))
+        .route("/api/premium/gifts/:account_id", get(routes::premium::get_gifts))
+        .route("/api/credits/history", get(routes::credits::history))
+        .route("/api/credits/usage", get(routes::credits::usage))
+        .route("/api/credits/pricing", get(routes::credits::pricing))
         // Suno AI
         .route("/api/suno/status", get(routes::suno::status))
         .route("/api/suno/credits", get(routes::suno::credits))
@@ -281,6 +339,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/languages", get(routes::admin::list_languages))
         .route("/api/admin/languages", post(routes::admin::create_language))
         .route("/api/admin/languages/:id", delete(routes::admin::delete_language))
+        .route("/api/admin/credits/summary", get(routes::admin::credits_summary))
+        .route("/api/admin/credits/transactions", get(routes::admin::credits_transactions))
+        // Video generation
+        .route("/api/admin/tips", get(routes::admin::list_tips))
+        .route("/api/songs/:uuid/video", get(routes::admin::video_status))
+        .route("/api/songs/:uuid/video/generate", post(routes::admin::generate_video_premium))
+        .route("/api/admin/songs/:uuid/video", post(routes::admin::generate_video).delete(routes::admin::delete_video))
         // Global middleware
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -297,4 +362,41 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Resets `daily_credits_used` to 0 for all users at UTC midnight each day.
+/// This ensures premium users see their credits refresh at a predictable time
+/// rather than lazily on their first generation of the new day.
+async fn reset_daily_credits_at_midnight(db: sqlx::PgPool) {
+    loop {
+        // Sleep until next UTC midnight
+        let now = chrono::Utc::now();
+        let next_midnight = (now + chrono::Duration::days(1))
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .expect("valid midnight time")
+            .and_utc();
+        let secs = (next_midnight - now).num_seconds().max(0) as u64;
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+
+        for attempt in 0u32..3 {
+            match sqlx::query(
+                "UPDATE users SET daily_credits_used = 0, daily_credits_date = CURRENT_DATE \
+                 WHERE daily_credits_date < CURRENT_DATE AND daily_credits_used > 0",
+            )
+            .execute(&db)
+            .await
+            {
+                Ok(r) => {
+                    tracing::info!(rows = r.rows_affected(), "Daily premium credits reset");
+                    break;
+                }
+                Err(e) if attempt < 2 => {
+                    tracing::warn!(attempt, error = %e, "Credits reset failed, retrying in 10s");
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                }
+                Err(e) => tracing::error!(error = %e, "Daily credits reset failed after retries"),
+            }
+        }
+    }
 }

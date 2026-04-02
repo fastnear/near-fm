@@ -104,6 +104,8 @@ pub async fn create_request(
     }
 
     let uuid = req.uuid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let title = super::truncate_str(&req.title, 200);
+    let description = super::truncate_str(&req.description, 5000);
 
     let request = sqlx::query_as::<_, SongRequest>(
         r#"INSERT INTO song_requests
@@ -113,8 +115,8 @@ pub async fn create_request(
     )
     .bind(&uuid)
     .bind(claims.user_id)
-    .bind(&req.title)
-    .bind(&req.description)
+    .bind(&title)
+    .bind(&description)
     .bind(&req.bounty_amount_yocto)
     .bind(&req.bounty_tx_hash)
     .bind(req.language_id)
@@ -165,7 +167,7 @@ pub struct SongRequestWithRequester {
     pub title: String,
     pub description: String,
     pub bounty_amount_yocto: String,
-    pub bounty_tx_hash: String,
+    pub bounty_tx_hash: Option<String>,
     pub status: String,
     pub awarded_song_id: Option<i32>,
     pub award_tx_hash: Option<String>,
@@ -176,6 +178,8 @@ pub struct SongRequestWithRequester {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub bounty_usd_cents: Option<i32>,
+    pub bounty_payment_method: Option<String>,
     pub requester_account_id: String,
     pub submission_count: Option<i64>,
 }

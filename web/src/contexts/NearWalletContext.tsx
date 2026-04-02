@@ -49,6 +49,13 @@ interface NearWalletContextType {
     gas?: string;
     deposit?: string;
   }) => Promise<string>;
+  callBatch: (txns: Array<{
+    contractId: string;
+    method: string;
+    args: Record<string, unknown>;
+    gas?: string;
+    deposit?: string;
+  }>) => Promise<void>;
   viewMethod: (params: {
     contractId: string;
     method: string;
@@ -77,6 +84,7 @@ const NearWalletContext = createContext<NearWalletContextType>({
   completeSignIn: async () => false,
   linkWallet: async () => false,
   callFunction: async () => "",
+  callBatch: async () => {},
   viewMethod: async () => null,
 });
 
@@ -93,7 +101,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const pendingLinkRef = useRef(false);
 
   // Sign NEP-413 message and return the payload for API calls
-  const signNep413 = useCallback(async (w: Wallet, accId: string) => {
+  const signNep413 = useCallback(async (w: Wallet, accId: string, action: string = "sign_in") => {
     if (!w.signMessage) {
       console.warn("Wallet does not support signMessage (NEP-413)");
       return null;
@@ -103,7 +111,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     crypto.getRandomValues(nonce);
 
     const message = JSON.stringify({
-      action: "sign_in",
+      action,
       domain: "near.fm",
       version: 1,
       timestamp: Date.now(),
@@ -140,10 +148,15 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, [signNep413]);
 
-  const doLinkWallet = useCallback(async (_w: Wallet, accId: string) => {
-    await linkWalletApi({ account_id: accId });
+  const doLinkWallet = useCallback(async (w: Wallet, accId: string) => {
+    const payload = await signNep413(w, accId, "link_wallet");
+    if (!payload) {
+      setSignInPending(true);
+      return;
+    }
+    await linkWalletApi(payload);
     window.dispatchEvent(new Event("nearfm_session_changed"));
-  }, []);
+  }, [signNep413]);
 
   // Check if the function call access key has enough allowance.
   // Uses the maximum allowance across all function call keys for the contract,
@@ -400,6 +413,34 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     [wallet]
   );
 
+  // Batch multiple transactions in a single wallet popup
+  const callBatch = useCallback(
+    async (txns: Array<{
+      contractId: string;
+      method: string;
+      args: Record<string, unknown>;
+      gas?: string;
+      deposit?: string;
+    }>) => {
+      if (!wallet) throw new Error("Please connect your NEAR wallet");
+
+      await wallet.signAndSendTransactions({
+        transactions: txns.map((tx) => ({
+          receiverId: tx.contractId,
+          actions: [
+            actionCreators.functionCall(
+              tx.method,
+              tx.args,
+              BigInt(tx.gas || "30000000000000"),
+              BigInt(tx.deposit || "0"),
+            ),
+          ],
+        })),
+      });
+    },
+    [wallet]
+  );
+
   const viewMethod = useCallback(
     async (params: {
       contractId: string;
@@ -456,6 +497,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         completeSignIn,
         linkWallet,
         callFunction,
+        callBatch,
         viewMethod,
       }}
     >

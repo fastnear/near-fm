@@ -1,0 +1,1 @@
+ALTER TABLE diamond_likes ADD COLUMN removed_at TIMESTAMPTZ DEFAULT NULL;

@@ -220,7 +220,9 @@ export default function RequestsPage() {
                 {/* Bounty amount */}
                 <div className="flex-shrink-0 text-right">
                   <div className="text-lg font-bold text-purple-400">
-                    {formatNear(req.bounty_amount_yocto)} NEAR
+                    {req.bounty_usd_cents
+                      ? `$${(req.bounty_usd_cents / 100).toFixed(2)}`
+                      : `${formatNear(req.bounty_amount_yocto)} NEAR`}
                   </div>
                   <div className="text-xs text-slate-500">bounty</div>
                 </div>

@@ -5,12 +5,13 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining } from "@/lib/api";
+import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining, restoreWallet } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
+import { getAddress } from "@/lib/outlayer";
 import { SongCard } from "@/components/song/SongCard";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
 import type { Song, Notification, Playlist } from "@/types";
-import { prepareFastFSUpload, uploadToFastFS, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
+import { prepareFastFSUpload, uploadToFastFS, uploadToFastFSViaRelayer, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
 
 // ── Helpers ──
 
@@ -47,11 +48,12 @@ function timeAgo(iso: string): string {
 
 // ── Tab types ──
 
-type TabKey = "balance" | "songs" | "playlists" | "feed" | "notifications" | "reports";
+type TabKey = "balance" | "songs" | "playlists" | "wallet" | "feed" | "notifications" | "reports";
 
 const BASE_TABS: { key: TabKey; label: string }[] = [
   { key: "balance", label: "Balance" },
   { key: "songs", label: "My Songs" },
+  { key: "wallet", label: "Wallet" },
   { key: "feed", label: "Blocked Users" },
   { key: "notifications", label: "Notifications" },
 ];
@@ -67,7 +69,7 @@ const ADMIN_TABS: { key: TabKey; label: string }[] = [
 // ── Main component ──
 
 export default function CabinetPage() {
-  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut: authSignOut } = useAuth();
+  const { user, isAuthenticated, loading: authLoading, promptSignIn, signOut: authSignOut } = useAuth();
   const { accountId, connectAndSignIn, loading: walletLoading } = useNearWallet();
   const [activeTab, setActiveTab] = useState<TabKey>("balance");
   const [diamondRemaining, setDiamondRemaining] = useState<number | null>(null);
@@ -104,24 +106,12 @@ export default function CabinetPage() {
           <p className="text-slate-400 text-sm mb-6">
             Sign in to access your dashboard, manage your balance, and view your songs.
           </p>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={signInWithGoogle}
-              className="btn-primary px-6 py-3 rounded-xl flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
-                <path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              </svg>
-              Sign in with Google
-            </button>
-            <button
-              onClick={connectAndSignIn}
-              className="px-6 py-3 rounded-xl text-sm text-slate-300 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all"
-            >
-              Sign in with NEAR Wallet
-            </button>
-          </div>
+          <button
+            onClick={promptSignIn}
+            className="btn-primary px-8 py-3 rounded-xl text-sm font-medium"
+          >
+            Sign In
+          </button>
         </div>
       </div>
     );
@@ -150,31 +140,60 @@ export default function CabinetPage() {
       </div>
 
       {/* Premium status */}
-      {isPremium && (
+      {isPremium ? (
         <div className="glass-card rounded-2xl p-5 mb-6 border border-cyan-500/10">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-2xl">✦</span>
-            <h2 className="text-lg font-bold diamond-shimmer">Premium</h2>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">✦</span>
+              <h2 className="text-lg font-bold diamond-shimmer">Premium</h2>
+            </div>
+            <Link href="/premium" className="text-xs text-slate-500 hover:text-slate-300 transition-colors">
+              Extend →
+            </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <div className="space-y-1">
+              <div className="text-slate-400">Daily AI credits</div>
+              <div className="text-cyan-400 font-semibold">
+                {user?.daily_credits_remaining ?? 0} / 40
+              </div>
+              <div className="text-xs text-slate-500">Resets midnight UTC</div>
+            </div>
             <div className="space-y-1">
               <div className="text-slate-400">Diamond Likes today</div>
-              <div className="text-white font-semibold text-lg">
+              <div className="text-white font-semibold">
                 {diamondRemaining !== null ? `${diamondRemaining} / 5` : "..."}
               </div>
-              <div className="text-xs text-slate-500">Diamond likes boost songs much higher in the feed</div>
+              <div className="text-xs text-slate-500">Boosts songs in feed</div>
             </div>
             <div className="space-y-1">
               <div className="text-slate-400">Playlists</div>
               <div className="text-[#00ec97] font-semibold">Available</div>
-              <div className="text-xs text-slate-500">Create playlists and share them</div>
+              <div className="text-xs text-slate-500">Create & share playlists</div>
             </div>
             <div className="space-y-1">
-              <div className="text-slate-400">Premium until</div>
+              <div className="text-slate-400">Active until</div>
               <div className="text-white font-semibold">
                 {user?.premium_until ? new Date(user.premium_until).toLocaleDateString() : "Active"}
               </div>
             </div>
+          </div>
+        </div>
+      ) : (
+        <div className="glass-card rounded-2xl p-5 mb-6 border border-white/[0.06]">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-300 mb-1">Get Premium — $10/month</h2>
+              <p className="text-sm text-slate-500">
+                40 free AI credits/day · 3 songs/day · Diamond Likes · Playlists
+              </p>
+            </div>
+            <Link
+              href="/premium"
+              className="shrink-0 ml-4 px-4 py-2 rounded-xl text-sm font-medium bg-gradient-to-r from-purple-600 to-cyan-500 text-white hover:opacity-90 transition-all"
+            >
+              Upgrade
+            </Link>
           </div>
         </div>
       )}
@@ -197,8 +216,14 @@ export default function CabinetPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "balance" && <BalanceTab />}
+      {activeTab === "balance" && (
+        <div className="space-y-6">
+          <BalanceTab />
+          <BalanceDepositSection />
+        </div>
+      )}
       {activeTab === "songs" && <MySongsTab userSlug={userSlug} />}
+      {activeTab === "wallet" && <WalletKeyTab />}
       {activeTab === "playlists" && isPremium && <PlaylistsTab />}
       {activeTab === "feed" && <BlockedUsers />}
       {activeTab === "notifications" && <NotificationsTab />}
@@ -209,192 +234,293 @@ export default function CabinetPage() {
 
 // ── Balance Tab ──
 
-function BalanceTab() {
-  const { user } = useAuth();
-  const { accountId, connectWallet, linkWallet, callFunction, viewMethod } = useNearWallet();
-  const [balance, setBalance] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [depositAmount, setDepositAmount] = useState("1");
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [actionLoading, setActionLoading] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+function BalanceDepositSection() {
+  const { isAuthenticated } = useAuth();
+  const [balance, setBalance] = useState("0.00");
+  const [balanceRaw, setBalanceRaw] = useState("0");
+  const [DepositForm, setDepositForm] = useState<React.ComponentType<{ onDeposited?: () => void }> | null>(null);
 
-  const fetchBalance = useCallback(async () => {
-    if (!accountId) return;
-    try {
-      const bal = await getBalance(
-        viewMethod as (params: { contractId: string; method: string; args: Record<string, unknown> }) => Promise<string>,
-        accountId
-      );
-      setBalance(typeof bal === "string" ? bal : String(bal));
-    } catch (e) {
-      console.error("Failed to fetch balance:", e);
-      setBalance("0");
-    }
-    setLoading(false);
-  }, [accountId, viewMethod]);
+  const fetchBalance = useCallback(() => {
+    import("@/lib/api").then(({ getWalletBalance }) =>
+      getWalletBalance().then((b) => {
+        setBalance(b.balance_usdc_formatted);
+        setBalanceRaw(b.balance_usdc);
+        window.dispatchEvent(new Event("nearfm_balance_updated"));
+      }).catch(() => {})
+    );
+  }, []);
 
   useEffect(() => {
-    fetchBalance();
-  }, [fetchBalance]);
-
-  const handleDeposit = async () => {
-    if (!depositAmount || parseFloat(depositAmount) <= 0) return;
-    setActionLoading(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      const yocto = nearToYocto(depositAmount);
-      const action = depositAction(yocto);
-      await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args,
-        gas: action.gas,
-        deposit: action.deposit,
-      });
-      setDepositAmount("");
-      setActionSuccess(`Deposited ${depositAmount} NEAR successfully.`);
-      // Wait for NEAR finality before refreshing balance
-      await new Promise((r) => setTimeout(r, 2000));
-      await fetchBalance();
-    } catch (e: any) {
-      console.error("Deposit failed:", e);
-      setActionError(e.message || "Deposit failed.");
+    if (isAuthenticated) {
+      fetchBalance();
+      import("@/components/balance/DepositForm").then((m) => setDepositForm(() => m.DepositForm));
     }
-    setActionLoading(false);
+  }, [isAuthenticated, fetchBalance]);
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-slate-300">Wallet Balance</div>
+            <div className="text-xs text-slate-500 mt-0.5">USDC on-chain (intents.near)</div>
+          </div>
+          <div className="text-2xl font-bold text-green-400">${balance}</div>
+        </div>
+        <p className="text-xs text-slate-500">
+          Used for tips, bounties, and premium. Deposit from any chain.
+        </p>
+      </div>
+      <div className="glass-card rounded-2xl p-6 space-y-3">
+        <div className="text-sm font-medium text-slate-300">Deposit</div>
+        {DepositForm ? <DepositForm onDeposited={fetchBalance} /> : <div className="h-20 skeleton rounded-xl" />}
+      </div>
+      {/* Withdraw */}
+      {parseFloat(balance) > 0 && (
+        <div className="glass-card rounded-2xl p-6 space-y-3">
+          <div className="text-sm font-medium text-slate-300">Withdraw</div>
+          <WithdrawInline balance={balance} balanceRaw={balanceRaw} onSuccess={fetchBalance} />
+        </div>
+      )}
+      <CreditsSection />
+    </div>
+  );
+}
+
+const WITHDRAW_CHAINS = [
+  { id: "near", name: "NEAR", placeholder: "account.near" },
+  { id: "solana", name: "Solana", placeholder: "So1ana..." },
+  { id: "ethereum", name: "Ethereum", placeholder: "0x..." },
+  { id: "base", name: "Base", placeholder: "0x..." },
+  { id: "arbitrum", name: "Arbitrum", placeholder: "0x..." },
+  { id: "bsc", name: "BSC", placeholder: "0x..." },
+  { id: "polygon", name: "Polygon", placeholder: "0x..." },
+  { id: "optimism", name: "Optimism", placeholder: "0x..." },
+  { id: "avalanche", name: "Avalanche", placeholder: "0x..." },
+] as const;
+
+function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; balanceRaw: string; onSuccess: () => void }) {
+  const { user } = useAuth();
+  const { accountId } = useNearWallet();
+  const [amount, setAmount] = useState("");
+  const [isMax, setIsMax] = useState(false);
+  const [receiver, setReceiver] = useState("");
+  const [chain, setChain] = useState("near");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const solAddr = user?.solana_address || "";
+  const nearAddr = accountId || user?.near_account_id || "";
+  const ethAddr = user?.eth_address || "";
+
+  // Set defaults on mount
+  useEffect(() => {
+    if (nearAddr) { setChain("near"); setReceiver(nearAddr); }
+    else if (solAddr) { setChain("solana"); setReceiver(solAddr); }
+    else if (ethAddr) { setChain("ethereum"); setReceiver(ethAddr); }
+  }, [nearAddr, solAddr, ethAddr]);
+
+  const chainMeta = WITHDRAW_CHAINS.find((c) => c.id === chain) || WITHDRAW_CHAINS[0];
+
+  // Max: show full precision from raw (6 decimals). E.g. 139998 → "0.139998"
+  const handleMax = () => {
+    const raw = parseInt(balanceRaw || "0");
+    const whole = Math.floor(raw / 1_000_000);
+    const frac = raw % 1_000_000;
+    const fracStr = frac.toString().padStart(6, "0").replace(/0+$/, "");
+    setAmount(fracStr ? `${whole}.${fracStr}` : `${whole}`);
+    setIsMax(true);
   };
 
-  const handleWithdraw = async () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) return;
+  const handleChainChange = (newChain: string) => {
+    setChain(newChain);
+    if (newChain === "near") setReceiver(nearAddr);
+    else if (newChain === "solana") setReceiver(solAddr);
+    else if (ethAddr && ["ethereum", "base", "arbitrum", "bsc", "polygon", "optimism"].includes(newChain)) setReceiver(ethAddr);
+    else setReceiver("");
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Chain selector */}
+      <div>
+        <label className="text-xs text-slate-500 mb-1 block">Chain</label>
+        <select
+          value={chain}
+          onChange={(e) => handleChainChange(e.target.value)}
+          disabled={loading}
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-white/[0.2] appearance-none cursor-pointer"
+          style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`, backgroundPosition: "right 0.5rem center", backgroundRepeat: "no-repeat", backgroundSize: "1.5em 1.5em", paddingRight: "2.5rem" }}
+        >
+          {WITHDRAW_CHAINS.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <div className="text-[11px] text-slate-500 mt-1">
+          {chain === "near" ? "Withdraws to NEAR Intents balance of the recipient"
+            : chain === "solana" ? ""
+            : "Same 0x address works on all EVM chains"}
+        </div>
+      </div>
+
+      {/* Receiver address */}
+      <div>
+        <label className="text-xs text-slate-500 mb-1 block">{chainMeta.name} address</label>
+        <input type="text" value={receiver} onChange={(e) => setReceiver(e.target.value)}
+          placeholder={chainMeta.placeholder}
+          disabled={loading}
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 px-3 text-sm text-slate-200 font-mono placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
+      </div>
+
+      {/* Amount + Max + Withdraw */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+          <input type="number" min="0.01" step="0.01" placeholder="1.00" value={amount}
+            onChange={(e) => { setAmount(e.target.value); setIsMax(false); }} disabled={loading}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 pl-7 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-white/[0.2]" />
+        </div>
+        <button onClick={handleMax} disabled={loading}
+          className="px-3 py-2 text-xs font-medium text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition-all">
+          Max
+        </button>
+        <button onClick={async () => {
+          const usd = parseFloat(amount);
+          if (isNaN(usd) || usd < 0.01) { setMsg({ type: "error", text: "Min $0.01" }); return; }
+          if (!receiver.trim()) { setMsg({ type: "error", text: "Enter address" }); return; }
+          setLoading(true); setMsg(null);
+          try {
+            const { withdrawFromBalance } = await import("@/lib/api");
+            const opts = isMax
+              ? { amount_raw: balanceRaw }
+              : { amount_cents: Math.round(usd * 100) };
+            await withdrawFromBalance(chain, receiver.trim(), opts);
+            setMsg({ type: "success", text: `$${usd.toFixed(2)} withdrawn to ${chainMeta.name}` });
+            setAmount(""); setIsMax(false); onSuccess();
+          } catch (e: any) { setMsg({ type: "error", text: e?.message || "Failed" }); }
+          setLoading(false);
+        }} disabled={loading || !amount || parseFloat(amount) < 0.01 || !receiver.trim()}
+          className="px-4 py-2 text-sm font-medium bg-white/[0.06] text-slate-300 border border-white/[0.08] rounded-lg hover:bg-white/[0.1] disabled:opacity-30 transition-all">
+          {loading ? "..." : "Withdraw"}
+        </button>
+      </div>
+      {msg && <p className={`text-xs ${msg.type === "error" ? "text-red-400" : "text-green-400"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+function CreditsSection() {
+  const { user, isPremium } = useAuth();
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-white font-semibold">AI Credits</h3>
+        <p className="text-2xl font-bold text-white">
+          {user?.credit_balance?.toLocaleString() ?? 0}
+        </p>
+      </div>
+      <p className="text-xs text-slate-400 mb-3">Used for AI music and lyrics generation (12 credits per song, 1 per lyrics)</p>
+      {user?.daily_credits_remaining != null && user.daily_credits_remaining > 0 && (
+        <p className="text-xs text-cyan-400 mb-3">
+          + {user.daily_credits_remaining} free daily credits remaining (premium)
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Link href="/credits" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.08] text-slate-300 hover:bg-white/[0.12] border border-white/[0.08] transition-all">
+          Buy Credits
+        </Link>
+        {!isPremium && (
+          <Link href="/premium" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/15 border border-cyan-500/20 transition-all">
+            Get 40 free/day with Premium →
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BalanceTab() {
+  const { user, isPremium } = useAuth();
+  const { accountId, viewMethod, callFunction } = useNearWallet();
+  const [nearBalance, setNearBalance] = useState<string | null>(null);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionMsg, setActionMsg] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  // Fetch legacy NEAR virtual balance (only for NEAR wallet users)
+  useEffect(() => {
+    if (!accountId) return;
+    const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID || "near-fm.near";
+    getBalance(
+      viewMethod as (params: { contractId: string; method: string; args: Record<string, unknown> }) => Promise<string>,
+      accountId
+    ).then((bal) => {
+      const b = typeof bal === "string" ? bal : String(bal);
+      if (b !== "0" && BigInt(b) > 0) setNearBalance(b);
+    }).catch(() => {});
+  }, [accountId, viewMethod]);
+
+  const handleNearWithdraw = async () => {
+    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0 || !callFunction) return;
     setActionLoading(true);
-    setActionError(null);
-    setActionSuccess(null);
+    setActionMsg(null);
     try {
       const yocto = nearToYocto(withdrawAmount);
       const action = withdrawAction(yocto);
       await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args,
-        gas: action.gas,
+        contractId: action.contractId, method: action.method, args: action.args, gas: action.gas,
       });
       setWithdrawAmount("");
-      setActionSuccess(`Withdrew ${withdrawAmount} NEAR successfully.`);
-      // Wait for NEAR finality before refreshing balance
-      await new Promise((r) => setTimeout(r, 2000));
-      await fetchBalance();
+      setActionMsg({ type: "success", text: `Withdrew ${withdrawAmount} NEAR` });
+      setNearBalance(null);
     } catch (e: any) {
-      console.error("Withdraw failed:", e);
-      setActionError(e.message || "Withdraw failed.");
+      setActionMsg({ type: "error", text: e.message || "Withdraw failed" });
     }
     setActionLoading(false);
   };
 
-  // Wallet-selector not connected — show connect button
-  if (!accountId) {
-    return (
-      <div className="glass-card rounded-2xl p-8 text-center">
-        <p className="text-slate-400 text-sm mb-4">Connect a NEAR wallet to manage your balance, send tips, and upload songs.</p>
-        <button
-          onClick={() => user?.near_account_id ? connectWallet() : linkWallet()}
-          className="btn-primary px-6 py-3 rounded-xl font-medium"
-        >
-          Connect NEAR Wallet
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* Current balance */}
-      <div className="glass-card rounded-2xl p-8 glow-purple text-center">
-        <p className="text-slate-400 text-sm mb-2">Virtual Balance</p>
-        {loading ? (
-          <div className="h-10 rounded-xl w-40 mx-auto skeleton" />
-        ) : (
-          <p className="text-4xl font-bold text-white">
-            {yoctoToNear(balance || "0")}{" "}
-            <span className="text-lg text-slate-400 font-normal">NEAR</span>
+      {/* Legacy NEAR virtual balance — only shown for NEAR users with balance > 0 */}
+      {accountId && nearBalance && (
+        <div className="glass-card rounded-2xl p-6 border border-amber-500/20 bg-amber-500/[0.04]">
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            <span className="text-sm font-medium text-amber-300">Legacy NEAR Balance</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">
+            You have <span className="text-white font-medium">{yoctoToNear(nearBalance)} NEAR</span> in the old virtual balance.
+            We recommend withdrawing it to your wallet.
           </p>
-        )}
-      </div>
-
-      {/* Feedback messages */}
-      {actionError && (
-        <div className="bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded-xl px-4 py-3 text-sm">
-          {actionError}
-        </div>
-      )}
-      {actionSuccess && (
-        <div className="bg-[#00ec97]/10 border border-[#00ec97]/20 text-[#00ec97] rounded-xl px-4 py-3 text-sm">
-          {actionSuccess}
-        </div>
-      )}
-
-      {/* Deposit & Withdraw */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        {/* Deposit */}
-        <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-white font-semibold mb-4">Deposit NEAR</h3>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
+              type="number" min="0" step="0.01" placeholder="0.00"
+              value={withdrawAmount}
+              onChange={(e) => setWithdrawAmount(e.target.value)}
               disabled={actionLoading}
-              className="flex-1 border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
+              className="flex-1 border border-white/[0.08] bg-white/[0.04] rounded-xl px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition disabled:opacity-50"
             />
             <button
-              onClick={handleDeposit}
-              disabled={actionLoading || !depositAmount || parseFloat(depositAmount) <= 0}
-              className="btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none px-6 py-3"
+              onClick={() => setWithdrawAmount(yoctoToNear(nearBalance))}
+              className="px-2 py-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg"
             >
-              {actionLoading ? "..." : "Deposit"}
+              Max
             </button>
-          </div>
-        </div>
-
-        {/* Withdraw */}
-        <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-white font-semibold mb-4">Withdraw NEAR</h3>
-          <div className="flex gap-3">
-            <div className="flex-1 relative">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                disabled={actionLoading}
-                className="w-full border border-white/[0.08] bg-white/[0.04] rounded-xl px-4 py-3 pr-14 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition disabled:opacity-50"
-              />
-              {balance && BigInt(balance) > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setWithdrawAmount(yoctoToNear(balance))}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-purple-400 hover:text-purple-300 bg-purple-500/10 rounded-lg transition"
-                >
-                  Max
-                </button>
-              )}
-            </div>
             <button
-              onClick={handleWithdraw}
+              onClick={handleNearWithdraw}
               disabled={actionLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
-              className="btn-primary rounded-xl disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none px-6 py-3"
+              className="px-4 py-2 text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 disabled:opacity-30 transition-all"
             >
               {actionLoading ? "..." : "Withdraw"}
             </button>
           </div>
+          {actionMsg && (
+            <p className={`text-xs mt-2 ${actionMsg.type === "error" ? "text-red-400" : "text-green-400"}`}>{actionMsg.text}</p>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -533,6 +659,12 @@ function NotificationIcon({ type }: { type: string }) {
           <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55C7.79 13 6 14.79 6 17s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
         </svg>
       );
+    case "blog_post":
+      return (
+        <svg className="w-5 h-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+        </svg>
+      );
     default:
       return (
         <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -547,16 +679,23 @@ function notificationText(notif: Notification): React.ReactNode {
 
   switch (notif.type) {
     case "tip_received": {
-      const amount = data.amount_yocto as string | undefined;
+      const amountYocto = data.amount_yocto as string | undefined;
+      const amountUsdCents = data.amount_usd_cents as number | undefined;
       const from = (data.from_account || data.from_account_id) as string | undefined;
-      const nearAmount = amount ? yoctoToNear(amount) : "?";
       const songTitle = data.song_title as string | undefined;
       const songUuid = data.song_uuid as string | undefined;
+      const profileSlug = data.profile_slug as string | undefined;
+      const tipDisplay = amountUsdCents
+        ? `$${(amountUsdCents / 100).toFixed(2)}`
+        : amountYocto
+          ? `${yoctoToNear(amountYocto)} NEAR`
+          : "";
       return (
         <>
-          You received a tip of {nearAmount} NEAR
+          You received a tip{tipDisplay ? ` of ${tipDisplay}` : ""}
           {from ? <> from <Link href={`/profile/${from}`} className="text-purple-400 hover:underline">{from}</Link></> : ""}
           {songTitle && songUuid ? <> for <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link></> : ""}
+          {profileSlug && !songUuid ? " on your profile" : ""}
         </>
       );
     }
@@ -565,17 +704,28 @@ function notificationText(notif: Notification): React.ReactNode {
     case "song_hidden":
       return "Your song has been hidden by a moderator";
     case "bounty_awarded": {
+      const bountyUsdCents = data.bounty_usd_cents as number | undefined;
       const bountyAmount = data.bounty_amount_yocto as string | undefined;
-      const nearBounty = bountyAmount ? yoctoToNear(bountyAmount) : "?";
+      const bountyDisplay = bountyUsdCents ? `$${(bountyUsdCents / 100).toFixed(2)}` : bountyAmount ? `${yoctoToNear(bountyAmount)} NEAR` : "?";
       const reqTitle = data.request_title as string | undefined;
-      return `Congratulations! Your song won the bounty of ${nearBounty} NEAR${reqTitle ? ` for "${reqTitle}"` : ""}. The reward has been added to your virtual balance.`;
+      return `Congratulations! Your song won the bounty of ${bountyDisplay}${reqTitle ? ` for "${reqTitle}"` : ""}. The reward has been added to your balance.`;
     }
     case "bounty_not_awarded": {
       const reqTitle2 = data.request_title as string | undefined;
       return `The bounty${reqTitle2 ? ` for "${reqTitle2}"` : ""} has been awarded to another song. Thanks for participating — keep submitting to other requests!`;
     }
-    case "submission_to_request":
-      return `A new song was submitted to your request${data.song_title ? `: "${data.song_title}"` : ""}`;
+    case "submission_to_request": {
+      const songUuid = data.song_uuid as string | undefined;
+      const songTitle = data.song_title as string | undefined;
+      return (
+        <>
+          A new song was submitted to your request
+          {songTitle && songUuid ? (
+            <>: <Link href={`/song/${songUuid}`} className="text-purple-400 hover:underline">&quot;{songTitle}&quot;</Link></>
+          ) : songTitle ? `: "${songTitle}"` : ""}
+        </>
+      );
+    }
     case "song_validated": {
       const songTitle = data.song_title as string | undefined;
       return `Your song${songTitle ? ` "${songTitle}"` : ""} is now live!`;
@@ -609,7 +759,7 @@ function notificationText(notif: Notification): React.ReactNode {
           {reqTitle && reqUuid ? (
             <Link href={`/requests/${reqUuid}`} className="text-purple-400 hover:underline">&quot;{reqTitle}&quot;</Link>
           ) : reqTitle ? `"${reqTitle}"` : ""}
-          {bountyNear ? ` (${bountyNear} NEAR)` : ""}
+          {data.bounty_usd_cents ? ` ($${((data.bounty_usd_cents as number) / 100).toFixed(2)})` : bountyNear ? ` (${bountyNear} NEAR)` : ""}
         </>
       );
     }
@@ -650,6 +800,62 @@ function notificationText(notif: Notification): React.ReactNode {
         </>
       );
     }
+    case "profile_comment": {
+      const commenter = data.commenter_account_id as string | undefined;
+      return (
+        <>
+          {commenter ? <Link href={`/profile/${commenter}`} className="text-purple-400 hover:underline">{commenter}</Link> : "Someone"}
+          {" left a comment on your profile"}
+        </>
+      );
+    }
+    case "profile_tip": {
+      const fromAccount = data.from_account as string | undefined;
+      const amountYocto = data.amount_yocto as string | undefined;
+      const nearStr = amountYocto ? yoctoToNear(amountYocto) : "?";
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-amber-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` sent you ${nearStr} NEAR`}
+        </>
+      );
+    }
+    case "premium_gifted": {
+      const fromAccount = data.from_account_id as string | undefined;
+      const daysAdded = data.days_added as number | undefined;
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-cyan-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` gifted you ${daysAdded ?? "?"} days of `}
+          <span className="diamond-shimmer font-medium">Premium</span>
+          {" ✦"}
+        </>
+      );
+    }
+    case "blog_post": {
+      const authorSlug = data.author_slug as string | undefined;
+      const authorName = (data.author_display_name as string | undefined) || authorSlug;
+      const postId = data.post_id as number | undefined;
+      return (
+        <>
+          <Link href={`/profile/${authorSlug}`} className="text-purple-400 hover:underline">{authorName}</Link>
+          {" published a new "}
+          {authorSlug && postId ? (
+            <Link href={`/profile/${authorSlug}/blog/${postId}`} className="text-purple-400 hover:underline">blog post</Link>
+          ) : "blog post"}
+        </>
+      );
+    }
+    case "reply": {
+      const fromAccount = data.from_account as string | undefined;
+      const parentType = data.parent_type as string | undefined;
+      return (
+        <>
+          {fromAccount ? <Link href={`/profile/${fromAccount}`} className="text-purple-400 hover:underline">{fromAccount}</Link> : "Someone"}
+          {` replied to your ${parentType === "blog_post" ? "blog post" : "comment"}`}
+        </>
+      );
+    }
     default:
       return `You have a new notification (${notif.type})`;
   }
@@ -665,9 +871,11 @@ function NotificationsTab() {
       const data = await getNotifications();
       setNotifications(data);
 
-      // Auto-mark all as read
+      // Auto-mark all as read & clear header badge
       if (data.some((n: Notification) => !n.is_read)) {
-        markAllNotificationsRead().catch(() => {});
+        markAllNotificationsRead()
+          .then(() => window.dispatchEvent(new Event("nearfm_notifications_read")))
+          .catch(() => {});
       }
     } catch (e) {
       console.error("Failed to load notifications:", e);
@@ -884,7 +1092,7 @@ function PlaylistsTab() {
   };
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedPlaylist || !accountId || !callFunction) return;
+    if (!selectedPlaylist) return;
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { alert("Please select an image file"); return; }
@@ -892,17 +1100,25 @@ function PlaylistsTab() {
 
     setCoverUploading(true);
     try {
-      const content = new Uint8Array(await file.arrayBuffer());
-      const hash = await import("@/lib/near/fastfs").then((m) => m.computeFileHash(content));
-      const relativePath = getRelativePath(await hash, file.type);
-      const parts = prepareFastFSUpload(relativePath, file.type, content);
-      await uploadToFastFS(
-        (params) => callFunction(params) as Promise<string>,
-        parts
-      );
-      // Wait for FastFS indexing
-      await new Promise((r) => setTimeout(r, 3000));
-      const url = getFastFSUrl(accountId, relativePath);
+      let url: string;
+      if (accountId && callFunction) {
+        // Direct upload via NEAR wallet
+        const content = new Uint8Array(await file.arrayBuffer());
+        const hash = await import("@/lib/near/fastfs").then((m) => m.computeFileHash(content));
+        const relativePath = getRelativePath(await hash, file.type);
+        const parts = prepareFastFSUpload(relativePath, file.type, content);
+        await uploadToFastFS(
+          (params) => callFunction(params) as Promise<string>,
+          parts
+        );
+        await new Promise((r) => setTimeout(r, 3000));
+        url = getFastFSUrl(accountId, relativePath);
+      } else {
+        // Upload via server relayer
+        const result = await uploadToFastFSViaRelayer(file);
+        await new Promise((r) => setTimeout(r, 3000));
+        url = result.url;
+      }
       const { playlist } = await updatePlaylist(selectedPlaylist.uuid, { cover_image_url: url });
       setSelectedPlaylist(playlist);
       setPlaylists((prev) => prev.map((p) => (p.uuid === playlist.uuid ? playlist : p)));
@@ -979,7 +1195,7 @@ function PlaylistsTab() {
             )}
             <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
               <span className="text-xs text-white font-medium">{coverUploading ? "Uploading..." : "Change Cover"}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || !accountId} />
+              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} disabled={coverUploading || (!accountId && !user?.solana_address && !user?.eth_address)} />
             </label>
           </div>
 
@@ -1335,6 +1551,175 @@ function ReportsTab() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Wallet Key Tab ──
+
+function WalletKeyTab() {
+  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [nearAccount, setNearAccount] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    // Try localStorage first, then server backup
+    const localKey = localStorage.getItem("nearfm_outlayer_api_key");
+    if (localKey) {
+      setApiKey(localKey);
+      getAddress(localKey).then(({ address }) => setNearAccount(address)).catch(() => {});
+      setLoading(false);
+      return;
+    }
+    restoreWallet()
+      .then((data) => {
+        if (data.api_key) {
+          setApiKey(data.api_key);
+          setNearAccount(data.near_account_id);
+          localStorage.setItem("nearfm_outlayer_api_key", data.api_key);
+          if (!data.near_account_id) {
+            getAddress(data.api_key).then(({ address }) => setNearAccount(address)).catch(() => {});
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div className="glass-card rounded-2xl p-6"><div className="h-4 skeleton rounded w-1/3" /></div>;
+  }
+
+  if (!apiKey) {
+    return (
+      <div className="glass-card rounded-2xl p-6">
+        <p className="text-slate-400 text-sm">
+          No wallet found. Visit <a href="/balance" className="text-purple-400 hover:text-purple-300">/balance</a> to create one.
+        </p>
+      </div>
+    );
+  }
+
+  const maskedKey = apiKey.slice(0, 6) + "•".repeat(20) + apiKey.slice(-4);
+  const dashboardUrl = `https://outlayer.fastnear.com/wallet?key=${apiKey}`;
+
+  return (
+    <div className="space-y-4">
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div>
+          <div className="text-sm font-medium text-slate-300 mb-1">OutLayer Custody Wallet</div>
+          <p className="text-xs text-slate-400 mb-1">
+            An OutLayer custody wallet has been created for you. Your key is stored in your browser, with a backup copy on the server.
+          </p>
+          <p className="text-xs text-slate-400 mb-3">
+            Copy and save this key — you can use it to manage your funds independently, even if NEAR FM is unavailable.
+          </p>
+        </div>
+
+        <div className="bg-black/20 rounded-xl p-4 space-y-3">
+          <div className="text-sm font-medium text-slate-200 mb-1">Wallet Key</div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs text-slate-300 font-mono break-all">
+              {revealed ? apiKey : maskedKey}
+            </code>
+            <button
+              onClick={() => setRevealed(!revealed)}
+              className="px-3 py-1.5 text-xs text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition shrink-0"
+            >
+              {revealed ? "Hide" : "Show"}
+            </button>
+          </div>
+          {revealed && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(apiKey);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="text-xs text-purple-400 hover:text-purple-300 transition"
+            >
+              {copied ? "Copied!" : "Copy to clipboard"}
+            </button>
+          )}
+        </div>
+
+        {nearAccount && (
+          <div className="bg-black/20 rounded-xl p-4 space-y-2">
+            <div className="text-sm font-medium text-slate-200">MPC NEAR Account</div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs text-slate-300 font-mono break-all">{nearAccount}</code>
+              <button
+                onClick={() => { navigator.clipboard.writeText(nearAccount); }}
+                className="px-2 py-1 text-xs text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition shrink-0"
+              >Copy</button>
+            </div>
+            <p className="text-xs text-slate-400">All tips, bounties, and payments are visible on the blockchain.</p>
+            <a
+              href={`https://publicintents.near.fastfs.io/publicintents.near/bd30a07fed2eb6c450c854fcd08af2422dfe80e0a119f6c4f4d2fa5fe2661efe.html?account=${nearAccount}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+            >
+              View transaction history
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
+
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <div className="text-sm font-medium text-slate-300">What you can do with this wallet</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-cyan-400 mb-1">Gasless Transactions</div>
+            <p className="text-[11px] text-slate-500">Send tips, create payment checks, and withdraw funds — no gas tokens needed on any chain.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-purple-400 mb-1">Cross-Chain Swaps</div>
+            <p className="text-[11px] text-slate-500">Swap between 200+ tokens across NEAR, Solana, Ethereum, and 20+ other chains via NEAR Intents.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-green-400 mb-1">Payment Checks</div>
+            <p className="text-[11px] text-slate-500">Create and claim payment checks — instant, gasless transfers between wallets on any chain.</p>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3 border border-white/[0.04]">
+            <div className="text-xs font-medium text-amber-400 mb-1">Withdraw Anywhere</div>
+            <p className="text-[11px] text-slate-500">Send funds to your NEAR, Solana, Ethereum, Bitcoin wallet — or any of 20+ supported chains.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-card rounded-2xl p-6 space-y-3">
+        <div className="text-sm font-medium text-slate-300">Use independently</div>
+        <p className="text-xs text-slate-400">
+          Your balance is stored on-chain (intents.near). NEAR FM does not hold your funds — you always have full control.
+        </p>
+        <p className="text-xs text-slate-500">
+          Give an AI agent the wallet skill so it can manage your NEAR FM wallet — send tips, check balance, and more.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="https://skills.outlayer.ai/agent-custody/SKILL.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-400 bg-purple-500/10 border border-purple-500/20 rounded-lg hover:bg-purple-500/15 transition"
+          >
+            Agent Wallet Skill
+          </a>
+          <a
+            href="https://outlayer.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 bg-white/[0.04] border border-white/[0.06] rounded-lg hover:bg-white/[0.08] transition"
+          >
+            About OutLayer
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

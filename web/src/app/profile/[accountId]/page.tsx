@@ -4,15 +4,22 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getUserProfile, getFollowers, updateUserProfile, blockUser, unblockUser, getBlockedUsers, followUser } from "@/lib/api";
 import type { FollowerEntry } from "@/lib/api";
+import { GiftPremiumButton } from "@/components/profile/GiftPremiumButton";
+import { ProfileTabs, type ProfileTab } from "@/components/profile/ProfileTabs";
+import { SongsTab } from "@/components/profile/SongsTab";
+import { BlogTab } from "@/components/profile/BlogTab";
+import { FanFeedTab } from "@/components/profile/FanFeedTab";
+import { TipsTab } from "@/components/profile/TipsTab";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { SongCard } from "@/components/song/SongCard";
+import { useToast } from "@/components/ui/Toast";
 import { FollowButton } from "@/components/song/FollowButton";
 import type { Song } from "@/types";
 import {
   prepareFastFSUpload,
   uploadToFastFS,
+  uploadToFastFSViaRelayer,
   computeFileHash,
   getFastFSUrl,
   getRelativePath,
@@ -22,7 +29,29 @@ function formatNear(yocto: string): string {
   const n = Number(yocto) / 1e24;
   if (n === 0) return "0";
   if (n >= 10 || n === Math.floor(n)) return Math.round(n).toString();
-  return n.toFixed(1).replace(/\.0$/, "");
+  if (n >= 0.1) return n.toFixed(1).replace(/\.0$/, "");
+  if (n >= 0.001) return n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+const EVM_CHAINS: Record<number, string> = {
+  1: "Ethereum", 5: "Goerli", 11155111: "Sepolia",
+  10: "Optimism", 56: "BSC", 100: "Gnosis", 137: "Polygon",
+  250: "Fantom", 324: "zkSync Era", 8453: "Base",
+  42161: "Arbitrum", 42170: "Arbitrum Nova", 43114: "Avalanche",
+  59144: "Linea", 534352: "Scroll", 7777777: "Zora",
+  81457: "Blast", 5000: "Mantle", 1101: "Polygon zkEVM",
+  1313161554: "Aurora",
+};
+
+function evmChainName(chainId: number | null): string {
+  if (!chainId) return "EVM";
+  return EVM_CHAINS[chainId] || `EVM (${chainId})`;
+}
+
+function truncateId(id: string, max = 30): string {
+  if (id.length <= max) return id;
+  return `${id.slice(0, 12)}...${id.slice(-8)}`;
 }
 
 function formatDate(iso: string): string {
@@ -38,7 +67,8 @@ export default function ProfilePage() {
   const accountId = params.accountId;
   const router = useRouter();
   const { user: authUser, signOut: authSignOut, refreshUser } = useAuth();
-  const { accountId: walletAccountId, callFunction, linkWallet } = useNearWallet();
+  const { accountId: walletAccountId, callFunction, linkWallet, connectWallet, viewMethod } = useNearWallet();
+  const { showToast } = useToast();
   const currentUser = authUser?.slug ?? null;
   const isOwnProfile = currentUser === accountId;
 
@@ -47,6 +77,18 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [followers, setFollowers] = useState<FollowerEntry[]>([]);
+
+  // Tab state — read from URL searchParam > localStorage > default "songs"
+  const [activeTab, setActiveTab] = useState<ProfileTab>(() => {
+    if (typeof window === "undefined") return "songs";
+    const urlTab = new URLSearchParams(window.location.search).get("tab") as ProfileTab | null;
+    if (urlTab && ["songs", "blog", "feed", "tips"].includes(urlTab)) return urlTab;
+    try {
+      const saved = localStorage.getItem(`nearfm:profile_tab:${accountId}`) as ProfileTab | null;
+      if (saved && ["songs", "blog", "feed", "tips"].includes(saved)) return saved;
+    } catch {}
+    return "songs";
+  });
 
   // Block & follow state
   const [isBlocked, setIsBlocked] = useState(false);
@@ -94,6 +136,11 @@ export default function ProfilePage() {
       getFollowers(accountId).then(setFollowers).catch(console.error);
     }
   }, [accountId]);
+
+  const handleTabChange = (tab: ProfileTab) => {
+    setActiveTab(tab);
+    try { localStorage.setItem(`nearfm:profile_tab:${accountId}`, tab); } catch {}
+  };
 
   // Check block status
   useEffect(() => {
@@ -167,19 +214,24 @@ export default function ProfilePage() {
       // Upload avatar to FastFS if selected
       if (avatarFile) {
         setUploadProgress("Uploading avatar...");
-        const buffer = await avatarFile.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        const hash = await computeFileHash(bytes);
-        const relPath = getRelativePath(hash, avatarFile.type || "image/jpeg");
-        const parts = prepareFastFSUpload(relPath, avatarFile.type, bytes);
-
-        await uploadToFastFS(
-          (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
-          parts,
-          (done, total) => setUploadProgress(`Uploading avatar ${done}/${total}...`)
-        );
-
-        avatarUrl = getFastFSUrl(walletAccountId!, relPath);
+        if (walletAccountId) {
+          // Direct upload via NEAR wallet
+          const buffer = await avatarFile.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const hash = await computeFileHash(bytes);
+          const relPath = getRelativePath(hash, avatarFile.type || "image/jpeg");
+          const parts = prepareFastFSUpload(relPath, avatarFile.type, bytes);
+          await uploadToFastFS(
+            (params) => callFunction({ contractId: params.contractId, method: params.method, args: params.args, gas: params.gas }),
+            parts,
+          );
+          avatarUrl = getFastFSUrl(walletAccountId, relPath);
+        } else {
+          // Upload via server relayer (Solana/Google users)
+          setUploadProgress("Uploading avatar (may take 1-2 min to appear)...");
+          const result = await uploadToFastFSViaRelayer(avatarFile);
+          avatarUrl = result.url;
+        }
       }
 
       setUploadProgress("Saving profile...");
@@ -209,6 +261,11 @@ export default function ProfilePage() {
       setProfileData(userData);
       setSongs(userSongs ?? []);
       setEditing(false);
+
+      // Show toast if avatar was uploaded via relayer (takes 1-2 min to appear on FastFS)
+      if (avatarUrl && !walletAccountId) {
+        showToast({ message: "Profile saved! Avatar may take 1-2 minutes to appear.", type: "success", id: "avatar-upload" });
+      }
     } catch (e) {
       console.error("Save profile failed:", e);
       alert("Failed to save profile. Please try again.");
@@ -262,7 +319,13 @@ export default function ProfilePage() {
 
   const displayName = profileData.display_name as string | null;
   const isProfilePremium = profileData.is_premium as boolean;
+  const isProfileAgent = profileData.is_agent as boolean;
+  const premiumGift = profileData.premium_gifted_by as { gifted_by_slug: string; gifted_by_display_name: string | null; days_added: number; created_at: string } | null;
   const nearAccountId = profileData.near_account_id as string | null;
+  const solanaAddress = profileData.solana_address as string | null;
+  const ethAddress = profileData.eth_address as string | null;
+  const ethChainId = profileData.eth_chain_id as number | null;
+  const authProvider = profileData.auth_provider as string;
   const avatarUrl = profileData.avatar_url as string | null;
   const bio = profileData.bio as string | null;
   const twitterHandle = profileData.twitter_handle as string | null;
@@ -276,6 +339,14 @@ export default function ProfilePage() {
   const activeBountiesCount = (profileData.active_bounties_count as number) ?? 0;
   const activeBountiesTotalYocto = profileData.active_bounties_total_yocto as string || "0";
   const activeBountiesTotalNear = (Number(activeBountiesTotalYocto) / 1e24).toFixed(1).replace(/\.0$/, "");
+  const activeBountiesTotalUsdCents = (profileData.active_bounties_total_usd_cents as number) || 0;
+  const activeBountiesTotalDisplay = activeBountiesTotalUsdCents > 0 && Number(activeBountiesTotalYocto) > 0
+    ? `$${(activeBountiesTotalUsdCents / 100).toFixed(2)} + ${activeBountiesTotalNear} NEAR`
+    : activeBountiesTotalUsdCents > 0
+    ? `$${(activeBountiesTotalUsdCents / 100).toFixed(2)}`
+    : Number(activeBountiesTotalYocto) > 0
+    ? `${activeBountiesTotalNear} NEAR`
+    : "";
   const memberSince = profileData.created_at as string;
 
   return (
@@ -300,6 +371,20 @@ export default function ProfilePage() {
                     </div>
                   )}
                 </div>
+              ) : isProfileAgent ? (
+                <div className="p-0.5 rounded-full bg-gradient-to-br from-purple-500 to-violet-600 shadow-lg shadow-purple-500/30">
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={displayName || accountId}
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-black/80"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-purple-700 to-violet-800 flex items-center justify-center text-2xl sm:text-3xl font-bold text-white ring-2 ring-black/80">
+                      ⚡
+                    </div>
+                  )}
+                </div>
               ) : avatarUrl ? (
                 <img
                   src={avatarUrl}
@@ -312,27 +397,89 @@ export default function ProfilePage() {
                 </div>
               )}
               {isProfilePremium && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 border border-cyan-500/20 diamond-shimmer">
-                  ✦ Premium
-                </span>
+                <div className="flex flex-col items-start">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 border border-cyan-500/20 diamond-shimmer">
+                    ✦ Premium
+                  </span>
+                  {premiumGift && (
+                    <span className="text-[9px] text-slate-500 mt-0.5 ml-0.5">
+                      gifted by{" "}
+                      <Link href={`/profile/${premiumGift.gifted_by_slug}`} className="text-purple-400 hover:underline">
+                        {premiumGift.gifted_by_display_name || premiumGift.gifted_by_slug}
+                      </Link>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
             <div className="min-w-0 flex-1">
               {displayName && (
-                <h1 className={`text-xl sm:text-2xl font-bold truncate ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
-                  {displayName}
-                </h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className={`text-xl sm:text-2xl font-bold truncate min-w-0 ${isProfilePremium ? "diamond-shimmer" : "text-white"}`}>
+                    {displayName}
+                  </h1>
+                  {isProfileAgent && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-300 shrink-0">
+                      ⚡ AI Agent
+                    </span>
+                  )}
+                </div>
               )}
-              <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate`}>
-                {accountId}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className={`${displayName ? "text-slate-400 text-sm" : `text-xl sm:text-2xl font-bold ${isProfilePremium ? "diamond-shimmer" : "text-white"}`} truncate min-w-0`} title={accountId.length > 30 ? accountId : undefined}>
+                  {truncateId(accountId)}
+                </p>
+                {isProfileAgent && !displayName && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-300 shrink-0">
+                    ⚡ AI Agent
+                  </span>
+                )}
+              </div>
               {bio && (
                 <p className="text-slate-300 text-sm mt-1.5 line-clamp-2 hidden sm:block">{bio}</p>
               )}
               <div className="flex items-center gap-3 mt-1 flex-wrap">
+                {/* Chain badge */}
+                {authProvider === "near" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    <svg className="w-3 h-3" viewBox="0 0 90.1 90" fill="currentColor">
+                      <path d="M72.2 4.6L53.4 32.5c-1.7 2.5 1.7 5.5 3.9 3.5l20-18.2c.5-.4 1.2-.1 1.2.6v54.4c0 .7-.9 1-1.3.5L18.4 2.8A12.3 12.3 0 0 0 8.7 0h-1C3.5 0 0 3.8 0 8.5v73c0 4.7 3.5 8.5 7.8 8.5 2.8 0 5.5-1.6 7-4.2l18.8-27.9c1.7-2.5-1.7-5.5-3.9-3.5l-20 18.2c-.5.4-1.2.1-1.2-.6V18.6c0-.7.9-1 1.3-.5l58.8 70.4a12.3 12.3 0 0 0 9.6 4.5h1c4.3 0 7.8-3.8 7.8-8.5v-73c0-4.7-3.5-8.5-7.8-8.5-2.9 0-5.5 1.6-7 4.6z" />
+                    </svg>
+                    NEAR
+                  </span>
+                )}
+                {authProvider === "solana" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                    <svg className="w-3 h-3" viewBox="0 0 397.7 311.7" fill="none">
+                      <linearGradient id="sol-p" x1="360.9" y1="351.5" x2="141.2" y2="-69.2" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 -25)">
+                        <stop offset="0" stopColor="#00FFA3" /><stop offset="1" stopColor="#DC1FFF" />
+                      </linearGradient>
+                      <path fill="url(#sol-p)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z" />
+                      <path fill="url(#sol-p)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z" />
+                      <path fill="url(#sol-p)" d="M333.1 120c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1L333.1 120z" />
+                    </svg>
+                    Solana
+                  </span>
+                )}
+                {authProvider === "ethereum" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <svg className="w-3 h-3" viewBox="0 0 784 784" fill="currentColor">
+                      <path d="M392 0L387.5 15.3V536.2L392 540.7L633.6 398.2L392 0Z" opacity=".6"/>
+                      <path d="M392 0L150.4 398.2L392 540.7V289.6V0Z"/>
+                      <path d="M392 586.4L389.5 589.4V779.3L392 784L633.8 444L392 586.4Z" opacity=".6"/>
+                      <path d="M392 784V586.4L150.4 444L392 784Z"/>
+                    </svg>
+                    {evmChainName(ethChainId)}
+                  </span>
+                )}
+                {solanaAddress && authProvider !== "solana" && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                    + Solana
+                  </span>
+                )}
                 {nearAccountId && nearAccountId !== accountId && (
-                  <span className="text-xs text-slate-500 font-mono">{nearAccountId}</span>
+                  <span className="text-xs text-slate-500 font-mono" title={nearAccountId}>{truncateId(nearAccountId)}</span>
                 )}
                 <p className="text-slate-500 text-xs">
                   Member since {formatDate(memberSince)}
@@ -364,6 +511,9 @@ export default function ProfilePage() {
             {!isOwnProfile && (
               <>
                 <FollowButton key={followKey} accountId={accountId} currentUser={currentUser} onFollowChange={setIsFollowing} />
+                {currentUser && (
+                  <GiftPremiumButton recipientSlug={accountId} />
+                )}
                 {currentUser && !isFollowing && (
                   <button
                     onClick={handleBlock}
@@ -381,7 +531,7 @@ export default function ProfilePage() {
             )}
             {isOwnProfile && (
               <>
-                {authUser && !authUser.near_account_id && (
+                {authUser && !authUser.near_account_id && !authUser.solana_address && !authUser.eth_address && (
                   <button
                     onClick={() => linkWallet()}
                     className="px-4 py-2 text-sm text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/30 rounded-xl transition-all"
@@ -534,6 +684,17 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Agent notice */}
+        {isProfileAgent && (
+          <div className="mt-6 flex items-start gap-3 px-4 py-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20">
+            <span className="text-lg mt-0.5 shrink-0">⚡</span>
+            <div>
+              <p className="text-sm font-semibold text-purple-300">AI Agent</p>
+              <p className="text-xs text-slate-400 mt-0.5">This profile is operated by an autonomous AI agent.</p>
+            </div>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="flex flex-wrap gap-4 mt-8 [&>div]:flex-1 [&>div]:min-w-[100px]">
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
@@ -575,26 +736,27 @@ export default function ProfilePage() {
       {!isOwnProfile && !isFollowing && activeBountiesCount > 0 && currentUser && (
         <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
           <p className="text-sm text-slate-200">
-            <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalNear} NEAR</span>.{" "}
+            <span className="font-medium text-white">{displayName || accountId}</span> has <span className="font-bold text-purple-400">{activeBountiesCount} active {activeBountiesCount === 1 ? "bounty" : "bounties"}</span>{activeBountiesTotalDisplay && <> totaling <span className="font-bold text-cyan-400">{activeBountiesTotalDisplay}</span></>}.{" "}
             <button onClick={async () => { try { await followUser(accountId); setIsFollowing(true); setFollowKey(k => k + 1); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
           </p>
         </div>
       )}
 
-      {/* Songs section */}
-      <h2 className="text-lg font-semibold text-white mb-4">Songs</h2>
+      {/* Tabs */}
+      <ProfileTabs activeTab={activeTab} onTabChange={handleTabChange} slug={accountId} />
 
-      {songs.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-slate-500 text-lg">No songs uploaded yet</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {songs.map((song) => (
-            <SongCard key={song.uuid} song={song} />
-          ))}
-        </div>
+      {/* Tab content */}
+      {activeTab === "songs" && <SongsTab songs={songs} />}
+      {activeTab === "blog" && <BlogTab accountId={accountId} isOwner={isOwnProfile} songs={songs} />}
+      {activeTab === "feed" && (
+        <FanFeedTab
+          accountId={accountId}
+          displayName={displayName}
+          nearAccountId={nearAccountId}
+          isOwnProfile={isOwnProfile}
+        />
       )}
+      {activeTab === "tips" && <TipsTab accountId={accountId} />}
 
       {/* Followers */}
       {followers.length > 0 && (

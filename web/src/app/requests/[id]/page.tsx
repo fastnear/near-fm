@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { SongRequest } from "@/types";
-import { getRequest, getRequestSubmissions, updateRequest, getUserProfile, followUser } from "@/lib/api";
+import { getRequest, getRequestSubmissions, updateRequest, getUserProfile, followUser, awardBountyFromBalance, withdrawBountyFromBalance, topupBountyFromBalance } from "@/lib/api";
 import { awardBountyAction, withdrawBountyAction } from "@/lib/near/contract";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
@@ -84,11 +84,16 @@ export default function RequestDetailPage() {
       .catch(() => {});
   }, [request]);
 
+  const isUsdBounty = request?.bounty_payment_method === "balance";
+
+  const [topupAmount, setTopupAmount] = useState("");
+  const [topupLoading, setTopupLoading] = useState(false);
+
   const handleWithdraw = async () => {
     if (!request) return;
 
     const confirmed = window.confirm(
-      "Are you sure you want to withdraw the bounty? A penalty may apply."
+      "Are you sure you want to withdraw the bounty? A 20% penalty applies."
     );
     if (!confirmed) return;
 
@@ -96,18 +101,20 @@ export default function RequestDetailPage() {
     setError("");
 
     try {
-      const action = withdrawBountyAction(request.uuid);
-      await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args as Record<string, unknown>,
-        gas: action.gas,
-      });
-
+      if (isUsdBounty) {
+        await withdrawBountyFromBalance(request.uuid);
+      } else {
+        const action = withdrawBountyAction(request.uuid);
+        await callFunction({
+          contractId: action.contractId,
+          method: action.method,
+          args: action.args as Record<string, unknown>,
+          gas: action.gas,
+        });
+      }
       await refreshData();
     } catch (e: any) {
       if (e.name === "WalletConnectionRequired") { setWithdrawing(false); return; }
-      console.error("Failed to withdraw bounty:", e);
       setError(e instanceof Error ? e.message : "Failed to withdraw bounty");
     }
     setWithdrawing(false);
@@ -116,14 +123,12 @@ export default function RequestDetailPage() {
   const handleAward = async (submission: any) => {
     if (!request) return;
 
-    const recipientNearId = submission.submitter_near_account_id;
-    if (!recipientNearId) {
-      setError("This submitter hasn't linked a NEAR wallet. Cannot award bounty.");
-      return;
-    }
+    const bountyDisplay = isUsdBounty
+      ? `$${((request.bounty_usd_cents || 0) / 100).toFixed(2)}`
+      : `${formatNear(request.bounty_amount_yocto)} NEAR`;
 
     const confirmed = window.confirm(
-      `Award the bounty of ${formatNear(request.bounty_amount_yocto)} NEAR to "${submission.song_title}" by ${submission.submitter_account_id}?`
+      `Award the bounty of ${bountyDisplay} to "${submission.song_title}" by ${submission.submitter_account_id}?`
     );
     if (!confirmed) return;
 
@@ -131,27 +136,47 @@ export default function RequestDetailPage() {
     setError("");
 
     try {
-      const action = awardBountyAction(request.uuid, recipientNearId);
-      await callFunction({
-        contractId: action.contractId,
-        method: action.method,
-        args: action.args as Record<string, unknown>,
-        gas: action.gas,
-      });
-
-      // Update request status on backend
-      await updateRequest(uuid, {
-        status: "awarded",
-        awarded_song_id: submission.song_id,
-      });
-
+      if (isUsdBounty) {
+        await awardBountyFromBalance(request.uuid, submission.song_id);
+      } else {
+        const recipientNearId = submission.submitter_near_account_id;
+        if (!recipientNearId) {
+          setError("This submitter hasn't linked a NEAR wallet. Cannot award bounty.");
+          setAwarding(null);
+          return;
+        }
+        const action = awardBountyAction(request.uuid, recipientNearId);
+        await callFunction({
+          contractId: action.contractId,
+          method: action.method,
+          args: action.args as Record<string, unknown>,
+          gas: action.gas,
+        });
+        await updateRequest(uuid, { status: "awarded", awarded_song_id: submission.song_id });
+      }
       await refreshData();
     } catch (e: any) {
       if (e.name === "WalletConnectionRequired") { setAwarding(null); return; }
-      console.error("Failed to award bounty:", e);
       setError(e instanceof Error ? e.message : "Failed to award bounty");
     }
     setAwarding(null);
+  };
+
+  const handleTopup = async () => {
+    if (!request) return;
+    const usd = parseFloat(topupAmount);
+    if (isNaN(usd) || usd < 0.10) { setError("Minimum top-up is $0.10"); return; }
+
+    setTopupLoading(true);
+    setError("");
+    try {
+      await topupBountyFromBalance(request.uuid, Math.round(usd * 100));
+      setTopupAmount("");
+      await refreshData();
+    } catch (e: any) {
+      setError(e?.message || "Top-up failed");
+    }
+    setTopupLoading(false);
   };
 
   if (loading) {
@@ -219,9 +244,11 @@ export default function RequestDetailPage() {
           </div>
           <div className="flex-shrink-0 text-right">
             <div className="text-2xl font-bold text-purple-400">
-              {formatNear(request.bounty_amount_yocto)} NEAR
+              {isUsdBounty
+                ? `$${((request.bounty_usd_cents || 0) / 100).toFixed(2)}`
+                : `${formatNear(request.bounty_amount_yocto)} NEAR`}
             </div>
-            <div className="text-xs text-slate-500">bounty</div>
+            <div className="text-xs text-slate-500">bounty{isUsdBounty ? " (USDC)" : ""}</div>
           </div>
         </div>
 
@@ -277,7 +304,7 @@ export default function RequestDetailPage() {
         {user && !isFollowingRequester && requesterBounties && (request as any).requester_account_id && user.slug !== (request as any).requester_account_id && (
           <div className="mb-6 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20 px-5 py-4">
             <p className="text-sm text-slate-200">
-              <Link href={`/profile/${(request as any).requester_account_id}`} className="text-purple-400 hover:text-purple-300 font-medium">{(request as any).requester_account_id}</Link> has <span className="font-bold text-purple-400">{requesterBounties.count} active {requesterBounties.count === 1 ? "bounty" : "bounties"}</span> totaling <span className="font-bold text-cyan-400">{requesterBounties.totalNear} NEAR</span>.{" "}
+              <Link href={`/profile/${(request as any).requester_account_id}`} className="text-purple-400 hover:text-purple-300 font-medium">{(request as any).requester_account_id}</Link> has <span className="font-bold text-purple-400">{requesterBounties.count} active {requesterBounties.count === 1 ? "bounty" : "bounties"}</span>{requesterBounties.totalNear !== "0" && <> totaling <span className="font-bold text-cyan-400">{requesterBounties.totalNear} NEAR</span></>}.{" "}
               <button onClick={async () => { try { await followUser((request as any).requester_account_id); setIsFollowingRequester(true); } catch {} }} className="text-purple-400 hover:text-purple-300 underline underline-offset-2 font-medium transition">Follow</button> to get notified about new bounties!
             </p>
           </div>
@@ -371,7 +398,9 @@ export default function RequestDetailPage() {
                 Create an AI-generated song matching this request to earn the
                 bounty of{" "}
                 <span className="text-purple-400 font-medium">
-                  {formatNear(request.bounty_amount_yocto)} NEAR
+                  {isUsdBounty
+                    ? `$${((request.bounty_usd_cents || 0) / 100).toFixed(2)}`
+                    : `${formatNear(request.bounty_amount_yocto)} NEAR`}
                 </span>
                 .
               </p>
@@ -382,6 +411,35 @@ export default function RequestDetailPage() {
                 Submit a Song
               </Link>
             </div>
+
+            {/* Top up bounty (anyone, USD bounties only) */}
+            {isUsdBounty && (
+              <div className="glass rounded-xl p-5">
+                <h3 className="text-base font-semibold mb-2">Add to Bounty</h3>
+                <p className="text-slate-400 text-sm mb-3">Anyone can add funds to increase the bounty.</p>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                    <input
+                      type="number"
+                      min="0.10"
+                      step="0.01"
+                      placeholder="1.00"
+                      value={topupAmount}
+                      onChange={(e) => setTopupAmount(e.target.value)}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg py-2 pl-7 pr-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                  <button
+                    onClick={handleTopup}
+                    disabled={topupLoading || !topupAmount || parseFloat(topupAmount) < 0.10}
+                    className="px-4 py-2 text-sm font-medium btn-primary rounded-lg disabled:opacity-30"
+                  >
+                    {topupLoading ? "..." : "Add"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Withdraw (requester only, after expiry) */}
             {isRequester && (

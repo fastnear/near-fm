@@ -46,10 +46,13 @@ pub fn verify_nep413_signature(
     )
     .map_err(|e| format!("Invalid public key: {}", e))?;
 
-    // Decode signature from base64
+    // Decode signature from base64 (strip "ed25519:" prefix if present)
+    let sig_str = signature_b64
+        .strip_prefix("ed25519:")
+        .unwrap_or(signature_b64);
     let sig_bytes = base64::Engine::decode(
         &base64::engine::general_purpose::STANDARD,
-        signature_b64,
+        sig_str,
     )
     .map_err(|e| format!("Invalid signature base64: {}", e))?;
 

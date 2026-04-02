@@ -14,9 +14,9 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://near.fm"),
-  title: "near.fm — AI Music for NEAR",
+  title: "near.fm — AI Music Platform",
   description:
-    "Discover and share AI-generated music about NEAR Protocol. Listen, vote, tip artists with NEAR tokens.",
+    "Discover and share AI-generated music on the first Web3 music platform. Listen, vote, tip artists with crypto.",
   icons: {
     icon: [
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
