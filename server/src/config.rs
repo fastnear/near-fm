@@ -21,6 +21,8 @@ pub struct Config {
     pub fastfs_relayer_account_id: Option<String>,
     pub fastfs_relayer_private_key: Option<String>,
     pub fastfs_relayer_rpc_url: Option<String>,
+    pub telegram_bot_token: Option<String>,
+    pub telegram_chat_id: Option<String>,
 }
 
 impl Config {
@@ -83,6 +85,8 @@ impl Config {
             fastfs_relayer_account_id: env::var("FASTFS_RELAYER_ACCOUNT_ID").ok(),
             fastfs_relayer_private_key: env::var("FASTFS_RELAYER_PRIVATE_KEY").ok(),
             fastfs_relayer_rpc_url: env::var("FASTFS_RELAYER_RPC_URL").ok(),
+            telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN").ok().filter(|s| !s.is_empty()),
+            telegram_chat_id: env::var("TELEGRAM_CHAT_ID").ok().filter(|s| !s.is_empty()),
         }
     }
 

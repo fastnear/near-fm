@@ -60,7 +60,10 @@ function FeedPageInner() {
 
     // /language/:code
     const langMatch = pathname.match(/^\/language\/([^/]+)$/);
-    if (langMatch) setLangCode(langMatch[1]);
+    if (langMatch) {
+      setLangCode(langMatch[1]);
+      setLanguageId(undefined); // lang_code overrides numeric languageId
+    }
 
     // /trending, /latest, /top
     const sortRoutes: Record<string, SortMode> = {
@@ -95,7 +98,10 @@ function FeedPageInner() {
     const genreParam = searchParams.get("genre");
     if (genreParam) setGenreSlug(genreParam);
     const langCodeParam = searchParams.get("lang_code");
-    if (langCodeParam) setLangCode(langCodeParam);
+    if (langCodeParam) {
+      setLangCode(langCodeParam);
+      setLanguageId(undefined); // lang_code overrides numeric languageId
+    }
     setSortReady(true);
   }, [searchParams]);
 

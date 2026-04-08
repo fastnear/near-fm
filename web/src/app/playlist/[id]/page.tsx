@@ -162,13 +162,26 @@ export default function PlaylistPage() {
                     <span className="text-xs text-slate-600">{i + 1}</span>
                   )}
                 </button>
-                <div className="w-10 h-10 rounded overflow-hidden shrink-0 ring-1 ring-white/[0.06]">
+                <button
+                  onClick={() => {
+                    if (currentSong?.uuid === song.uuid) togglePlay(song);
+                    else playFromFeed(song, songs);
+                  }}
+                  className="w-10 h-10 rounded overflow-hidden shrink-0 ring-1 ring-white/[0.06] relative group cursor-pointer"
+                >
                   {song.cover_image_url ? (
                     <img src={song.cover_image_url} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-purple-900/50 to-cyan-900/50" />
                   )}
-                </div>
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                    {isActive && isPlaying ? (
+                      <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    )}
+                  </div>
+                </button>
                 <div className="flex-1 min-w-0">
                   <Link href={`/song/${song.uuid}`} className="text-sm text-white hover:text-purple-400 transition-colors truncate block">
                     {song.title}

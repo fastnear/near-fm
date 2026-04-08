@@ -634,6 +634,8 @@ pub async fn generate(
     if task_id.is_empty() {
         let suno_msg = body["msg"].as_str().unwrap_or("").to_string();
         tracing::error!("No taskId in Suno response: {:?}", body);
+        // Alert via Telegram on critical Suno errors (e.g. 429 credits exhausted)
+        send_telegram_alert(&state, &format!("Suno API error: {}", if suno_msg.is_empty() { "no taskId" } else { &suno_msg })).await;
         if paid_from_balance {
             refund_balance_deduction(&state.db, claims.user_id, CREDITS_PER_SONG, "suno_error").await;
         }
@@ -1192,4 +1194,25 @@ pub async fn lyrics_callback(
     }
 
     Ok(StatusCode::OK)
+}
+
+/// Send alert to Telegram (non-blocking, fire-and-forget)
+async fn send_telegram_alert(state: &AppState, message: &str) {
+    let token = match &state.config.telegram_bot_token {
+        Some(t) => t.clone(),
+        None => return,
+    };
+    let chat_id = match &state.config.telegram_chat_id {
+        Some(c) => c.clone(),
+        None => return,
+    };
+    let client = state.http_client.clone();
+    let text = format!("near.fm alert: {}", message);
+    tokio::spawn(async move {
+        let _ = client
+            .post(format!("https://api.telegram.org/bot{}/sendMessage", token))
+            .json(&serde_json::json!({ "chat_id": chat_id, "text": text }))
+            .send()
+            .await;
+    });
 }
