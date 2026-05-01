@@ -32,7 +32,7 @@ export default function UploadPageWrapper() {
 
 function UploadPage() {
   const { user, isAuthenticated, promptSignIn } = useAuth();
-  const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction } = useNearWallet();
+  const { accountId, connectAndSignIn, completeSignIn, linkWallet, callFunction, lowAllowance, reconnectWallet } = useNearWallet();
   const searchParams = useSearchParams();
   const fulfillsRequestId = searchParams.get("fulfills_request_id");
   const requestUuid = searchParams.get("request_uuid");
@@ -176,6 +176,10 @@ function UploadPage() {
       return;
     }
 
+    if (lowAllowance && accountId) {
+      setError("Your wallet session key has run out of gas. Please reconnect your wallet to continue.");
+      return;
+    }
     setUploading(true);
     setError("");
 
@@ -226,7 +230,12 @@ function UploadPage() {
       window.location.href = `https://near.fm/song/${song.uuid}`;
     } catch (e) {
       console.error("Upload failed:", e);
-      setError(e instanceof Error ? e.message : "Upload failed");
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("Exceeded the prepaid gas") || msg.includes("NotEnoughAllowance")) {
+        setError("Your wallet session key has run out of gas. Please reconnect your wallet (click your name in the top menu) and try again.");
+      } else {
+        setError(msg || "Upload failed");
+      }
     }
     setUploading(false);
   };
@@ -238,6 +247,15 @@ function UploadPage() {
     <div className="max-w-2xl mx-auto px-4 py-10">
       <h1 className="text-2xl font-bold text-white mb-2">Upload a Song</h1>
       <p className="text-slate-500 text-sm mb-8">Share your AI-generated music with the world</p>
+
+      {lowAllowance && accountId && (
+        <div className="flex items-center gap-2 text-amber-300 text-sm bg-amber-900/40 border border-amber-500/20 rounded-xl px-4 py-3 mb-4">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span>Your wallet session key is low on gas. <button onClick={reconnectWallet} className="underline font-medium">Reconnect wallet</button> to upload songs.</span>
+        </div>
+      )}
 
       {bountyRequest && (
         <div className="glass-card rounded-2xl p-5 mb-6 border-l-4 border-l-purple-500">

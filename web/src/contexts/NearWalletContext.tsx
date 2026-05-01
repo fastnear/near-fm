@@ -36,6 +36,7 @@ interface NearWalletContextType {
   loading: boolean;
   signInPending: boolean;
   lowAllowance: boolean;
+  keyAllowanceNear: string | null;
   connectWallet: () => void;
   connectAndSignIn: () => void;
   disconnectWallet: () => Promise<void>;
@@ -77,6 +78,7 @@ const NearWalletContext = createContext<NearWalletContextType>({
   loading: true,
   signInPending: false,
   lowAllowance: false,
+  keyAllowanceNear: null,
   connectWallet: () => {},
   connectAndSignIn: () => {},
   disconnectWallet: async () => {},
@@ -96,6 +98,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [signInPending, setSignInPending] = useState(false);
   const [lowAllowance, setLowAllowance] = useState(false);
+  const [keyAllowanceNear, setKeyAllowanceNear] = useState<string | null>(null);
 
   const pendingAuthRef = useRef(false);
   const pendingLinkRef = useRef(false);
@@ -158,9 +161,9 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new Event("nearfm_session_changed"));
   }, [signNep413]);
 
-  // Check if the function call access key has enough allowance.
-  // Uses the maximum allowance across all function call keys for the contract,
-  // because after reconnect the old depleted key may still exist on-chain.
+  // Check if function call access keys have enough allowance.
+  // Uses the key with highest nonce (most recently used by the wallet).
+  // Old depleted keys may remain on-chain after reconnect but won't be used.
   const checkAllowance = useCallback(async (accId: string) => {
     try {
       const res = await fetch(RPC_URL, {
@@ -180,18 +183,24 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
       const json = await res.json();
       if (!json.result?.keys) return;
 
-      let maxAllowance = BigInt(-1);
+      let bestAllowance = BigInt(-1);
+      let bestNonce = -1;
       for (const key of json.result.keys) {
         const perm = key.access_key.permission;
         if (perm !== "FullAccess" && perm.FunctionCall?.receiver_id === CONTRACT_ID) {
+          const nonce = key.access_key.nonce || 0;
           const allowance = BigInt(perm.FunctionCall.allowance);
-          if (allowance > maxAllowance) {
-            maxAllowance = allowance;
+          // Pick the key with highest nonce (most recently used/created)
+          if (nonce > bestNonce) {
+            bestNonce = nonce;
+            bestAllowance = allowance;
           }
         }
       }
-      if (maxAllowance >= BigInt(0)) {
-        setLowAllowance(maxAllowance < MIN_ALLOWANCE);
+      if (bestAllowance >= BigInt(0)) {
+        setLowAllowance(bestAllowance < MIN_ALLOWANCE);
+        const nearVal = Number(bestAllowance) / 1e24;
+        setKeyAllowanceNear(nearVal < 0.001 ? "<0.001" : nearVal.toFixed(3));
       }
     } catch (e) {
       console.error("Failed to check key allowance:", e);
@@ -490,6 +499,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
         loading,
         signInPending,
         lowAllowance,
+        keyAllowanceNear,
         connectWallet,
         connectAndSignIn,
         disconnectWallet,

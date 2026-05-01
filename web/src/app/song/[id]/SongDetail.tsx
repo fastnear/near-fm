@@ -191,7 +191,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
       let cover_image_url: string | undefined;
 
       // Upload cover to FastFS if a new one was selected
-      if (coverFile && (accountId || user?.solana_address)) {
+      // Upload cover: NEAR users can always upload (they pay gas). Solana/ETH use relayer — only first upload.
+      const canUploadCover = accountId || ((!song.cover_image_url) && (user?.solana_address || user?.eth_address));
+      if (coverFile && canUploadCover) {
         setCoverUploading(true);
         if (accountId) {
           // Direct upload via NEAR wallet
@@ -368,8 +370,8 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
             </div>
           )}
 
-          {/* Remove cover button — admin only (authors cannot change cover once set) */}
-          {isAdmin && song.cover_image_url && (
+          {/* Remove cover button — in edit mode: admin or author with NEAR wallet */}
+          {editing && (isAdmin || (canEdit && accountId)) && song.cover_image_url && (
             <button
               onClick={removeCover}
               className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-slate-400 hover:text-rose-400 transition-colors"

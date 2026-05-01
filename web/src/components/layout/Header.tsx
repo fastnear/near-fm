@@ -10,7 +10,7 @@ import { getNotifications, getWalletBalance } from "@/lib/api";
 
 export function Header() {
   const { user, isAuthenticated, isPremium, loading: authLoading, promptSignIn } = useAuth();
-  const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, reconnectWallet, lowAllowance, loading: walletLoading } = useNearWallet();
+  const { accountId, connectAndSignIn, completeSignIn, signInPending, disconnectWallet, reconnectWallet, lowAllowance, keyAllowanceNear, loading: walletLoading } = useNearWallet();
   const [unreadCount, setUnreadCount] = useState(0);
   const [walletBalance, setWalletBalance] = useState<string | null>(null);
   const pathname = usePathname();
@@ -179,7 +179,7 @@ export function Header() {
       {/* Low allowance warning */}
       {lowAllowance && isAuthenticated && (
         <div className="bg-amber-900/40 border-b border-amber-500/20 px-4 py-2 text-center text-sm text-amber-300">
-          Your session key is running low on gas.{" "}
+          Your session key is running low on gas{keyAllowanceNear ? ` (${keyAllowanceNear} NEAR left)` : ""}.{" "}
           <button onClick={reconnectWallet} className="underline underline-offset-2 font-medium hover:text-amber-200 transition">
             Reconnect wallet
           </button>
