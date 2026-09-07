@@ -475,6 +475,39 @@ fn prune_cache(cache: &mut HashMap<String, SunoTaskData>, max: usize) {
     }
 }
 
+/// Build SunoSongData from a raw JSON object. The Suno API may send both
+/// camelCase and snake_case spellings of the same field in one object, which
+/// serde's derive rejects as a duplicate field — so extract fields manually.
+fn song_from_value(v: &serde_json::Value) -> SunoSongData {
+    fn pick_str(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
+        keys.iter().find_map(|k| match &v[*k] {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })
+    }
+    fn pick_f64(v: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+        keys.iter().find_map(|k| match &v[*k] {
+            serde_json::Value::Number(n) => n.as_f64(),
+            serde_json::Value::String(s) => s.parse().ok(),
+            _ => None,
+        })
+    }
+    SunoSongData {
+        id: pick_str(v, &["id"]),
+        audio_url: pick_str(v, &["audioUrl", "audio_url"]),
+        stream_audio_url: pick_str(v, &["streamAudioUrl", "stream_audio_url"]),
+        image_url: pick_str(v, &["imageUrl", "image_url"]),
+        source_image_url: pick_str(v, &["sourceImageUrl", "source_image_url"]),
+        source_audio_url: pick_str(v, &["sourceAudioUrl", "source_audio_url"]),
+        title: pick_str(v, &["title"]),
+        tags: pick_str(v, &["tags"]),
+        duration: pick_f64(v, &["duration"]),
+        prompt: pick_str(v, &["prompt"]),
+        create_time: pick_str(v, &["createTime", "create_time"]),
+    }
+}
+
 fn parse_suno_songs(data: Option<&[SunoSongData]>) -> Vec<SongVariant> {
     data.map(|songs| {
         songs
@@ -696,10 +729,15 @@ pub async fn status(
                 task_data.suno_data.as_ref().map(|v| v.len()).unwrap_or(0),
                 songs.len()
             );
-            return Ok(Json(StatusResponse {
-                status: task_data.status.clone(),
-                songs,
-            }));
+            // A success status with no songs means the callback data was lost
+            // (e.g. failed to parse) — fall through and poll Suno directly
+            // instead of returning a permanently empty result.
+            if !(songs.is_empty() && task_data.status.contains("SUCCESS")) {
+                return Ok(Json(StatusResponse {
+                    status: task_data.status.clone(),
+                    songs,
+                }));
+            }
         }
     }
 
@@ -732,13 +770,23 @@ pub async fn status(
 
     let suno_data: Option<Vec<SunoSongData>> = body["data"]["sunoData"]
         .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| serde_json::from_value(v.clone()).ok())
-                .collect()
-        });
+        .map(|arr| arr.iter().map(song_from_value).collect());
 
     let songs = parse_suno_songs(suno_data.as_deref());
+
+    // Repair the cache so subsequent status/download calls see the songs
+    if !songs.is_empty() {
+        let mut cache = state.suno_cache.write().await;
+        let entry = cache
+            .entry(params.task_id.clone())
+            .or_insert_with(|| SunoTaskData {
+                status: status_str.clone(),
+                suno_data: None,
+                created_at: Some(Instant::now()),
+            });
+        entry.status = status_str.clone();
+        entry.suno_data = suno_data;
+    }
 
     Ok(Json(StatusResponse {
         status: status_str,
@@ -822,16 +870,7 @@ pub async fn callback(
     let suno_data: Option<Vec<SunoSongData>> = data["data"]
         .as_array()
         .or_else(|| payload["sunoData"].as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    serde_json::from_value::<SunoSongData>(v.clone()).map_err(|e| {
-                        tracing::warn!("Failed to parse SunoSongData: {} — raw: {}", e, v);
-                        e
-                    }).ok()
-                })
-                .collect::<Vec<_>>()
-        })
+        .map(|arr| arr.iter().map(song_from_value).collect::<Vec<_>>())
         .filter(|v| !v.is_empty());
 
     // Only accept callbacks for tasks we initiated
