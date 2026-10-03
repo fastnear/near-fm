@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Song } from "@/types";
+import { usePlayPauseHint } from "@/hooks/usePlayPauseHint";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { VoteButtons } from "./VoteButtons";
 
@@ -13,6 +14,10 @@ const langFlags: Record<string, string> = {
 export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }) {
   const { currentSong, isPlaying, togglePlay, playFromFeed } = useAudioPlayer();
   const isActive = currentSong?.uuid === song.uuid;
+  const playing = isActive && isPlaying;
+  // While playing, the pause icon shows briefly then fades out so the cover art stays
+  // unobstructed (shared with the song page). Clicking the cover still toggles playback.
+  const pauseHintVisible = usePlayPauseHint(playing);
 
   return (
     <div
@@ -43,19 +48,23 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
           </span>
         )}
 
-        {/* Play button overlay */}
+        {/* Play / pause overlay. The whole cover is the click target (toggles playback).
+            No hover scrim; while playing the icon fades out so the art is unobstructed. */}
         <button
           onClick={() => isActive ? togglePlay(song) : (feedSongs ? playFromFeed(song, feedSongs) : togglePlay(song))}
-          className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-all duration-300"
+          aria-label={playing ? "Pause" : "Play"}
+          className="absolute inset-0 flex items-center justify-center"
         >
           <div
-            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ${
-              isActive && isPlaying
-                ? "opacity-100 scale-100 bg-gradient-to-r from-purple-500 to-cyan-500 animate-pulse-glow"
-                : "opacity-0 group-hover:opacity-100 group-hover:scale-100 scale-75 bg-gradient-to-r from-purple-500 to-purple-600"
+            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-xl bg-gradient-to-r transition-all ${
+              playing
+                ? `duration-700 from-purple-500 to-cyan-500 ${
+                    pauseHintVisible ? "opacity-100 scale-100 animate-pulse-glow" : "opacity-0 scale-90"
+                  }`
+                : "duration-200 from-purple-500 to-purple-600 opacity-100 scale-100"
             }`}
           >
-            {isActive && isPlaying ? (
+            {playing ? (
               <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
               </svg>

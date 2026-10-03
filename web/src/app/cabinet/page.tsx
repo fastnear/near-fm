@@ -5,10 +5,10 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNearWallet } from "@/contexts/NearWalletContext";
-import { getUserProfile, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining, restoreWallet } from "@/lib/api";
+import { getUserSongs, getNotifications, markAllNotificationsRead, getReports, reviewReport, moderateSong, getPlaylists, createPlaylist, updatePlaylist, deletePlaylist, getPlaylistSongs, removeSongFromPlaylist, reorderPlaylistSongs, getDiamondLikesRemaining, restoreWallet } from "@/lib/api";
 import { depositAction, withdrawAction, getBalance } from "@/lib/near/contract";
 import { getAddress } from "@/lib/outlayer";
-import { SongCard } from "@/components/song/SongCard";
+import { SongsTab } from "@/components/profile/SongsTab";
 import { BlockedUsers } from "@/components/cabinet/BlockedUsers";
 import type { Song, Notification, Playlist } from "@/types";
 import { prepareFastFSUpload, uploadToFastFS, uploadToFastFSViaRelayer, getRelativePath, getFastFSUrl } from "@/lib/near/fastfs";
@@ -529,6 +529,7 @@ function BalanceTab() {
 
 function MySongsTab({ userSlug }: { userSlug?: string }) {
   const [songs, setSongs] = useState<Song[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -536,8 +537,9 @@ function MySongsTab({ userSlug }: { userSlug?: string }) {
     const load = async () => {
       setLoading(true);
       try {
-        const data: any = await getUserProfile(userSlug);
+        const data = await getUserSongs(userSlug, 1);
         setSongs(data.songs ?? []);
+        setTotal(data.total ?? 0);
       } catch (e) {
         console.error("Failed to load songs:", e);
       }
@@ -574,13 +576,8 @@ function MySongsTab({ userSlug }: { userSlug?: string }) {
     );
   }
 
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-      {songs.map((song) => (
-        <SongCard key={song.uuid} song={song} />
-      ))}
-    </div>
-  );
+  // Grid + "Load more" pagination is shared with the public profile's Songs tab.
+  return <SongsTab songs={songs} slug={userSlug} total={total} />;
 }
 
 // ── Notifications Tab ──

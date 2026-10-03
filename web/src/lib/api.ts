@@ -294,6 +294,27 @@ export async function getUserProfile(accountId: string) {
   return fetchApi(`/api/users/${accountId}`);
 }
 
+// Page size for a user's uploaded-songs list. Must equal the backend's
+// PROFILE_SONGS_PAGE_SIZE so the first page (delivered inline with the profile
+// payload) and subsequent "Load more" pages line up without gaps or overlap.
+export const PROFILE_SONGS_PAGE_SIZE = 50;
+
+export interface UserSongsPage {
+  songs: Song[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export async function getUserSongs(
+  accountId: string,
+  page = 1,
+  limit = PROFILE_SONGS_PAGE_SIZE
+): Promise<UserSongsPage> {
+  const search = new URLSearchParams({ page: String(page), limit: String(limit) });
+  return fetchApi(`/api/users/${accountId}/songs?${search.toString()}`);
+}
+
 export async function getBookmarks(accountId: string): Promise<Song[]> {
   return fetchApi(`/api/users/${accountId}/bookmarks`);
 }

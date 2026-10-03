@@ -336,6 +336,9 @@ export default function ProfilePage() {
   const totalLikesGiven = (profileData.total_likes_given as number) ?? 0;
   const totalDislikesGiven = (profileData.total_dislikes_given as number) ?? 0;
   const followersCount = (profileData.followers_count as number) ?? 0;
+  // Real song count from the API; `songs` only holds the first page. Fall back to the
+  // loaded page length if the field is missing (e.g. during a rolling deploy).
+  const totalSongs = (profileData.total_songs as number) ?? songs.length;
   const activeBountiesCount = (profileData.active_bounties_count as number) ?? 0;
   const activeBountiesTotalYocto = profileData.active_bounties_total_yocto as string || "0";
   const activeBountiesTotalNear = (Number(activeBountiesTotalYocto) / 1e24).toFixed(1).replace(/\.0$/, "");
@@ -702,7 +705,7 @@ export default function ProfilePage() {
             <p className="text-xs text-slate-400 mt-1">Reputation</p>
           </div>
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
-            <p className="text-2xl font-bold text-white">{songs.length}</p>
+            <p className="text-2xl font-bold text-white">{totalSongs}</p>
             <p className="text-xs text-slate-400 mt-1">Songs</p>
           </div>
           <div className="bg-white/[0.04] rounded-xl p-4 border border-white/[0.04] text-center">
@@ -746,7 +749,7 @@ export default function ProfilePage() {
       <ProfileTabs activeTab={activeTab} onTabChange={handleTabChange} slug={accountId} />
 
       {/* Tab content */}
-      {activeTab === "songs" && <SongsTab songs={songs} />}
+      {activeTab === "songs" && <SongsTab songs={songs} slug={accountId} total={totalSongs} />}
       {activeTab === "blog" && <BlogTab accountId={accountId} isOwner={isOwnProfile} songs={songs} />}
       {activeTab === "feed" && (
         <FanFeedTab

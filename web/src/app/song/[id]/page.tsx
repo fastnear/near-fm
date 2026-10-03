@@ -28,30 +28,37 @@ export async function generateMetadata({
     return { title: "Song not found — near.fm" };
   }
 
+  const siteBase = API_URL.replace('api.near.fm', 'near.fm');
+  const artistName = song.uploader_display_name || song.uploader_account_id;
+  // Songs with cover: use cover directly (faster, smaller). Without cover: generate OG image with text.
+  const ogImage = song.cover_image_url || `${siteBase}/api/og?${new URLSearchParams({
+    title: song.title,
+    author: artistName,
+    type: "song",
+  })}`;
+  const description = song.description
+    ? song.description.slice(0, 150)
+    : `Listen to "${song.title}" by ${artistName} — AI-generated music on near.fm. Vote, tip, and discover new tracks.`;
+  const ogTitle = `${song.title} by ${artistName} — near.fm`;
+
   return {
-    title: `${song.title} — near.fm`,
-    description:
-      song.description ||
-      `AI-generated song by ${song.uploader_account_id} on near.fm`,
+    title: ogTitle,
+    description,
     openGraph: {
-      title: `${song.title} — near.fm`,
-      description:
-        song.description ||
-        `AI-generated song by ${song.uploader_account_id}`,
+      title: ogTitle,
+      description,
       type: "music.song",
       siteName: "near.fm",
-      ...(song.cover_image_url && { images: [{ url: song.cover_image_url }] }),
+      images: [{ url: ogImage, width: 1200, height: 630, alt: song.title }],
       ...(song.audio_url && {
         audio: [{ url: song.audio_url, type: song.audio_mime_type }],
       }),
     },
     twitter: {
       card: "summary_large_image",
-      title: `${song.title} — near.fm`,
-      description:
-        song.description ||
-        `AI-generated song on near.fm`,
-      ...(song.cover_image_url && { images: [song.cover_image_url] }),
+      title: ogTitle,
+      description,
+      images: [ogImage],
     },
   };
 }
