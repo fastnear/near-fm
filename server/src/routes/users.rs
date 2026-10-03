@@ -13,6 +13,10 @@ use crate::{
     AppState,
 };
 
+/// Songs returned inline with the profile (first page). The rest are fetched via
+/// the paginated `/api/users/:account_id/songs` endpoint.
+const PROFILE_SONGS_PAGE_SIZE: i64 = 50;
+
 #[derive(Debug, Serialize)]
 pub struct UserProfileResponse {
     pub account_id: String, // slug (backward compat field name)
@@ -40,6 +44,10 @@ pub struct UserProfileResponse {
     pub is_agent: bool,
     pub premium_gifted_by: Option<PremiumGiftInfo>,
     pub created_at: String,
+    /// Total visible uploaded songs (may exceed `songs.len()`, which is only the first page).
+    pub total_songs: i64,
+    /// First page of the user's uploaded songs (newest first). Use the paginated
+    /// `/api/users/:account_id/songs` endpoint to load the rest.
     pub songs: Vec<SongWithUploader>,
 }
 
@@ -60,32 +68,16 @@ pub async fn get_profile(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
 
-    let songs = sqlx::query_as::<_, SongWithUploader>(
-        r#"SELECT s.*,
-            u.slug AS uploader_account_id,
-                u.account_id AS uploader_near_account_id,
-            u.display_name AS uploader_display_name,
-            u.reputation_score AS uploader_reputation,
-            u.twitter_handle AS uploader_twitter_handle,
-            u.is_agent AS uploader_is_agent,
-            c.name AS category_name,
-            c.slug AS category_slug,
-            l.code AS language_code,
-            l.name AS language_name,
-            (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
-            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
-           FROM songs s
-           JOIN users u ON s.uploader_id = u.id
-           LEFT JOIN categories c ON s.category_id = c.id
-           LEFT JOIN languages l ON s.language_id = l.id
-           WHERE s.uploader_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
-           ORDER BY s.created_at DESC
-           LIMIT 50"#,
-    )
-    .bind(user.id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // First page of songs for fast initial paint; the full list is paginated via
+    // GET /api/users/:account_id/songs. `total_songs` carries the real count so the
+    // profile can show it even though `songs` is capped at one page.
+    let songs = queries::list_user_songs(&state.db, user.id, PROFILE_SONGS_PAGE_SIZE, 0)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let total_songs = queries::count_user_songs(&state.db, user.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Get vote activity stats
     let (total_likes_given, total_dislikes_given): (i64, i64) = sqlx::query_as(
@@ -182,8 +174,50 @@ pub async fn get_profile(
         is_agent: user.is_agent,
         premium_gifted_by,
         created_at: user.created_at.to_rfc3339(),
+        total_songs,
         songs,
     }))
+}
+
+// ── Paginated list of a user's uploaded songs ──
+
+#[derive(Debug, Deserialize)]
+pub struct UserSongsQuery {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserSongsResponse {
+    pub songs: Vec<SongWithUploader>,
+    pub page: i64,
+    pub limit: i64,
+    pub total: i64,
+}
+
+pub async fn list_user_songs(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    Query(params): Query<UserSongsQuery>,
+) -> Result<Json<UserSongsResponse>, (StatusCode, String)> {
+    let user = queries::get_user_by_slug(&state.db, &account_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+    let limit = params.limit.unwrap_or(PROFILE_SONGS_PAGE_SIZE).clamp(1, 100);
+    let page = params.page.unwrap_or(1).max(1);
+    let offset = (page - 1) * limit;
+
+    let total = queries::count_user_songs(&state.db, user.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let songs = queries::list_user_songs(&state.db, user.id, limit, offset)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(UserSongsResponse { songs, page, limit, total }))
 }
 
 // Deprecated: bookmarks feature removed from UI

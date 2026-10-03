@@ -430,6 +430,55 @@ pub async fn get_unread_count(pool: &PgPool, user_id: i32) -> Result<i64, sqlx::
     .await
 }
 
+// ── A user's uploaded songs (profile / "My Songs") ──
+
+/// Count a user's visible uploaded songs. Uses the same filter as `list_user_songs`
+/// (non-deleted, non-hidden — unvalidated songs are still counted, so owners see them).
+pub async fn count_user_songs(pool: &PgPool, user_id: i32) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM songs WHERE uploader_id = $1 AND NOT is_deleted AND NOT is_hidden",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// A page of a user's uploaded songs, newest first. Filter must match `count_user_songs`.
+pub async fn list_user_songs(
+    pool: &PgPool,
+    user_id: i32,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<SongWithUploader>, sqlx::Error> {
+    sqlx::query_as::<_, SongWithUploader>(
+        r#"SELECT s.*,
+            u.slug AS uploader_account_id,
+                u.account_id AS uploader_near_account_id,
+            u.display_name AS uploader_display_name,
+            u.reputation_score AS uploader_reputation,
+            u.twitter_handle AS uploader_twitter_handle,
+            u.is_agent AS uploader_is_agent,
+            c.name AS category_name,
+            c.slug AS category_slug,
+            l.code AS language_code,
+            l.name AS language_name,
+            (SELECT COUNT(*) FROM comments cm WHERE cm.song_id = s.id AND NOT cm.is_hidden) AS comment_count,
+            COALESCE((SELECT json_agg(json_build_object('id', g.id, 'name', g.name, 'slug', g.slug, 'display_order', g.display_order, 'created_at', g.created_at))::text FROM song_genres sg JOIN genres g ON g.id = sg.genre_id WHERE sg.song_id = s.id), '[]') AS genres_json
+           FROM songs s
+           JOIN users u ON s.uploader_id = u.id
+           LEFT JOIN categories c ON s.category_id = c.id
+           LEFT JOIN languages l ON s.language_id = l.id
+           WHERE s.uploader_id = $1 AND NOT s.is_deleted AND NOT s.is_hidden
+           ORDER BY s.created_at DESC
+           LIMIT $2 OFFSET $3"#,
+    )
+    .bind(user_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
 // ── Categories & Languages ──
 
 pub async fn list_categories(pool: &PgPool) -> Result<Vec<Category>, sqlx::Error> {
