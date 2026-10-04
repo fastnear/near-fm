@@ -394,8 +394,10 @@ function WithdrawInline({ balance, balanceRaw, onSuccess }: { balance: string; b
             const opts = isMax
               ? { amount_raw: balanceRaw }
               : { amount_cents: Math.round(usd * 100) };
-            await withdrawFromBalance(chain, receiver.trim(), opts);
-            setMsg({ type: "success", text: `$${usd.toFixed(2)} withdrawn to ${chainMeta.name}` });
+            const r = await withdrawFromBalance(chain, receiver.trim(), opts);
+            setMsg({ type: "success", text: r?.status === "processing"
+              ? `$${usd.toFixed(2)} withdrawal to ${chainMeta.name} is on its way`
+              : `$${usd.toFixed(2)} withdrawn to ${chainMeta.name}` });
             setAmount(""); setIsMax(false); onSuccess();
           } catch (e: any) { setMsg({ type: "error", text: e?.message || "Failed" }); }
           setLoading(false);

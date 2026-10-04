@@ -14,6 +14,8 @@ import {
   getDepositStatus,
   getSwapQuote,
   executeSwap,
+  newIdempotencyKey,
+  OutlayerOpError,
   type DepositIntent,
   type SwapQuote,
 } from "@/lib/outlayer";
@@ -232,22 +234,31 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
         // Swap wNEAR → USDC (use actual intents balance to avoid rounding mismatch)
         setStep("swapping");
         let swapOk = false;
+        let swapPending = false;
+        let swapKey = newIdempotencyKey();
         for (let i = 0; i < 3; i++) {
           try {
             const bal = await getIntentsBalance(apiKey, asset.contract);
             const actualAmount = bal.balance || "0";
             if (actualAmount === "0") throw new Error("No balance to swap");
             const q = await getSwapQuote(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount);
-            await executeSwap(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount, q.min_amount_out);
+            await executeSwap(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount, q.min_amount_out, swapKey);
             const usdcOut = (parseInt(q.amount_out) / 1e6).toFixed(2);
             setResult(`+$${usdcOut} deposited (${amount} NEAR)`);
             swapOk = true;
             break;
-          } catch {
+          } catch (e) {
+            // Only a swap that never executed is safe to repeat (under a new key);
+            // anything else may have moved funds — stop and let the user check.
+            if (e instanceof OutlayerOpError && e.kind === "processing") { swapPending = true; break; }
+            if (!(e instanceof OutlayerOpError && e.kind === "never_executed")) break;
+            swapKey = newIdempotencyKey();
             if (i < 2) await new Promise((r) => setTimeout(r, 2000));
           }
         }
-        if (!swapOk) {
+        if (!swapOk && swapPending) {
+          setResult("Deposit received — swap to USDC is still settling; your balance will update shortly.");
+        } else if (!swapOk) {
           setError("Deposit received but swap failed. Check internal balances on the Balance page.");
           setStep("error");
           return;
@@ -277,22 +288,31 @@ export function DepositForm({ onDeposited }: { onDeposited?: () => void }) {
         // Swap USDT → USDC (use actual intents balance)
         setStep("swapping");
         let swapOk = false;
+        let swapPending = false;
+        let swapKey = newIdempotencyKey();
         for (let i = 0; i < 3; i++) {
           try {
             const bal = await getIntentsBalance(apiKey, asset.contract);
             const actualAmount = bal.balance || "0";
             if (actualAmount === "0") throw new Error("No balance to swap");
             const q = await getSwapQuote(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount);
-            await executeSwap(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount, q.min_amount_out);
+            await executeSwap(apiKey, asset.defuseId, USDC_DEFUSE, actualAmount, q.min_amount_out, swapKey);
             const usdcOut = (parseInt(q.amount_out) / 1e6).toFixed(2);
             setResult(`+$${usdcOut} deposited (${amount} ${asset.symbol})`);
             swapOk = true;
             break;
-          } catch {
+          } catch (e) {
+            // Only a swap that never executed is safe to repeat (under a new key);
+            // anything else may have moved funds — stop and let the user check.
+            if (e instanceof OutlayerOpError && e.kind === "processing") { swapPending = true; break; }
+            if (!(e instanceof OutlayerOpError && e.kind === "never_executed")) break;
+            swapKey = newIdempotencyKey();
             if (i < 2) await new Promise((r) => setTimeout(r, 2000));
           }
         }
-        if (!swapOk) {
+        if (!swapOk && swapPending) {
+          setResult("Deposit received — swap to USDC is still settling; your balance will update shortly.");
+        } else if (!swapOk) {
           setError("Deposit received but swap failed. Check internal balances on the Balance page.");
           setStep("error");
           return;

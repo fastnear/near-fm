@@ -312,42 +312,36 @@ async fn deduct_credits_or_balance(
             format!("Insufficient credits ({} required). Top up at /balance", cost_credits)));
     };
 
-    let token = super::wallet::default_token();
+    if state.config.treasury_agent_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "Balance payments are not configured".to_string()));
+    }
 
-    // Create check from user (funds frozen, not yet claimed)
-    let check_resp = super::wallet::outlayer_request(
+    // Pay treasury via check. Generation starts only once the claim settled;
+    // a failed claim reclaims the check back to the user.
+    super::outlayer::pay_via_check(
         &state.http_client,
         &api_key,
-        "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": token,
-            "amount": raw_amount.to_string(),
-            "memo": "AI song generation",
-        })),
-    ).await.map_err(|e| {
-        if e.contains("insufficient") || e.contains("balance") {
+        super::wallet::default_token(),
+        &raw_amount.to_string(),
+        "AI song generation",
+        "suno-generation",
+        &[super::outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: None,
+            label: "treasury".to_string(),
+        }],
+        false,
+    )
+    .await
+    .map_err(|(_, e)| {
+        let lower = e.to_lowercase();
+        if lower.contains("insufficient") || lower.contains("balance") {
             (StatusCode::PAYMENT_REQUIRED,
                 format!("Insufficient balance (${:.2} required). Top up at /balance", cost_cents as f64 / 100.0))
         } else {
             (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e))
         }
     })?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
-        .to_string();
-
-    // Claim to treasury
-    if !state.config.treasury_agent_key.is_empty() {
-        let _ = super::wallet::outlayer_request(
-            &state.http_client,
-            &state.config.treasury_agent_key,
-            "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await;
-    }
 
     tracing::info!(user_id, cost_cents, "Deducted from OutLayer balance for AI generation");
 

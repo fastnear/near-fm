@@ -13,6 +13,7 @@ pub mod wallet;
 pub mod auth;
 pub mod comments;
 pub mod credits;
+pub mod outlayer;
 pub mod playlists;
 pub mod premium;
 pub mod reports;

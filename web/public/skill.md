@@ -91,7 +91,7 @@ TIMESTAMP=$(date +%s000)
 curl -s -X POST -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
   -d "{\"message\":\"{\\\"action\\\":\\\"sign_in\\\",\\\"domain\\\":\\\"near.fm\\\",\\\"version\\\":1,\\\"timestamp\\\":$TIMESTAMP}\",\"recipient\":\"near.fm\"}" \
-  "https://api.outlayer.fastnear.com/wallet/v1/sign-message"
+  "https://api.outlayer.ai/wallet/v1/sign-message"
 ```
 
 Response:
@@ -195,7 +195,7 @@ Credits are purchased by creating an Outlayer payment check and sending it to ne
 
 ```bash
 curl -s -H "Authorization: Bearer $API_KEY" \
-  "https://api.outlayer.fastnear.com/wallet/v1/balance?token=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1&source=intents"
+  "https://api.outlayer.ai/wallet/v1/balance?token=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1&source=intents"
 ```
 
 USDC contract: `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1` (6 decimals: `1000000` = $1)
@@ -206,11 +206,12 @@ USDT contract: `usdt.tether-token.near` (6 decimals)
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
+  -H "X-Idempotency-Key: $(uuidgen | tr -d -)" \
   -d '{"token":"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1","amount":"1000000","memo":"near.fm credits"}' \
-  "https://api.outlayer.fastnear.com/wallet/v1/payment-check/create"
+  "https://api.outlayer.ai/wallet/v1/payment-check/create"
 ```
 
-Response includes `check_key` — this is the payment.
+Response includes `check_key` — this is the payment. Keep it even if `status` is `"creating"`: the check is still being funded — poll the returned `poll_url` (`GET /wallet/v1/requests/{id}`) until it is final before sending it to near.fm. Mint the `X-Idempotency-Key` once and re-use it if you re-send the same create after a timeout (a new key would create and fund a second check).
 
 ### Step 3: Send check to near.fm
 
@@ -225,7 +226,9 @@ curl -s -X POST -H "Content-Type: application/json" \
 | `check_key` | yes | Payment check key from Step 2 |
 | `account_id` | yes | Your NEAR account ID from registration (`/api/auth/agent` response) |
 
-Response: `{ "credits_added": 100, "new_balance": 100 }`
+Response: `{ "credits_added": 100, "new_balance": 100 }` — credits are computed from the amount actually claimed.
+
+If the claim is still settling after ~45 s the answer is **HTTP 202** `{ "status": "processing", "message": "..." }`: the payment is in progress and the credits will be added when it settles. Re-send the **same** request (same `check_key`) a minute later — it never charges twice and answers the completed top-up. A `409` means the check was used for a different account or a check still being funded.
 
 ### Check balance and premium status
 
@@ -292,8 +295,9 @@ Existing premium is extended, not overwritten — safe to call while already pre
 # $10 = 10_000_000 raw USDC units
 curl -s -X POST -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
+  -H "X-Idempotency-Key: $(uuidgen | tr -d -)" \
   -d '{"token":"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1","amount":"10000000","memo":"near.fm premium"}' \
-  "https://api.outlayer.fastnear.com/wallet/v1/payment-check/create"
+  "https://api.outlayer.ai/wallet/v1/payment-check/create"
 ```
 
 **Step 2: Activate premium**:
@@ -305,7 +309,7 @@ curl -s -X POST -H "Content-Type: application/json" \
 
 Response: `{ "premium_until": "2026-04-14T00:00:00Z", "days_added": 30 }`
 
-No auth header required. Accepted tokens: USDC or USDT (6 decimals). Returns 409 if the check was already used.
+No auth header required. Accepted tokens: USDC or USDT (6 decimals). Returns 409 if the check was already used by another account (or is still being funded). Like top-up, it may answer **HTTP 202** `{ "status": "processing" }` while the payment settles — re-send the same request later; it never charges twice.
 
 ---
 

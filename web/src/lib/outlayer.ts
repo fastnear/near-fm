@@ -1,4 +1,4 @@
-const OUTLAYER_API = "https://api.outlayer.fastnear.com";
+const OUTLAYER_API = "https://api.outlayer.ai";
 const STORAGE_KEY = "nearfm_outlayer_api_key";
 
 export function getApiKey(): string | null {
@@ -30,6 +30,117 @@ async function outlayerFetch<T>(
   const text = await res.text();
   if (!text) return undefined as T;
   return JSON.parse(text);
+}
+
+// ── Money operations (API 0.1.0-alpha.3 semantics) ──
+//
+// A write can answer 200 with `status: "processing"` (or "creating") and a
+// `poll_url`: the funds were handed over, the outcome is not known yet. Follow
+// it to a final status; never re-send a processing call under a new key (that
+// can pay twice). A re-sent key runs nothing and answers its request.
+
+export type OutlayerOpErrorKind =
+  | "never_executed" // nothing moved — safe to retry under a NEW key
+  | "failed" // may have moved funds — reconcile the balance before acting again
+  | "needs_review" // outcome unknown — do not retry
+  | "processing" // still running after our wait — do not retry
+  | "http";
+
+export class OutlayerOpError extends Error {
+  constructor(message: string, public kind: OutlayerOpErrorKind, public requestId?: string) {
+    super(message);
+    this.name = "OutlayerOpError";
+  }
+}
+
+/** Common shape of a money-operation answer or its polled request. */
+export interface OpBody {
+  status?: string;
+  error?: string;
+  message?: string;
+  request_id?: string;
+  poll_url?: string;
+  result?: { never_executed?: boolean; never_submitted?: boolean; reason?: string };
+  [key: string]: unknown;
+}
+
+const FINAL_OK = new Set(["success", "completed", "claimed", "partially_claimed", "unclaimed", "reclaimed"]);
+const IN_FLIGHT = new Set(["processing", "creating", "pending"]);
+
+export function newIdempotencyKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().replace(/-/g, "")
+    : `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Classify a 2xx body: returns it when final-success, throws otherwise; null = in flight. */
+function settle(data: OpBody): OpBody | null {
+  if (data?.error && data.error !== "duplicate_idempotency_key") {
+    throw new OutlayerOpError(data.message || data.error, "failed", data.request_id);
+  }
+  const status: string = data?.status ?? "";
+  if (status === "" || FINAL_OK.has(status)) return data ?? {};
+  if (IN_FLIGHT.has(status)) return null;
+  if (status === "failed") {
+    const never = data?.result?.never_executed || data?.result?.never_submitted;
+    throw new OutlayerOpError(
+      never ? "Operation was not executed — nothing moved" : `Operation failed${data?.result?.reason ? `: ${data.result.reason}` : ""}`,
+      never ? "never_executed" : "failed",
+      data?.request_id,
+    );
+  }
+  if (status === "needs_review") {
+    throw new OutlayerOpError("Outcome could not be confirmed — do not retry", "needs_review", data?.request_id);
+  }
+  throw new OutlayerOpError(`Operation ended '${status}'`, "failed", data?.request_id);
+}
+
+/**
+ * POST a money operation with an idempotency key (mint it once per user
+ * action and reuse it for that action's retries) and follow it to an outcome.
+ */
+export async function outlayerWrite<T = OpBody>(
+  path: string,
+  apiKey: string,
+  body: unknown,
+  idempotencyKey: string,
+  followMs = 60_000,
+): Promise<T> {
+  let data: OpBody = {};
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${OUTLAYER_API}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "X-Idempotency-Key": idempotencyKey,
+        "X-Answer-Within": "15",
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    data = text ? (JSON.parse(text) as OpBody) : {};
+    if (res.status === 409 && data?.error === "wallet_busy" && attempt < 3) {
+      await sleep(2000); // same key: the duplicate answer resolves ours
+      continue;
+    }
+    if (!res.ok) throw new OutlayerOpError(text || res.statusText, "http");
+    break;
+  }
+  const done = settle(data);
+  if (done) return done as unknown as T;
+
+  const pollUrl: string = data.poll_url || `/wallet/v1/requests/${data.request_id}`;
+  const deadline = Date.now() + followMs;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    const polled = await outlayerFetch<OpBody>(pollUrl, apiKey);
+    const final = settle(polled);
+    if (final) return { ...data, ...final } as unknown as T;
+  }
+  throw new OutlayerOpError("Still processing — it will complete on its own", "processing", data.request_id);
 }
 
 export async function register(): Promise<{
@@ -145,11 +256,23 @@ export async function executeSwap(
   tokenOut: string,
   amountIn: string,
   minAmountOut: string,
-): Promise<{ intent_hash: string }> {
-  return outlayerFetch("/wallet/v1/intents/swap", apiKey, {
-    method: "POST",
-    body: JSON.stringify({ token_in: tokenIn, token_out: tokenOut, amount_in: amountIn, min_amount_out: minAmountOut }),
-  });
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<{ intent_hash?: string }> {
+  return outlayerWrite(
+    "/wallet/v1/intents/swap",
+    apiKey,
+    { token_in: tokenIn, token_out: tokenOut, amount_in: amountIn, min_amount_out: minAmountOut },
+    idempotencyKey,
+  );
+}
+
+/** Gasless withdraw from the intents balance to an external chain address. */
+export async function withdrawIntents(
+  apiKey: string,
+  body: { token: string; amount: string; chain: string; to: string },
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<OpBody> {
+  return outlayerWrite("/wallet/v1/intents/withdraw", apiKey, body, idempotencyKey);
 }
 
 // ── Payment checks ──
@@ -157,14 +280,13 @@ export async function executeSwap(
 export async function createCheck(
   apiKey: string,
   token: string,
-  amount: string
+  amount: string,
+  idempotencyKey: string = newIdempotencyKey(),
 ): Promise<{
   check_id: string;
   check_key: string;
   amount: string;
 }> {
-  return outlayerFetch("/wallet/v1/payment-check/create", apiKey, {
-    method: "POST",
-    body: JSON.stringify({ token, amount }),
-  });
+  // Followed until funded: a `creating` check cannot be claimed yet.
+  return outlayerWrite("/wallet/v1/payment-check/create", apiKey, { token, amount }, idempotencyKey);
 }

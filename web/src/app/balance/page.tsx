@@ -214,8 +214,10 @@ function WithdrawSection({ hasNear, hasSolana, nearAccountId, solanaAddress, eth
           setLoading(true); setError(""); setSuccess("");
           try {
             const opts = isMax ? { amount_raw: balanceRaw } : { amount_cents: Math.round(usd * 100) };
-            await withdrawFromBalance(chain, receiver.trim(), opts);
-            setSuccess(`$${usd.toFixed(2)} withdrawn to ${chainMeta.name}`);
+            const r = await withdrawFromBalance(chain, receiver.trim(), opts);
+            setSuccess(r?.status === "processing"
+              ? `$${usd.toFixed(2)} withdrawal to ${chainMeta.name} is on its way`
+              : `$${usd.toFixed(2)} withdrawn to ${chainMeta.name}`);
             setAmount(""); setIsMax(false); onSuccess();
           } catch (e: any) { setError(e?.message || "Failed"); }
           setLoading(false);
@@ -307,15 +309,15 @@ function WithdrawTokenButton({ symbol, raw, contract, user }: { symbol: string; 
         const apiKey = localStorage.getItem("nearfm_outlayer_api_key");
         if (!apiKey) throw new Error("No wallet");
         const tokenWithPrefix = `nep141:${contract}`;
-        const res = await fetch("https://api.outlayer.fastnear.com/wallet/v1/intents/withdraw", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ token: tokenWithPrefix, amount: raw, chain, to: receiver }),
-        });
-        if (!res.ok) throw new Error(await res.text());
+        const { withdrawIntents } = await import("@/lib/outlayer");
+        await withdrawIntents(apiKey, { token: tokenWithPrefix, amount: raw, chain, to: receiver });
         setDone(true);
       } catch (e: any) {
-        alert(`Withdraw failed: ${e?.message || "Unknown error"}`);
+        if (e?.kind === "processing") {
+          setDone(true); // on its way — do not let the user send it twice
+        } else {
+          alert(`Withdraw failed: ${e?.message || "Unknown error"}`);
+        }
       }
       setLoading(false);
     }} className="px-3 py-1 text-xs font-medium text-slate-400 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] disabled:opacity-30 transition-all">

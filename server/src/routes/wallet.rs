@@ -8,7 +8,7 @@ use sha2::Digest;
 
 use crate::{auth::jwt::require_auth, db::queries, AppState};
 
-const OUTLAYER_API: &str = "https://api.outlayer.fastnear.com";
+use super::outlayer;
 const TIP_COMMISSION_BPS: u64 = 0;    // 0% — tips go fully to recipient
 const BOUNTY_COMMISSION_BPS: u64 = 500; // 5% — platform fee on bounty awards
 
@@ -184,7 +184,7 @@ pub async fn balance(
     // Query OutLayer for USDC intents balance
     let url = format!(
         "{}/wallet/v1/balance?token={}&source=intents",
-        OUTLAYER_API, default_token()
+        outlayer::api_base(), default_token()
     );
 
     let resp = state.http_client
@@ -238,7 +238,7 @@ pub async fn send_tip(
     State(state): State<AppState>,
     extensions: Extensions,
     Json(req): Json<SendTipRequest>,
-) -> Result<Json<SendTipResponse>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -337,10 +337,6 @@ pub async fn send_tip(
         (StatusCode::BAD_GATEWAY, "Failed to create wallet for recipient. Try again later.".to_string())
     })?;
 
-    // Calculate amounts using raw units (6 decimals)
-    let commission_raw = raw_amount * TIP_COMMISSION_BPS / 10_000;
-    let raw_recipient = raw_amount - commission_raw;
-
     // Check sender's balance before creating check
     let balance_resp = outlayer_request(
         &state.http_client,
@@ -360,80 +356,59 @@ pub async fn send_tip(
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance. Top up first.".to_string()));
     }
 
-    // Step 1: Create payment check from sender's wallet
-    let check_resp = outlayer_request(
+    // Calculate amounts using raw units (6 decimals) — after the dust adjustment,
+    // so the recipient's claim never exceeds the check.
+    let commission_raw = raw_amount * TIP_COMMISSION_BPS / 10_000;
+    let raw_recipient = raw_amount - commission_raw;
+
+    let mut legs = vec![outlayer::Leg {
+        api_key: recipient_key,
+        amount: Some(raw_recipient.to_string()),
+        label: "recipient".to_string(),
+    }];
+    if commission_raw > 0 && !state.config.treasury_agent_key.is_empty() {
+        legs.push(outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: None,
+            label: "commission".to_string(),
+        });
+    }
+
+    // Payment + DB record run detached: they finish even if the client disconnects.
+    let st = state.clone();
+    let tipper_id = claims.user_id;
+    let tipper_sub = claims.sub.clone();
+    let flow = async move {
+    let state = st;
+    outlayer::pay_via_check(
         &state.http_client,
         &sender_key,
-        "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": format!("Tip: {}", tip_context),
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to create tip check: {}", e)))?;
+        default_token(),
+        &raw_amount.to_string(),
+        &format!("Tip: {}", tip_context),
+        "tip",
+        &legs,
+        false,
+    )
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_GATEWAY, format!("Tip failed: {}", e)))?;
 
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
-        .to_string();
-
-    // Step 2: Claim recipient's share (with retry on transient failures)
-    let mut claim_result = Err("not attempted".to_string());
-    for attempt in 0..3 {
-        claim_result = outlayer_request(
-            &state.http_client,
-            &recipient_key,
-            "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({
-                "check_key": check_key,
-                "amount": raw_recipient.to_string(),
-            })),
-        ).await;
-        if claim_result.is_ok() { break; }
-        if attempt < 2 {
-            tracing::warn!(attempt, "Tip claim retry after failure");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-    }
-
-    if let Err(e) = claim_result {
-        // Reclaim the check back to sender if all retries failed
-        tracing::error!("Tip claim failed after 3 attempts, reclaiming: {}", e);
-        let _ = outlayer_request(
-            &state.http_client,
-            &sender_key,
-            "POST",
-            "/wallet/v1/payment-check/reclaim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await;
-        return Err((StatusCode::BAD_GATEWAY, format!("Tip failed, funds returned: {}", e)));
-    }
-
-    // Step 3: Claim commission to platform treasury
-    if commission_raw > 0 && !state.config.treasury_agent_key.is_empty() {
-        let _ = outlayer_request(
-            &state.http_client,
-            &state.config.treasury_agent_key,
-            "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await;
-    }
-
-    // Step 4: Record in DB
+    // Record in DB
     let tip_id = sqlx::query_scalar::<_, i32>(
         r#"INSERT INTO tips (song_id, tipper_id, recipient_id, amount_usd_cents, payment_method)
            VALUES ($1, $2, $3, $4, 'balance')
            RETURNING id"#,
     )
     .bind(song_id)
-    .bind(claims.user_id)
+    .bind(tipper_id)
     .bind(recipient_id)
     .bind(amount_cents_for_db as i32)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(tipper_id, recipient_id, raw_amount, "Tip paid but DB record failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
     // Update USD tip totals
     let recipient_cents_for_db = (raw_recipient / 10_000) as i32;
@@ -462,7 +437,7 @@ pub async fn send_tip(
             "song_uuid": req.song_uuid,
             "song_title": song_title,
             "profile_slug": req.profile_slug,
-            "from_account": claims.sub,
+            "from_account": tipper_sub,
             "amount_usd_cents": amount_cents_for_db,
         }),
     )
@@ -471,7 +446,7 @@ pub async fn send_tip(
 
     tracing::info!(
         tip_id,
-        sender = claims.user_id,
+        sender = tipper_id,
         recipient = recipient_id,
         amount_cents = amount_cents_for_db,
         raw_amount = raw_amount,
@@ -479,11 +454,14 @@ pub async fn send_tip(
         "USD tip sent via payment check"
     );
 
-    Ok(Json(SendTipResponse {
+    Ok(SendTipResponse {
         tip_id,
         amount_cents: amount_cents_for_db,
         commission_cents: (commission_raw / 10_000) as u32,
-    }))
+    })
+    };
+
+    finish(flow, "Tip is processing and will arrive shortly.").await
 }
 
 // ── Bounties via dedicated OutLayer wallet ──
@@ -503,7 +481,7 @@ pub async fn create_bounty(
     State(state): State<AppState>,
     extensions: Extensions,
     Json(req): Json<CreateBountyRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -559,37 +537,24 @@ pub async fn create_bounty(
         .to_string();
     let bounty_near_account = bounty_wallet["near_account_id"].as_str().unwrap_or("").to_string();
 
-    // 2. Transfer funds: sender → check → bounty wallet claim
-    let check_resp = outlayer_request(
-        &state.http_client, &sender_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": format!("Bounty: {}", req.title),
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to create bounty check: {}", e)))?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
-        .to_string();
-
-    // Claim into bounty wallet
-    let claim_result = outlayer_request(
-        &state.http_client, &bounty_key, "POST",
-        "/wallet/v1/payment-check/claim",
-        Some(serde_json::json!({ "check_key": check_key })),
-    ).await;
-
-    if let Err(e) = claim_result {
-        // Reclaim check back to sender on failure
-        let _ = outlayer_request(
-            &state.http_client, &sender_key, "POST",
-            "/wallet/v1/payment-check/reclaim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await;
-        return Err((StatusCode::BAD_GATEWAY, format!("Failed to fund bounty: {}", e)));
-    }
+    // 2. Transfer funds: sender → check → bounty wallet claim, then create
+    // the request + escrow. Detached: finishes even if the client disconnects.
+    let st = state.clone();
+    let requester_id = claims.user_id;
+    let flow = async move {
+    let state = st;
+    outlayer::pay_via_check(
+        &state.http_client,
+        &sender_key,
+        default_token(),
+        &raw_amount.to_string(),
+        &format!("Bounty: {}", req.title),
+        "bounty-create",
+        &[outlayer::Leg { api_key: bounty_key.clone(), amount: None, label: "escrow".to_string() }],
+        false,
+    )
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_GATEWAY, format!("Failed to fund bounty: {}", e)))?;
 
     // 3. Create request + escrow in DB
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -604,14 +569,17 @@ pub async fn create_bounty(
            RETURNING id"#,
     )
     .bind(&uuid)
-    .bind(claims.user_id)
+    .bind(requester_id)
     .bind(&title)
     .bind(&description)
     .bind(req.amount_cents as i32)
     .bind(req.language_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(requester_id, bounty_near_account = %bounty_near_account, "Bounty funded but request insert failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
     sqlx::query(
         "INSERT INTO bounty_escrow (request_id, amount_cents, outlayer_api_key, outlayer_near_account) VALUES ($1, $2, $3, $4)"
@@ -622,14 +590,17 @@ pub async fn create_bounty(
     .bind(&bounty_near_account)
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(request_id, bounty_near_account = %bounty_near_account, "Bounty funded but escrow insert failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
     // Track contribution
     sqlx::query(
         "INSERT INTO bounty_contributions (escrow_id, user_id, amount_cents) VALUES ((SELECT id FROM bounty_escrow WHERE request_id = $1), $2, $3)"
     )
     .bind(request_id)
-    .bind(claims.user_id)
+    .bind(requester_id)
     .bind(req.amount_cents as i32)
     .execute(&state.db)
     .await
@@ -637,11 +608,14 @@ pub async fn create_bounty(
 
     tracing::info!(request_id, amount_cents = req.amount_cents, "USD bounty created with dedicated wallet");
 
-    Ok(Json(serde_json::json!({
+    Ok(serde_json::json!({
         "uuid": uuid,
         "request_id": request_id,
         "bounty_usd_cents": req.amount_cents,
-    })))
+    }))
+    };
+
+    finish(flow, "Bounty funding is processing; the request will appear shortly.").await
 }
 
 #[derive(Deserialize)]
@@ -655,7 +629,7 @@ pub async fn topup_bounty(
     Path(uuid): Path<String>,
     extensions: Extensions,
     Json(req): Json<TopUpBountyRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -702,25 +676,23 @@ pub async fn topup_bounty(
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance".to_string()));
     }
 
-    // Transfer: sender → check → bounty wallet
-    let check_resp = outlayer_request(
-        &state.http_client, &sender_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": "Bounty top-up",
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Check failed: {}", e)))?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?;
-
-    outlayer_request(
-        &state.http_client, &bounty_key, "POST",
-        "/wallet/v1/payment-check/claim",
-        Some(serde_json::json!({ "check_key": check_key })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Claim failed: {}", e)))?;
+    // Transfer: sender → check → bounty wallet, then record. Detached.
+    let st = state.clone();
+    let contributor_id = claims.user_id;
+    let flow = async move {
+    let state = st;
+    outlayer::pay_via_check(
+        &state.http_client,
+        &sender_key,
+        default_token(),
+        &raw_amount.to_string(),
+        "Bounty top-up",
+        "bounty-topup",
+        &[outlayer::Leg { api_key: bounty_key, amount: None, label: "escrow".to_string() }],
+        false,
+    )
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_GATEWAY, format!("Top-up failed: {}", e)))?;
 
     // Update escrow amount + track contribution
     sqlx::query("UPDATE bounty_escrow SET amount_cents = amount_cents + $1 WHERE id = $2")
@@ -741,15 +713,18 @@ pub async fn topup_bounty(
         "INSERT INTO bounty_contributions (escrow_id, user_id, amount_cents) VALUES ($1, $2, $3)"
     )
     .bind(escrow_id)
-    .bind(claims.user_id)
+    .bind(contributor_id)
     .bind(req.amount_cents as i32)
     .execute(&state.db)
     .await
     .ok();
 
-    tracing::info!(escrow_id, user_id = claims.user_id, amount_cents = req.amount_cents, "Bounty top-up");
+    tracing::info!(escrow_id, user_id = contributor_id, amount_cents = req.amount_cents, "Bounty top-up");
 
-    Ok(Json(serde_json::json!({ "status": "topped_up", "amount_cents": req.amount_cents })))
+    Ok(serde_json::json!({ "status": "topped_up", "amount_cents": req.amount_cents }))
+    };
+
+    finish(flow, "Top-up is processing and will be added to the bounty shortly.").await
 }
 
 /// POST /api/bounties/:uuid/award — award bounty to winner.
@@ -759,7 +734,7 @@ pub async fn award_bounty(
     Path(uuid): Path<String>,
     extensions: Extensions,
     Json(req): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -833,34 +808,45 @@ pub async fn award_bounty(
     let raw_amount = (amount_cents as u64) * 10_000;
     let raw_recipient = (recipient_cents as u64) * 10_000;
 
-    // Create check from bounty wallet
-    let check_resp = outlayer_request(
-        &state.http_client, &bounty_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": "Bounty award",
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to create award check: {}", e)))?;
+    // Lock the escrow while the payout runs (it may outlive this request).
+    lock_escrow(&state.db, escrow_id).await?;
 
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?;
-
-    // Claim recipient's share
-    outlayer_request(
-        &state.http_client, &recipient_key, "POST",
-        "/wallet/v1/payment-check/claim",
-        Some(serde_json::json!({ "check_key": check_key, "amount": raw_recipient.to_string() })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Award claim failed: {}", e)))?;
-
-    // Commission to treasury
+    let mut legs = vec![outlayer::Leg {
+        api_key: recipient_key,
+        amount: Some(raw_recipient.to_string()),
+        label: "winner".to_string(),
+    }];
     if commission_cents > 0 && !state.config.treasury_agent_key.is_empty() {
-        let _ = outlayer_request(
-            &state.http_client, &state.config.treasury_agent_key, "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await;
+        legs.push(outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: None,
+            label: "commission".to_string(),
+        });
+    }
+
+    let st = state.clone();
+    let flow = async move {
+    let state = st;
+    if let Err(e) = outlayer::pay_via_check(
+        &state.http_client,
+        &bounty_key,
+        default_token(),
+        &raw_amount.to_string(),
+        "Bounty award",
+        "bounty-award",
+        &legs,
+        false,
+    )
+    .await
+    {
+        let (in_flight, e) = e;
+        if in_flight {
+            // Money is moving: keep the escrow locked for manual reconciliation.
+            tracing::error!(escrow_id, "Award still in flight after follow window: {}", e);
+            return Err((StatusCode::SERVICE_UNAVAILABLE, "Payout is still settling; it will complete shortly.".to_string()));
+        }
+        unlock_escrow(&state.db, escrow_id).await;
+        return Err((StatusCode::BAD_GATEWAY, format!("Award failed: {}", e)));
     }
 
     // Update DB
@@ -873,9 +859,12 @@ pub async fn award_bounty(
         "request_uuid": uuid, "bounty_usd_cents": amount_cents,
     })).await.ok();
 
-    tracing::info!(request_id = request.0, recipient_id, amount_cents, "USD bounty awarded from dedicated wallet");
+    tracing::info!(recipient_id, amount_cents, "USD bounty awarded from dedicated wallet");
 
-    Ok(Json(serde_json::json!({ "status": "awarded", "recipient_cents": recipient_cents })))
+    Ok(serde_json::json!({ "status": "awarded", "recipient_cents": recipient_cents }))
+    };
+
+    finish(flow, "Award payout is processing and will arrive shortly.").await
 }
 
 /// POST /api/bounties/:uuid/withdraw — cancel bounty, refund contributors (with penalty).
@@ -883,7 +872,7 @@ pub async fn withdraw_bounty(
     State(state): State<AppState>,
     Path(uuid): Path<String>,
     extensions: Extensions,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -920,31 +909,6 @@ pub async fn withdraw_bounty(
     let refund_pool = amount_cents - penalty_cents;
     let raw_total = (amount_cents as u64) * 10_000;
 
-    // Create check from bounty wallet for the full amount
-    let check_resp = outlayer_request(
-        &state.http_client, &bounty_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_total.to_string(),
-            "memo": "Bounty withdrawal",
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Withdrawal check failed: {}", e)))?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?;
-
-    // Penalty to treasury
-    if penalty_cents > 0 && !state.config.treasury_agent_key.is_empty() {
-        let raw_penalty = (penalty_cents as u64) * 10_000;
-        let _ = outlayer_request(
-            &state.http_client, &state.config.treasury_agent_key, "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key, "amount": raw_penalty.to_string() })),
-        ).await;
-    }
-
-    // Refund each contributor proportionally
     let contributions: Vec<(i32, i32)> = sqlx::query_as(
         "SELECT user_id, amount_cents FROM bounty_contributions WHERE escrow_id = $1"
     )
@@ -953,10 +917,17 @@ pub async fn withdraw_bounty(
     .await
     .unwrap_or_default();
 
+    let mut legs = Vec::new();
+    if penalty_cents > 0 && !state.config.treasury_agent_key.is_empty() {
+        legs.push(outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: Some(((penalty_cents as u64) * 10_000).to_string()),
+            label: "penalty".to_string(),
+        });
+    }
     for (contributor_id, contrib_cents) in &contributions {
         let refund_share = (*contrib_cents as u64) * (refund_pool as u64) / (amount_cents as u64);
         if refund_share == 0 { continue; }
-
         let contributor_key: Option<String> = sqlx::query_scalar(
             "SELECT outlayer_api_key FROM users WHERE id = $1"
         )
@@ -965,15 +936,47 @@ pub async fn withdraw_bounty(
         .await
         .ok()
         .flatten();
-
-        if let Some(ckey) = contributor_key {
-            let raw_refund = refund_share * 10_000;
-            let _ = outlayer_request(
-                &state.http_client, &ckey, "POST",
-                "/wallet/v1/payment-check/claim",
-                Some(serde_json::json!({ "check_key": check_key, "amount": raw_refund.to_string() })),
-            ).await;
+        match contributor_key {
+            Some(ckey) => legs.push(outlayer::Leg {
+                api_key: ckey,
+                amount: Some((refund_share * 10_000).to_string()),
+                label: format!("refund-{}", contributor_id),
+            }),
+            None => tracing::warn!(contributor_id, "Bounty refund skipped: contributor has no wallet"),
         }
+    }
+    if legs.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Nothing to refund".to_string()));
+    }
+
+    // Lock the escrow while the refunds run (they may outlive this request).
+    lock_escrow(&state.db, escrow_id).await?;
+
+    let st = state.clone();
+    let flow = async move {
+    let state = st;
+    // What is left on the check (a contributor without a wallet, a failed
+    // share) goes back to the bounty wallet rather than sitting in the check.
+    if let Err(e) = outlayer::pay_via_check(
+        &state.http_client,
+        &bounty_key,
+        default_token(),
+        &raw_total.to_string(),
+        "Bounty withdrawal",
+        "bounty-withdraw",
+        &legs,
+        true,
+    )
+    .await
+    {
+        let (in_flight, e) = e;
+        if in_flight {
+            // Money is moving: keep the escrow locked for manual reconciliation.
+            tracing::error!(escrow_id, "Withdrawal still in flight after follow window: {}", e);
+            return Err((StatusCode::SERVICE_UNAVAILABLE, "Payout is still settling; it will complete shortly.".to_string()));
+        }
+        unlock_escrow(&state.db, escrow_id).await;
+        return Err((StatusCode::BAD_GATEWAY, format!("Withdrawal failed: {}", e)));
     }
 
     // Update DB
@@ -982,13 +985,52 @@ pub async fn withdraw_bounty(
     sqlx::query("UPDATE song_requests SET status = 'withdrawn', updated_at = NOW() WHERE uuid = $1")
         .bind(&uuid).execute(&state.db).await.ok();
 
-    tracing::info!(request_id = request.0, amount_cents, refund_pool, penalty_cents, "USD bounty withdrawn, contributors refunded");
+    tracing::info!(escrow_id, amount_cents, refund_pool, penalty_cents, "USD bounty withdrawn, contributors refunded");
 
-    Ok(Json(serde_json::json!({
+    Ok(serde_json::json!({
         "status": "withdrawn",
         "refund_cents": refund_pool,
         "penalty_cents": penalty_cents,
-    })))
+    }))
+    };
+
+    finish(flow, "Refunds are processing and will arrive shortly.").await
+}
+
+/// Mark an escrow as being paid out; refuses if it is not `held` (a payout is
+/// already running, or it was resolved).
+async fn lock_escrow(db: &sqlx::PgPool, escrow_id: i32) -> Result<(), (StatusCode, String)> {
+    let locked: Option<i32> = sqlx::query_scalar(
+        "UPDATE bounty_escrow SET status = 'paying' WHERE id = $1 AND status = 'held' RETURNING id"
+    )
+    .bind(escrow_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    locked.map(|_| ()).ok_or((StatusCode::CONFLICT, "A payout for this bounty is already in progress".to_string()))
+}
+
+/// Return an escrow to `held` after a payout failed for good (funds reclaimed).
+async fn unlock_escrow(db: &sqlx::PgPool, escrow_id: i32) {
+    sqlx::query("UPDATE bounty_escrow SET status = 'held' WHERE id = $1 AND status = 'paying'")
+        .bind(escrow_id)
+        .execute(db)
+        .await
+        .ok();
+}
+
+/// Await a detached money flow for up to `outlayer::ROUTE_WAIT`; past that,
+/// answer 202 and let it finish (and write its own DB rows) in the background.
+async fn finish<T: Serialize + Send + 'static>(
+    flow: impl std::future::Future<Output = Result<T, (StatusCode, String)>> + Send + 'static,
+    processing_message: &str,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    use axum::response::IntoResponse;
+    match outlayer::detached(flow, outlayer::ROUTE_WAIT).await {
+        Some(Ok(v)) => Ok(Json(v).into_response()),
+        Some(Err(e)) => Err(e),
+        None => Ok(outlayer::processing_response(processing_message)),
+    }
 }
 
 // ── Credits from balance ──
@@ -1004,7 +1046,7 @@ pub async fn buy_credits(
     State(state): State<AppState>,
     extensions: Extensions,
     Json(req): Json<BuyCreditsRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -1039,44 +1081,54 @@ pub async fn buy_credits(
         return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${:.2}", req.amount_cents as f64 / 100.0)));
     }
 
-    // Create check → claim to treasury
-    let check_resp = outlayer_request(
-        &state.http_client, &api_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": format!("Buy {} AI credits", credits),
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?;
-
-    if !state.config.treasury_agent_key.is_empty() {
-        outlayer_request(
-            &state.http_client, &state.config.treasury_agent_key, "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Claim failed: {}", e)))?;
+    if state.config.treasury_agent_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "Credit purchases are not configured".to_string()));
     }
+
+    // Pay treasury via check, then add credits. Detached.
+    let st = state.clone();
+    let buyer_id = claims.user_id;
+    let flow = async move {
+    let state = st;
+    outlayer::pay_via_check(
+        &state.http_client,
+        &api_key,
+        default_token(),
+        &raw_amount.to_string(),
+        &format!("Buy {} AI credits", credits),
+        "buy-credits",
+        &[outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: None,
+            label: "treasury".to_string(),
+        }],
+        false,
+    )
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
 
     // Add credits
     let new_balance: i32 = sqlx::query_scalar(
         "UPDATE users SET credit_balance = credit_balance + $1 WHERE id = $2 RETURNING credit_balance"
     )
     .bind(credits)
-    .bind(claims.user_id)
+    .bind(buyer_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(buyer_id, credits, "Credits paid but not added: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
-    tracing::info!(user_id = claims.user_id, credits, "Credits purchased from balance");
+    tracing::info!(user_id = buyer_id, credits, "Credits purchased from balance");
 
-    Ok(Json(serde_json::json!({
+    Ok(serde_json::json!({
         "credits_added": credits,
         "new_balance": new_balance,
-    })))
+    }))
+    };
+
+    finish(flow, "Payment is processing; credits will be added shortly.").await
 }
 
 // ── Premium from balance ──
@@ -1093,7 +1145,7 @@ pub async fn buy_premium(
     State(state): State<AppState>,
     extensions: Extensions,
     Json(req): Json<BuyPremiumRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -1140,98 +1192,82 @@ pub async fn buy_premium(
         return Err((StatusCode::BAD_REQUEST, format!("Insufficient balance. Need ${}.00", price_cents / 100)));
     }
 
-    // Create check from buyer
-    let check_resp = outlayer_request(
-        &state.http_client, &api_key, "POST",
-        "/wallet/v1/payment-check/create",
-        Some(serde_json::json!({
-            "token": default_token(),
-            "amount": raw_amount.to_string(),
-            "memo": format!("Premium {} months{}", req.months, if is_gift { " (gift)" } else { "" }),
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
-
-    let check_key = check_resp["check_key"].as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "Missing check_key".to_string()))?
-        .to_string();
-
-    // Claim to treasury — must succeed before granting premium
-    if !state.config.treasury_agent_key.is_empty() {
-        outlayer_request(
-            &state.http_client, &state.config.treasury_agent_key, "POST",
-            "/wallet/v1/payment-check/claim",
-            Some(serde_json::json!({ "check_key": check_key })),
-        ).await.map_err(|e| {
-            // Reclaim on failure
-            let client = state.http_client.clone();
-            let key = api_key.clone();
-            let ck = check_key.clone();
-            tokio::spawn(async move {
-                let _ = outlayer_request(&client, &key, "POST",
-                    "/wallet/v1/payment-check/reclaim",
-                    Some(serde_json::json!({ "check_key": ck })),
-                ).await;
-            });
-            (StatusCode::BAD_GATEWAY, format!("Payment claim failed, funds returned: {}", e))
-        })?;
+    if state.config.treasury_agent_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "Premium purchases are not configured".to_string()));
     }
 
-    // Record in premium_purchases (dedup via check_key_hash)
-    let key_hash = hex::encode(sha2::Sha256::digest(check_key.as_bytes()));
-    let insert_result = sqlx::query(
-        r#"INSERT INTO premium_purchases (user_id, check_key_hash, token, amount, days_added, gifted_by_user_id)
-           VALUES ($1, $2, $3, $4, $5, $6)"#,
+    // Pay treasury via check — must settle before granting premium. Detached.
+    let st = state.clone();
+    let buyer_id = claims.user_id;
+    let buyer_sub = claims.sub.clone();
+    let flow = async move {
+    let state = st;
+    outlayer::pay_via_check(
+        &state.http_client,
+        &api_key,
+        default_token(),
+        &raw_amount.to_string(),
+        &format!("Premium {} months{}", req.months, if is_gift { " (gift)" } else { "" }),
+        "buy-premium",
+        &[outlayer::Leg {
+            api_key: state.config.treasury_agent_key.clone(),
+            amount: None,
+            label: "treasury".to_string(),
+        }],
+        false,
+    )
+    .await
+    .map_err(|(_, e)| (StatusCode::BAD_GATEWAY, format!("Payment failed: {}", e)))?;
+
+    // Record purchase and add premium days atomically
+    let purchase_ref = hex::encode(sha2::Sha256::digest(outlayer::fresh_idem_key().as_bytes()));
+    sqlx::query(
+        r#"WITH ins AS (
+               INSERT INTO premium_purchases (user_id, check_key_hash, token, amount, days_added, gifted_by_user_id)
+               VALUES ($1, $2, $3, $4, $5, $6)
+           )
+           UPDATE users SET
+               premium_since = COALESCE(premium_since, NOW()),
+               premium_until = GREATEST(COALESCE(premium_until, NOW()), NOW()) + make_interval(days => $5)
+           WHERE id = $1"#,
     )
     .bind(recipient_id)
-    .bind(&key_hash)
+    .bind(&purchase_ref)
     .bind(default_token())
     .bind(raw_amount.to_string())
     .bind(days)
-    .bind(if is_gift { Some(claims.user_id) } else { None })
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = insert_result {
-        if e.to_string().contains("check_key_hash") {
-            return Err((StatusCode::CONFLICT, "This purchase was already processed".to_string()));
-        }
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
-    }
-
-    // Add premium days to recipient
-    sqlx::query(
-        r#"UPDATE users SET
-            premium_since = COALESCE(premium_since, NOW()),
-            premium_until = GREATEST(COALESCE(premium_until, NOW()), NOW()) + make_interval(days => $1)
-           WHERE id = $2"#,
-    )
-    .bind(days)
-    .bind(recipient_id)
+    .bind(if is_gift { Some(buyer_id) } else { None })
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(buyer_id, recipient_id, days, "Premium paid but not granted: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
     // Notification for gift
     if is_gift {
         queries::create_notification(&state.db, recipient_id, "premium_gifted", &serde_json::json!({
-            "from_account": claims.sub,
+            "from_account": buyer_sub,
             "months": req.months,
             "days_added": days,
         })).await.ok();
     }
 
     tracing::info!(
-        user_id = claims.user_id, recipient_id, months = req.months, days,
+        user_id = buyer_id, recipient_id, months = req.months, days,
         is_gift, "Premium purchased from balance"
     );
 
-    Ok(Json(serde_json::json!({
+    Ok(serde_json::json!({
         "status": "success",
         "months": req.months,
         "days_added": days,
         "price_cents": price_cents,
         "is_gift": is_gift,
-    })))
+    }))
+    };
+
+    finish(flow, "Payment is processing; premium will be activated shortly.").await
 }
 
 // ── Withdrawal ──
@@ -1250,7 +1286,7 @@ pub async fn withdraw(
     State(state): State<AppState>,
     extensions: Extensions,
     Json(req): Json<WithdrawRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let claims = require_auth(&extensions)
         .map_err(|s| (s, "Authentication required".to_string()))?;
 
@@ -1294,40 +1330,59 @@ pub async fn withdraw(
         return Err((StatusCode::BAD_REQUEST, "Insufficient balance".to_string()));
     }
 
-    // Gasless withdraw via OutLayer intents (use "to" not "receiver")
+    // Gasless withdraw via OutLayer intents (use "to" not "receiver"). The API
+    // runs it to its outcome even if we stop waiting; follow it briefly.
     let token_with_prefix = format!("nep141:{}", default_token());
-    let withdraw_resp = outlayer_request(
-        &state.http_client, &api_key, "POST",
-        "/wallet/v1/intents/withdraw",
-        Some(serde_json::json!({
-            "token": token_with_prefix,
-            "amount": raw_amount.to_string(),
-            "chain": req.chain,
-            "to": req.receiver,
-        })),
-    ).await.map_err(|e| (StatusCode::BAD_GATEWAY, format!("Withdrawal failed: {}", e)))?;
+    let body = serde_json::json!({
+        "token": token_with_prefix,
+        "amount": raw_amount.to_string(),
+        "chain": req.chain,
+        "to": req.receiver,
+    });
+    let idem = outlayer::fresh_idem_key();
+    let outcome = outlayer::execute(&state.http_client, &api_key, "/wallet/v1/intents/withdraw", &body, &idem, 25)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Withdrawal failed: {}", e)))?;
 
     tracing::info!(
         user_id = claims.user_id,
         raw_amount = raw_amount,
         chain = %req.chain,
         receiver = %req.receiver,
+        outcome = ?outcome,
         "USD withdrawal via OutLayer intents"
     );
 
-    Ok(Json(serde_json::json!({
-        "status": "success",
-        "amount_raw": raw_amount.to_string(),
-        "chain": req.chain,
-        "receiver": req.receiver,
-        "details": withdraw_resp,
-    })))
+    use axum::response::IntoResponse;
+    match outcome {
+        outlayer::Outcome::Final(details) => Ok(Json(serde_json::json!({
+            "status": "success",
+            "amount_raw": raw_amount.to_string(),
+            "chain": req.chain,
+            "receiver": req.receiver,
+            "details": details,
+        })).into_response()),
+        outlayer::Outcome::Processing { body, .. } => Ok((StatusCode::ACCEPTED, Json(serde_json::json!({
+            "status": "processing",
+            "message": "Withdrawal is on its way. Do not resubmit — it will arrive shortly.",
+            "request_id": body["request_id"],
+            "amount_raw": raw_amount.to_string(),
+            "chain": req.chain,
+            "receiver": req.receiver,
+        }))).into_response()),
+        outlayer::Outcome::NeverExecuted { .. } => Err((StatusCode::BAD_GATEWAY,
+            "Withdrawal was not executed — nothing moved. You can try again.".to_string())),
+        outlayer::Outcome::Failed(why) => Err((StatusCode::BAD_GATEWAY, format!(
+            "Withdrawal failed ({}). Funds may have partially moved — check your balance before retrying.", why))),
+        outlayer::Outcome::NeedsReview(id) => Err((StatusCode::BAD_GATEWAY, format!(
+            "Withdrawal outcome could not be confirmed (request {}). Do not retry — contact support.", id))),
+    }
 }
 
 /// Register a new OutLayer wallet (no auth needed).
 async fn register_outlayer_wallet(client: &reqwest::Client) -> Result<serde_json::Value, String> {
     let resp = client
-        .post(format!("{}/register", OUTLAYER_API))
+        .post(format!("{}/register", outlayer::api_base()))
         .send()
         .await
         .map_err(|e| format!("Register request failed: {}", e))?;
@@ -1348,7 +1403,7 @@ pub async fn outlayer_request(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let url = format!("{}{}", OUTLAYER_API, path);
+    let url = format!("{}{}", outlayer::api_base(), path);
     let mut req = match method {
         "POST" => client.post(&url),
         "GET" => client.get(&url),

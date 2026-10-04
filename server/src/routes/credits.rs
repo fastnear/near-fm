@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{auth::jwt::require_auth, AppState};
 
-const OUTLAYER_API: &str = "https://api.outlayer.fastnear.com";
+use super::outlayer;
 
 // Accepted stablecoin contracts (both 6 decimals)
 const USDC_TOKEN: &str = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
@@ -38,15 +38,12 @@ struct PeekResponse {
     status: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ClaimResponse {
-    amount_claimed: String,
-}
-
 pub async fn topup(
     State(state): State<AppState>,
     Json(req): Json<TopupRequest>,
-) -> Result<Json<TopupResponse>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    use axum::response::IntoResponse;
+
     if state.config.treasury_agent_key.is_empty() {
         return Err((StatusCode::SERVICE_UNAVAILABLE, "Credits top-up is not configured".to_string()));
     }
@@ -69,7 +66,7 @@ pub async fn topup(
     // Peek check via OutLayer API
     let peek_resp = state
         .http_client
-        .post(format!("{}/wallet/v1/payment-check/peek", OUTLAYER_API))
+        .post(format!("{}/wallet/v1/payment-check/peek", outlayer::api_base()))
         .header("Authorization", format!("Bearer {}", state.config.treasury_agent_key))
         .json(&serde_json::json!({ "check_key": req.check_key }))
         .send()
@@ -91,87 +88,120 @@ pub async fn topup(
         return Err((StatusCode::BAD_REQUEST, "Only USDC and USDT checks are accepted".to_string()));
     }
 
-    // Validate status and balance
-    if peek.status != "unclaimed" && peek.status != "partially_claimed" {
-        return Err((StatusCode::BAD_REQUEST, format!("Check status is '{}', expected 'unclaimed'", peek.status)));
+    match peek.status.as_str() {
+        "unclaimed" | "partially_claimed" => {
+            let balance: u128 = peek.balance.parse().map_err(|_| {
+                (StatusCode::BAD_REQUEST, "Invalid check balance".to_string())
+            })?;
+            if balance / RAW_UNITS_PER_CREDIT == 0 {
+                return Err((StatusCode::BAD_REQUEST, "Check amount too small (minimum $0.01 = 1 credit)".to_string()));
+            }
+        }
+        // Possibly claimed by our own earlier attempt (a dropped connection, a
+        // 202): the claim below re-sends the same idempotency key and reads
+        // that request's outcome. A check claimed by anyone else fails there.
+        "claiming" | "claimed" => {}
+        "creating" => {
+            return Err((StatusCode::CONFLICT, "Check is still being funded. Try again in a minute.".to_string()));
+        }
+        other => {
+            return Err((StatusCode::BAD_REQUEST, format!("Check status is '{}', expected 'unclaimed'", other)));
+        }
     }
 
-    let balance: u128 = peek.balance.parse().map_err(|_| {
-        (StatusCode::BAD_REQUEST, "Invalid check balance".to_string())
-    })?;
-
-    if balance == 0 {
-        return Err((StatusCode::BAD_REQUEST, "Check has zero balance".to_string()));
-    }
-
-    let credits = (balance / RAW_UNITS_PER_CREDIT) as i32;
-    if credits == 0 {
-        return Err((StatusCode::BAD_REQUEST, "Check amount too small (minimum $0.01 = 1 credit)".to_string()));
-    }
-
-    // Claim check via OutLayer API
-    let claim_resp = state
-        .http_client
-        .post(format!("{}/wallet/v1/payment-check/claim", OUTLAYER_API))
-        .header("Authorization", format!("Bearer {}", state.config.treasury_agent_key))
-        .json(&serde_json::json!({ "check_key": req.check_key }))
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("OutLayer claim error: {}", e)))?;
-
-    if !claim_resp.status().is_success() {
-        let text = claim_resp.text().await.unwrap_or_default();
-        return Err((StatusCode::BAD_GATEWAY, format!("Failed to claim check: {}", text)));
-    }
-
-    let claim: ClaimResponse = claim_resp
-        .json()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse claim response: {}", e)))?;
-
-    // Credit user atomically — UNIQUE on check_key_hash prevents double-credit
-    let result: Result<i32, sqlx::Error> = sqlx::query_scalar(
-        r#"
-        WITH ins AS (
-            INSERT INTO credit_topups (user_id, check_key_hash, token, amount, credits_added)
-            VALUES ($1, $2, $3, $4, $5)
+    // Claim + credit run detached: they finish even if the client disconnects.
+    let st = state.clone();
+    let check_key = req.check_key.clone();
+    let token = peek.token.clone();
+    let account_id = req.account_id.clone();
+    let flow = async move {
+        let uid = user_id.to_string();
+        let claimed = outlayer::claim_check(
+            &st.http_client,
+            &st.config.treasury_agent_key,
+            &check_key,
+            None,
+            &["credits-topup", &uid, &key_hash],
+            outlayer::FLOW_FOLLOW_SECS,
         )
-        UPDATE users SET credit_balance = credit_balance + $5
-        WHERE id = $1
-        RETURNING credit_balance
-        "#,
-    )
-    .bind(user_id)
-    .bind(&key_hash)
-    .bind(&peek.token)
-    .bind(&claim.amount_claimed)
-    .bind(credits)
-    .fetch_one(&state.db)
-    .await;
+        .await
+        .map_err(|(retryable, why)| {
+            if retryable { (StatusCode::SERVICE_UNAVAILABLE, why) } else { (StatusCode::BAD_GATEWAY, why) }
+        })?;
 
-    let new_balance = match result {
-        Ok(b) => b,
-        Err(sqlx::Error::Database(ref db_err)) if db_err.constraint() == Some("credit_topups_check_key_hash_key") => {
-            return Err((StatusCode::CONFLICT, "This check has already been used for top-up".to_string()));
-        }
-        Err(e) => {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)));
-        }
+        // Credits from what was actually claimed, never from the peeked balance.
+        let amount_claimed = outlayer::amount_claimed(&claimed)
+            .ok_or((StatusCode::BAD_GATEWAY, "Claim answered without amount_claimed".to_string()))?;
+        let raw: u128 = amount_claimed
+            .parse()
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "Invalid claimed amount".to_string()))?;
+        let credits = (raw / RAW_UNITS_PER_CREDIT) as i32;
+
+        // Credit user atomically — UNIQUE on check_key_hash prevents double-credit
+        let result: Result<i32, sqlx::Error> = sqlx::query_scalar(
+            r#"
+            WITH ins AS (
+                INSERT INTO credit_topups (user_id, check_key_hash, token, amount, credits_added)
+                VALUES ($1, $2, $3, $4, $5)
+            )
+            UPDATE users SET credit_balance = credit_balance + $5
+            WHERE id = $1
+            RETURNING credit_balance
+            "#,
+        )
+        .bind(user_id)
+        .bind(&key_hash)
+        .bind(&token)
+        .bind(&amount_claimed)
+        .bind(credits)
+        .fetch_one(&st.db)
+        .await;
+
+        let new_balance = match result {
+            Ok(b) => b,
+            Err(sqlx::Error::Database(ref db_err)) if db_err.constraint() == Some("credit_topups_check_key_hash_key") => {
+                // A re-send after a 202 / dropped answer: the same user's top-up
+                // already landed — answer it instead of an error.
+                let prior: Option<(i32, i32)> = sqlx::query_as(
+                    "SELECT ct.credits_added, u.credit_balance FROM credit_topups ct JOIN users u ON u.id = ct.user_id \
+                     WHERE ct.check_key_hash = $1 AND ct.user_id = $2",
+                )
+                .bind(&key_hash)
+                .bind(user_id)
+                .fetch_optional(&st.db)
+                .await
+                .ok()
+                .flatten();
+                return match prior {
+                    Some((credits_added, new_balance)) => Ok(TopupResponse { credits_added, new_balance }),
+                    None => Err((StatusCode::CONFLICT, "This check has already been used for top-up".to_string())),
+                };
+            }
+            Err(e) => {
+                tracing::error!(user_id, amount = %amount_claimed, "Check claimed but credit write failed: {}", e);
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)));
+            }
+        };
+
+        tracing::info!(
+            account_id = %account_id,
+            user_id = user_id,
+            credits = credits,
+            token = %token,
+            amount = %amount_claimed,
+            "Credit top-up successful"
+        );
+
+        Ok(TopupResponse { credits_added: credits, new_balance })
     };
 
-    tracing::info!(
-        account_id = %req.account_id,
-        user_id = user_id,
-        credits = credits,
-        token = %peek.token,
-        amount = %claim.amount_claimed,
-        "Credit top-up successful"
-    );
-
-    Ok(Json(TopupResponse {
-        credits_added: credits,
-        new_balance,
-    }))
+    match outlayer::detached(flow, outlayer::ROUTE_WAIT).await {
+        Some(Ok(resp)) => Ok(Json(resp).into_response()),
+        Some(Err(e)) => Err(e),
+        None => Ok(outlayer::processing_response(
+            "Check is being claimed; credits will be added when it settles. Re-send the same request to check.",
+        )),
+    }
 }
 
 // ── Balance (authenticated) ──

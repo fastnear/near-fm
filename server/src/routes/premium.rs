@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{db::queries, AppState};
 
-const OUTLAYER_API: &str = "https://api.outlayer.fastnear.com";
+use super::outlayer;
 
 // Accepted stablecoin contracts (both 6 decimals) — mirrors credits.rs
 const USDC_TOKEN: &str = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
@@ -71,11 +71,6 @@ struct PeekResponse {
     status: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ClaimResponse {
-    amount_claimed: String,
-}
-
 // ── Shared query helpers (used by get_gifts and profile endpoint) ──
 
 pub async fn fetch_received_gifts(
@@ -130,7 +125,9 @@ pub async fn subscribe(
     State(state): State<AppState>,
     extensions: axum::http::Extensions,
     Json(req): Json<SubscribeRequest>,
-) -> Result<Json<SubscribeResponse>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    use axum::response::IntoResponse;
+
     if state.config.treasury_agent_key.is_empty() {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
@@ -157,7 +154,7 @@ pub async fn subscribe(
     // ── Peek ──
     let peek_resp = state
         .http_client
-        .post(format!("{}/wallet/v1/payment-check/peek", OUTLAYER_API))
+        .post(format!("{}/wallet/v1/payment-check/peek", outlayer::api_base()))
         .header(
             "Authorization",
             format!("Bearer {}", state.config.treasury_agent_key),
@@ -184,24 +181,32 @@ pub async fn subscribe(
         ));
     }
 
-    if peek.status != "unclaimed" && peek.status != "partially_claimed" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("Check status is '{}', expected 'unclaimed'", peek.status),
-        ));
-    }
-
-    let balance: u128 = peek
-        .balance
-        .parse()
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid check balance".to_string()))?;
-
-    let usd = balance / RAW_UNITS_PER_USD;
-    if usd < MIN_USD {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("Minimum is $10 USDC/USDT (got ~${} USD)", usd),
-        ));
+    match peek.status.as_str() {
+        "unclaimed" | "partially_claimed" => {
+            let balance: u128 = peek
+                .balance
+                .parse()
+                .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid check balance".to_string()))?;
+            let usd = balance / RAW_UNITS_PER_USD;
+            if usd < MIN_USD {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("Minimum is $10 USDC/USDT (got ~${} USD)", usd),
+                ));
+            }
+        }
+        // Possibly claimed by our own earlier attempt: the claim below re-sends
+        // the same idempotency key and reads that request's outcome.
+        "claiming" | "claimed" => {}
+        "creating" => {
+            return Err((StatusCode::CONFLICT, "Check is still being funded. Try again in a minute.".to_string()));
+        }
+        other => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Check status is '{}', expected 'unclaimed'", other),
+            ));
+        }
     }
 
     // Determine if this is a gift (buyer is authenticated and different from recipient)
@@ -212,36 +217,30 @@ pub async fn subscribe(
 
     let is_gift = gifted_by_user_id.is_some();
 
-    // ── Claim ──
-    let claim_resp = state
-        .http_client
-        .post(format!("{}/wallet/v1/payment-check/claim", OUTLAYER_API))
-        .header(
-            "Authorization",
-            format!("Bearer {}", state.config.treasury_agent_key),
-        )
-        .json(&serde_json::json!({ "check_key": req.check_key }))
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("OutLayer claim error: {}", e)))?;
-
-    if !claim_resp.status().is_success() {
-        let text = claim_resp.text().await.unwrap_or_default();
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("Failed to claim check: {}", text),
-        ));
-    }
-
-    let claim: ClaimResponse = claim_resp
-        .json()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to parse claim response: {}", e)))?;
+    // Claim + grant run detached: they finish even if the client disconnects.
+    let st = state.clone();
+    let check_key = req.check_key.clone();
+    let token = peek.token.clone();
+    let flow = async move {
+    let state = st;
+    let claimed = outlayer::claim_check(
+        &state.http_client,
+        &state.config.treasury_agent_key,
+        &check_key,
+        None,
+        &["premium-subscribe", &recipient_id.to_string(), &key_hash],
+        outlayer::FLOW_FOLLOW_SECS,
+    )
+    .await
+    .map_err(|(retryable, why)| {
+        if retryable { (StatusCode::SERVICE_UNAVAILABLE, why) } else { (StatusCode::BAD_GATEWAY, why) }
+    })?;
+    let amount_claimed = outlayer::amount_claimed(&claimed)
+        .ok_or((StatusCode::BAD_GATEWAY, "Claim answered without amount_claimed".to_string()))?;
 
     // Compute days from the actual claimed amount (not the peeked balance) to avoid
     // granting more days than received in case of a partial claim race.
-    let claimed_amount: u128 = claim
-        .amount_claimed
+    let claimed_amount: u128 = amount_claimed
         .parse()
         .map_err(|_| (StatusCode::BAD_GATEWAY, "Invalid claimed amount in response".to_string()))?;
     let days_to_add = usd_to_days(claimed_amount / RAW_UNITS_PER_USD);
@@ -270,8 +269,8 @@ pub async fn subscribe(
     )
     .bind(recipient_id)
     .bind(&key_hash)
-    .bind(&peek.token)
-    .bind(&claim.amount_claimed)
+    .bind(&token)
+    .bind(&amount_claimed)
     .bind(days_to_add)
     .bind(gifted_by_user_id)
     .fetch_one(&state.db)
@@ -282,16 +281,34 @@ pub async fn subscribe(
         Err(sqlx::Error::Database(ref db_err))
             if db_err.constraint() == Some("premium_purchases_check_key_hash_key") =>
         {
-            return Err((
-                StatusCode::CONFLICT,
-                "This check has already been used for a premium subscription".to_string(),
-            ));
+            // A re-send after a 202 / dropped answer: answer the grant that landed.
+            let prior: Option<(i32, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+                "SELECT pp.days_added, u.premium_until FROM premium_purchases pp JOIN users u ON u.id = pp.user_id \
+                 WHERE pp.check_key_hash = $1 AND pp.user_id = $2 AND u.premium_until IS NOT NULL",
+            )
+            .bind(&key_hash)
+            .bind(recipient_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+            return match prior {
+                Some((days_added, until)) => Ok(SubscribeResponse {
+                    premium_until: until.to_rfc3339(),
+                    days_added,
+                    is_gift,
+                }),
+                None => Err((
+                    StatusCode::CONFLICT,
+                    "This check has already been used for a premium subscription".to_string(),
+                )),
+            };
         }
         Err(e) => {
             tracing::error!(
                 error = %e,
                 recipient_id,
-                amount = %claim.amount_claimed,
+                amount = %amount_claimed,
                 "DB write failed after successful Outlayer claim — premium not granted"
             );
             return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)));
@@ -318,18 +335,27 @@ pub async fn subscribe(
         recipient_id = recipient_id,
         gifted_by_user_id = gifted_by_user_id,
         days_added = days_to_add,
-        token = %peek.token,
-        amount = %claim.amount_claimed,
+        token = %token,
+        amount = %amount_claimed,
         premium_until = %premium_until,
         is_gift = is_gift,
         "Premium subscription activated"
     );
 
-    Ok(Json(SubscribeResponse {
+    Ok(SubscribeResponse {
         premium_until: premium_until.to_rfc3339(),
         days_added: days_to_add,
         is_gift,
-    }))
+    })
+    };
+
+    match outlayer::detached(flow, outlayer::ROUTE_WAIT).await {
+        Some(Ok(resp)) => Ok(Json(resp).into_response()),
+        Some(Err(e)) => Err(e),
+        None => Ok(outlayer::processing_response(
+            "Check is being claimed; premium will be granted when it settles. Re-send the same request to check.",
+        )),
+    }
 }
 
 /// GET /api/premium/gifts/:account_id
