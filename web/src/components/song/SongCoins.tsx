@@ -59,7 +59,7 @@ export function SongCoins({ song }: { song: Song }) {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={lp.logo} alt="" className="w-4 h-4 rounded" />
               )}
-              Trade on {lp?.name ?? coin.launchpad} ↗
+              Trade ↗
             </span>
           </a>
         );
