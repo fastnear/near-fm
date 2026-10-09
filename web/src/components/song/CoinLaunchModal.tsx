@@ -108,7 +108,6 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   const [customSplit, setCustomSplit] = useState<TaxSplit | null>(null);
   const [pair, setPair] = useState<string | null>(null);
   const [devBuy, setDevBuy] = useState(""); // NEAR
-  const [aiOptIn, setAiOptIn] = useState(true);
   const [noLogoOk, setNoLogoOk] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [preview, setPreview] = useState<unknown[] | null>(null);
@@ -238,14 +237,18 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
     if (!config || !quote || !valid || !accountId) return;
     setError(null);
     try {
-      if (aiOptIn) {
-        setBusy("Checking the coin matches the song…");
-        const v = await checkSongCoin(song.uuid, { name: form.name, symbol: form.symbol, description: form.description || undefined });
-        if (v.reviewed && !v.allowed) {
-          setBusy(null);
-          setError(`Doesn't look related to this song: ${v.reason}. Change the name or description, or turn the check off.`);
-          return;
-        }
+      // Mandatory: a coin that is not about the song is not launched from here.
+      setBusy("Checking the coin matches the song…");
+      const v = await checkSongCoin(song.uuid, { name: form.name, symbol: form.symbol, description: form.description || undefined });
+      if (!v.reviewed) {
+        setBusy(null);
+        setError("The relevance check is unavailable right now. Try again in a minute.");
+        return;
+      }
+      if (!v.allowed) {
+        setBusy(null);
+        setError(`Doesn't look related to this song: ${v.reason}. Change the name or description and try again.`);
+        return;
       }
       if (form.feeMode === "other" && form.feeTo) {
         setBusy("Checking the fee wallet…");
@@ -489,11 +492,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
           ))}
         </div>
 
-        {/* AI check */}
-        <label className="flex items-start gap-2 mb-5 text-xs text-slate-400 cursor-pointer">
-          <input type="checkbox" checked={aiOptIn} onChange={(e) => setAiOptIn(e.target.checked)} className="mt-0.5" />
-          <span>Check with AI that the coin is actually about this song before launching. Unrelated coins aren&apos;t shown on the song page.</span>
-        </label>
+        <p className="mb-5 text-xs text-slate-500">Before launching, the coin is checked to be about this song.</p>
 
         {/* Cost + launch */}
         <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4 mb-4 text-sm">
