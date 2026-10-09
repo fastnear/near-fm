@@ -271,14 +271,16 @@ pub struct Suggestion {
 pub fn suggest_prompt(song: &SongContext) -> String {
     format!(
         "You name memecoins that song authors launch from their songs on near.fm, a music platform on NEAR.\n\
-         Propose one coin for THIS song:\n\
-         - name: catchy, 2 to 32 characters, drawn from the song's title, hook, a character, image or mood. \
-           Not just the title verbatim if something better is in the lyrics. Natural capitalization \
-           (\"Gonna Make It\", not \"GONNA MAKE IT\"), and different from the symbol.\n\
-         - symbol: 2 to 12 uppercase letters or digits, memorable, no spaces, no $.\n\
-         - description: 1 to 2 playful sentences, at most 280 characters, that tell what the coin is about and \
-           name the song. No price talk, no promises, no \"official\", no real brands, companies or people \
-           unless they are in the song.\n\n\
+         Propose one coin for THIS song. The coin must be recognisably the song: keep its title.\n\
+         - name: the song title itself, unchanged, including its capitalization. Only if the title is longer \
+           than 32 characters, shorten it to its most recognisable part (drop \"feat.\", parentheses, a subtitle) \
+           without changing its meaning. Never invent a different name.\n\
+         - symbol: 2 to 12 uppercase letters or digits made from the title: the title's words joined if they \
+           fit, else the initials or the key word. It must read as the title (\"Neon Nights\" → NEONNIGHTS or \
+           NEON; \"We're All Gonna Make It Now\" → WAGMI or WAGMIN). No spaces, no $.\n\
+         - description: 1 to 2 playful sentences, at most 280 characters, that name the song and what it is \
+           about, in the song's own mood. No price talk, no promises, no \"official\", no real brands, companies \
+           or people unless they are in the song.\n\n\
          {song_block}\n\n\
          Answer with JSON only: {{\"name\": \"...\", \"symbol\": \"...\", \"description\": \"...\"}}",
         song_block = fenced("SONG", &format!(
@@ -312,6 +314,7 @@ pub async fn suggest(http: &reqwest::Client, song: &SongContext<'_>) -> Result<S
             _ => "AI is unavailable right now".to_string(),
         }
     })?;
+    tracing::info!(title = %clip(song.title, 80), answer = %text.chars().take(400).collect::<String>(), "coin AI suggest");
     parse_suggestion(&text).ok_or_else(|| {
         tracing::warn!("coin AI suggest: unparseable answer: {}", text.chars().take(200).collect::<String>());
         "AI gave an unusable answer, try again".to_string()
@@ -388,6 +391,11 @@ mod live_tests {
         let sug = suggest(&http, &song).await.expect("suggestion");
         eprintln!("suggestion: {sug:?}");
         assert!(sug.name.len() >= 2 && sug.symbol.len() >= 2 && !sug.description.is_empty());
+        let s2 = SongContext { title: "Neon Nights in Tbilisi", description: None, lyrics: Some("city lights, we drive all night\nneon nights, hold me tight") };
+        let sug2 = suggest(&http, &s2).await.expect("suggestion 2");
+        eprintln!("suggestion 2: {sug2:?}");
+        assert_eq!(sug2.name, "Neon Nights in Tbilisi", "title must be kept as the name");
+        assert!(sug2.symbol.starts_with("NEON") || sug2.symbol.starts_with("NN"), "ticker must come from the title: {}", sug2.symbol);
         // The suggestion must itself pass the relevance review.
         let v = review(&http, &song, &CoinContext { name: &sug.name, symbol: &sug.symbol, description: Some(&sug.description) }).await;
         assert!(v.allowed, "suggested coin failed review: {}", v.reason);
