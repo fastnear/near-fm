@@ -38,6 +38,9 @@ export interface Song {
   fulfills_request_id: number | null;
   diamond_like_count: number;
   created_on_nearfm: boolean;
+  coin_symbol?: string | null;
+  coin_launchpad?: string | null;
+  coin_token_account?: string | null;
   created_at: string;
   updated_at: string;
   // Uploader join fields

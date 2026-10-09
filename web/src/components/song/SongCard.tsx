@@ -41,6 +41,13 @@ export function SongCard({ song, feedSongs }: { song: Song; feedSongs?: Song[] }
           </div>
         )}
 
+        {/* memecoin badge */}
+        {song.coin_symbol && (
+          <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded-full bg-black/50 text-amber-200 border border-amber-400/30 font-medium backdrop-blur-sm" title={`The author made a memecoin from this song: $${song.coin_symbol}`}>
+            🚀 ${song.coin_symbol}
+          </span>
+        )}
+
         {/* near.fm badge */}
         {song.created_on_nearfm && (
           <span className="absolute top-1.5 right-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded-full bg-black/50 text-purple-300 border border-purple-500/30 font-medium backdrop-blur-sm" title="Created on near.fm">

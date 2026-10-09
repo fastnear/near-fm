@@ -357,6 +357,17 @@ pub async fn link(
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 
+    if coin.status != "hidden" {
+        sqlx::query("UPDATE songs SET coin_symbol = $1, coin_launchpad = $2, coin_token_account = $3 WHERE id = $4 AND coin_symbol IS NULL")
+            .bind(&coin.symbol)
+            .bind(&coin.launchpad)
+            .bind(&coin.token_account)
+            .bind(song.id)
+            .execute(&state.db)
+            .await
+            .ok();
+    }
+
     tracing::info!(song_id = song.id, launchpad = %coin.launchpad, token = %coin.token_account, status = %coin.status, "Song coin linked");
 
     if coin.status == "hidden" {
