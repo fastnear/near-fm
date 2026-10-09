@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Song } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useToast } from "@/components/ui/Toast";
-import { checkSongCoin, linkSongCoin, type SongCoin } from "@/lib/api";
+import { checkSongCoin, linkSongCoin, suggestSongCoin, type SongCoin } from "@/lib/api";
 import { LAUNCHPADS, type CostQuote, type FeeMode, type Launchpad, type LaunchpadConfig, type Tax, type TaxSplit } from "@/lib/launchpads";
 import { compressIcon } from "@/lib/launchpads/image";
 
@@ -110,6 +110,21 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   const [devBuy, setDevBuy] = useState(""); // NEAR
   const [aiOptIn, setAiOptIn] = useState(true);
   const [noLogoOk, setNoLogoOk] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+
+  const suggest = async () => {
+    setSuggesting(true);
+    setError(null);
+    try {
+      const s = await suggestSongCoin(song.uuid);
+      setName(s.name);
+      setSymbol(s.symbol);
+      setDescription(`${s.description} Listen: ${songUrl}`.slice(0, 500));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI is unavailable right now");
+    }
+    setSuggesting(false);
+  };
 
   const [balanceYocto, setBalanceYocto] = useState<string | null>(null);
   const [quote, setQuote] = useState<CostQuote | null>(null);
@@ -317,6 +332,13 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
         </div>
 
         {/* Token */}
+        <div className="flex items-center justify-between mb-2">
+          <span className={label}>Token</span>
+          <button type="button" onClick={suggest} disabled={suggesting || !!busy}
+            className="text-xs px-2.5 py-1 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-200 hover:bg-purple-500/25 disabled:opacity-50 transition">
+            {suggesting ? "Thinking…" : "✨ Prepare with AI"}
+          </button>
+        </div>
         <div className="grid grid-cols-[auto,1fr] gap-4 mb-5">
           <div>
             <span className={label}>Logo</span>

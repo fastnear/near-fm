@@ -150,6 +150,31 @@ pub async fn check(
     Ok(Json(CheckResponse { ai_enabled: launchpads::ai_check::enabled(), verdict }))
 }
 
+/// POST /api/songs/:uuid/coins/suggest — AI proposes name, ticker and description.
+pub async fn suggest(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+) -> Result<Json<launchpads::ai_check::Suggestion>, ApiError> {
+    let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let song = load_song(&state, &uuid).await?;
+    require_near_author(&state, claims.user_id, &song).await?;
+    if !launchpads::ai_check::enabled() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "AI suggestions are not enabled".to_string()));
+    }
+    let s = launchpads::ai_check::suggest(
+        &state.http_client,
+        &launchpads::ai_check::SongContext {
+            title: &song.title,
+            description: song.description.as_deref(),
+            lyrics: song.lyrics.as_deref(),
+        },
+    )
+    .await
+    .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    Ok(Json(s))
+}
+
 #[derive(Deserialize)]
 pub struct LinkRequest {
     pub launchpad: String,

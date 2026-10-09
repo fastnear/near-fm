@@ -1170,3 +1170,8 @@ export async function checkSongCoin(uuid: string, coin: { name: string; symbol: 
 export async function linkSongCoin(uuid: string, launchpad: string, symbol: string): Promise<SongCoin> {
   return fetchApi(`/api/songs/${uuid}/coins/link`, { method: "POST", body: JSON.stringify({ launchpad, symbol }) });
 }
+
+/** AI proposes a name, ticker and description for the song's coin (author only). */
+export async function suggestSongCoin(uuid: string): Promise<{ name: string; symbol: string; description: string }> {
+  return fetchApi(`/api/songs/${uuid}/coins/suggest`, { method: "POST" });
+}

@@ -137,6 +137,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/diamond-like", post(routes::songs::diamond_like_song))
         .route("/api/songs/:uuid/report", post(routes::songs::report_song))
         .route("/api/songs/:uuid/coins/check", post(routes::coins::check))
+        .route("/api/songs/:uuid/coins/suggest", post(routes::coins::suggest))
         .route("/api/songs/:uuid/coins/link", post(routes::coins::link))
         .route("/api/playlists", post(routes::playlists::create_playlist))
         .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
