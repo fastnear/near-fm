@@ -305,11 +305,12 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
 
   const field = "w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-purple-500/50";
   const label = "block text-xs font-medium text-slate-400 mb-1";
+  const hint = "text-[11px] text-slate-600 mt-1.5";
   const chip = (active: boolean) =>
     `px-3 py-1.5 rounded-lg text-xs font-medium border transition ${active ? "bg-purple-500/20 border-purple-500/50 text-purple-200" : "bg-white/[0.03] border-white/[0.08] text-slate-400 hover:bg-white/[0.06]"}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={busy ? undefined : onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm" >
       <div className="w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-[#0f0f14] border border-white/[0.08] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
@@ -366,7 +367,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
               )}
               <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => onPickIcon(e.target.files?.[0])} />
             </label>
-            <p className="text-[10px] text-slate-600 mt-1 w-20">From the cover. Tap to change.</p>
+            <p className="text-[10px] text-slate-600 mt-1 w-20">From the cover. Tap to change. Stored on chain, final.</p>
             {!icon && iconState !== "loading" && (
               <label className="flex items-start gap-1 mt-2 w-28 text-[10px] text-amber-300/80 cursor-pointer">
                 <input type="checkbox" checked={noLogoOk} onChange={(e) => setNoLogoOk(e.target.checked)} className="mt-0.5" />
@@ -379,6 +380,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
               <span className={label}>Name</span>
               <input value={name} onChange={(e) => setName(e.target.value)} maxLength={launchpad.limits.nameMax} className={field} />
               {problems.name && <p className="text-xs text-red-400 mt-1">{problems.name}</p>}
+              <p className={hint}>Shown in wallets and on the launchpad. Up to {launchpad.limits.nameMax} characters, can&apos;t be changed after launch.</p>
             </div>
             <div>
               <span className={label}>Ticker</span>
@@ -387,12 +389,14 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
                 <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))} className={`${field} rounded-l-none uppercase`} />
               </div>
               {problems.symbol && <p className="text-xs text-red-400 mt-1">{problems.symbol}</p>}
+              <p className={hint}>The $TICKER people trade by, {launchpad.limits.symbolHint}. The token account is derived from it (e.g. nit.nearlytrade.near).</p>
             </div>
           </div>
         </div>
         <div className="mb-5">
           <span className={label}>Description <span className="text-slate-600">optional</span></span>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={launchpad.limits.descriptionMax} className={field} placeholder="What is this coin about?" />
+          <p className={hint}>Shown on the token page. Keep the near.fm link so traders find the song.</p>
         </div>
 
         {/* Fees */}
@@ -409,12 +413,13 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
               {problems.feeTo && <p className="text-xs text-red-400 mt-1">{problems.feeTo}</p>}
             </div>
           )}
-          <p className="text-[11px] text-slate-600 mt-1.5">70% of the 1% pool fee on every trade, paid out automatically.</p>
+          <p className={hint}>Every trade pays a 1% pool fee; 70% of it is the creator share, paid out automatically about every hour. <b>Your wallet</b> — to you. <b>Another wallet</b> — to any NEAR account you name. <b>Holders</b> — sold for the pair asset and split among holders by balance. Locked at launch.</p>
         </div>
 
         {/* Tax */}
         <div className="mb-5">
           <span className={label}>Tax <span className="text-slate-600">optional, up to 4% a side, locked at launch</span></span>
+          <p className={`${hint} mb-2`}>An extra cut taken in the token on every buy and/or sell on top of the 1% pool fee (max 5% total). Wallet-to-wallet transfers are never taxed. Where it goes: <b>You</b> — sold and sent to you; <b>Burn</b> — removed from supply; <b>Holders</b> — paid pro rata to holders.</p>
           <div className="grid grid-cols-2 gap-3">
             {([["Buy", buyTax, setBuyTax], ["Sell", sellTax, setSellTax]] as const).map(([lbl, val, set]) => (
               <div key={lbl}>
@@ -461,6 +466,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
         {config && config.pairs.length > 1 && (
           <div className="mb-5">
             <span className={label}>Pair it with <span className="text-slate-600">what buyers pay in</span></span>
+            <p className={`${hint} mb-2`}>The asset the pool holds against your token and that fees arrive in. NEAR is the default; a USDC/USDT pair opens at the same ~$5K value. First buy is only available on NEAR.</p>
             <div className="flex flex-wrap gap-2">
               {config.pairs.map((p) => (
                 <button key={p.tokenId} type="button" className={chip((pairOption?.tokenId ?? "") === p.tokenId)} onClick={() => { setPair(p.tokenId); if (!p.native) setDevBuy(""); }}>{p.symbol}</button>
@@ -478,10 +484,12 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
               <span className="px-3 py-2 rounded-r-lg bg-white/[0.06] border border-l-0 border-white/[0.08] text-sm text-slate-400">NEAR</span>
             </div>
             {problems.devBuy && <p className="text-xs text-red-400 mt-1">{problems.devBuy}</p>}
+            <p className={hint}>Buys tokens for you from the pool the moment it opens, at the opening price, before anyone else. Paid on top of the launch cost; pays the pool fee and any buy tax like every buy.</p>
           </div>
         )}
 
         {/* Links */}
+        <p className={`${hint} mb-2`}>Links shown on the token page. X and Telegram accept @handles.</p>
         <div className="mb-5 grid sm:grid-cols-3 gap-2">
           {([["Website", website, setWebsite, "https://", "website"], ["X", twitter, setTwitter, "@handle", "twitter"], ["Telegram", telegram, setTelegram, "@group", "telegram"]] as const).map(([lbl, val, set, ph, key]) => (
             <div key={lbl}>
@@ -512,9 +520,12 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
 
         {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
         {preview && (
-          <pre className="mb-3 max-h-64 overflow-auto rounded-lg bg-black/40 border border-white/[0.06] p-3 text-[10px] text-slate-400 whitespace-pre-wrap break-all">
-            {JSON.stringify(preview, null, 2)}
-          </pre>
+          <div className="mb-3">
+            <button type="button" onClick={() => navigator.clipboard.writeText(JSON.stringify(preview, null, 2))} className="text-xs text-purple-300 hover:text-purple-200 mb-1">Copy transaction JSON</button>
+            <pre className="max-h-64 overflow-auto rounded-lg bg-black/40 border border-white/[0.06] p-3 text-[10px] text-slate-400 whitespace-pre-wrap break-all">
+              {JSON.stringify(preview, null, 2)}
+            </pre>
+          </div>
         )}
 
         <button
