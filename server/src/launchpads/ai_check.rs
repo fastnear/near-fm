@@ -1,6 +1,6 @@
 //! Optional AI review: is the coin actually about the song?
 //!
-//! Disabled unless `COIN_AI_CHECK_URL` is set; then every check is allowed.
+//! Disabled unless `COIN_AI_CHECK_URL` is set (then every check is allowed).
 //! A failing or unreachable reviewer never blocks a launch (fail open) — the
 //! check is a quality filter for what near.fm shows, not a security boundary.
 
@@ -76,20 +76,25 @@ pub fn parse_answer(text: &str) -> Option<Verdict> {
     })
 }
 
-/// Ask the reviewer. Transport: POST `{"prompt": ...}` to `COIN_AI_CHECK_URL`
-/// (optional bearer `COIN_AI_CHECK_TOKEN`); the answer text is read from
-/// `response`, `text`, `result` or `content`, or the raw body.
+/// Ask the reviewer: an OpenAI-compatible chat endpoint at `COIN_AI_CHECK_URL`
+/// (base URL, e.g. `http://172.17.0.1:18317/v1`), bearer `COIN_AI_CHECK_TOKEN`,
+/// model `COIN_AI_CHECK_MODEL` (default `claude-sonnet-4-6`). The answer is
+/// `choices[0].message.content`.
 pub async fn review(http: &reqwest::Client, song: &SongContext<'_>, coin: &CoinContext<'_>) -> Verdict {
-    let Ok(url) = std::env::var("COIN_AI_CHECK_URL") else {
-        return Verdict::skipped("AI review is not enabled");
-    };
-    if url.is_empty() {
+    let base = std::env::var("COIN_AI_CHECK_URL").unwrap_or_default();
+    if base.is_empty() {
         return Verdict::skipped("AI review is not enabled");
     }
+    let model = std::env::var("COIN_AI_CHECK_MODEL").ok().filter(|m| !m.is_empty()).unwrap_or_else(|| "claude-sonnet-4-6".to_string());
     let mut req = http
-        .post(&url)
-        .timeout(std::time::Duration::from_secs(45))
-        .json(&json!({ "prompt": prompt(song, coin) }));
+        .post(format!("{}/chat/completions", base.trim_end_matches('/')))
+        // The route answering the author sits behind nginx's 60 s cut.
+        .timeout(std::time::Duration::from_secs(50))
+        .json(&json!({
+            "model": model,
+            "temperature": 0,
+            "messages": [{ "role": "user", "content": prompt(song, coin) }],
+        }));
     if let Ok(token) = std::env::var("COIN_AI_CHECK_TOKEN") {
         if !token.is_empty() {
             req = req.bearer_auth(token);
@@ -108,14 +113,10 @@ pub async fn review(http: &reqwest::Client, song: &SongContext<'_>, coin: &CoinC
     };
     let text = serde_json::from_str::<Value>(&body)
         .ok()
-        .and_then(|v| {
-            ["response", "text", "result", "content"]
-                .iter()
-                .find_map(|k| v[*k].as_str().map(str::to_string))
-        })
+        .and_then(|v| v["choices"][0]["message"]["content"].as_str().map(str::to_string))
         .unwrap_or(body);
     parse_answer(&text).unwrap_or_else(|| {
-        tracing::warn!("coin AI review: unparseable answer");
+        tracing::warn!("coin AI review: unparseable answer: {}", text.chars().take(200).collect::<String>());
         Verdict::skipped("AI review unavailable")
     })
 }
@@ -140,5 +141,30 @@ mod tests {
             &CoinContext { name: "Doomslug", symbol: "SLUG", description: None },
         );
         assert!(p.contains("Doom Slug") && p.contains("SLUG") && p.contains("slugs at dawn"));
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    /// Talks to the local reviewer. Run by hand with the env set:
+    /// COIN_AI_CHECK_URL=http://127.0.0.1:18317/v1 COIN_AI_CHECK_TOKEN=... cargo test --release -- --ignored ai_live
+    #[tokio::test]
+    #[ignore]
+    async fn ai_live_related_vs_unrelated() {
+        assert!(enabled(), "set COIN_AI_CHECK_URL");
+        let http = reqwest::Client::new();
+        let song = SongContext {
+            title: "We're All Gonna Make It Now",
+            description: Some("Euphoric anthemic pop about everyone, humans and AI agents, winning together"),
+            lyrics: Some("everything's green, everything's up\nraise it high, baby, fill the cup\nwe're all gonna make it now\n(we're all gonna be rich)"),
+        };
+        let related = review(&http, &song, &CoinContext { name: "Gonna Make It", symbol: "WAGMI", description: Some("Memecoin of the song on near.fm") }).await;
+        assert!(related.reviewed, "{related:?}");
+        assert!(related.allowed, "related coin refused: {}", related.reason);
+        let unrelated = review(&http, &song, &CoinContext { name: "Elon Tesla Official", symbol: "TSLA", description: Some("The official Tesla token") }).await;
+        assert!(unrelated.reviewed, "{unrelated:?}");
+        assert!(!unrelated.allowed, "unrelated/impersonating coin allowed: {}", unrelated.reason);
     }
 }
