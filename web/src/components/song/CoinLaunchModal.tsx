@@ -281,6 +281,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
       setBusy("Launching… waiting for the token to appear on chain");
       let coin: SongCoin | null = null;
       for (let i = 0; i < 40 && !coin; i++) {
+        setBusy("Creating the token…");
         try {
           coin = await linkSongCoin(song.uuid, launchpad.id, form.symbol);
         } catch (e) {
@@ -293,6 +294,24 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
         setError("Launched, but the token is still being created. Reload this page in a minute to see it.");
         setBusy(null);
         return;
+      }
+      // The factory finishes token → pool → first buy over a few blocks. Wait
+      // for it; a launch that stops moving can be resumed on the launchpad.
+      let stalledPolls = 0;
+      for (let i = 0; i < 45 && coin.status !== "live"; i++) {
+        setBusy(form.devBuyYocto ? "Opening the pool and making your first buy…" : "Opening the pool…");
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const st = await launchpad.launchStatus(view, nextId);
+          if (st.done) { coin = { ...coin, status: "live" }; break; }
+          stalledPolls = st.inFlight ? 0 : stalledPolls + 1;
+          if (stalledPolls >= 8) {
+            setBusy(null);
+            setError(`The launch stopped before the pool opened. Nothing is lost: open $${coin.symbol} on ${launchpad.name} and press Resume, or wait — it finishes on its own.`);
+            onLaunched(coin);
+            return;
+          }
+        } catch { /* transient RPC error: keep waiting */ }
       }
       showToast({ message: `$${coin.symbol} launched on ${launchpad.name}!`, type: "success", duration: 6000 });
       onLaunched(coin);

@@ -92,5 +92,7 @@ export interface Launchpad {
   /** Launch sequence number the next launch will get (for finding it afterwards). */
   nextLaunchId(view: ViewFn): Promise<number>;
   buildTransactions(form: LaunchForm, totalYocto: string, nextLaunchId: number): LaunchTx[];
+  /** Where a launch stands on chain: finished, still being carried out, or stalled. */
+  launchStatus(view: ViewFn, launchId: number): Promise<{ done: boolean; inFlight: boolean; tokenAccount: string | null }>;
   tokenUrl(tokenAccount: string): string;
 }

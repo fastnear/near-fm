@@ -10,7 +10,6 @@ import type { CostQuote, LaunchForm, Launchpad, LaunchpadConfig, LaunchTx, PairO
 
 export const FACTORY = "nearlytrade.near";
 const LAUNCH_GAS = "300000000000000"; // 300 TGas
-const RESUME_GAS = "300000000000000";
 const NATIVE = "wrap.near";
 
 function utf8Bytes(s: string): number {
@@ -118,16 +117,19 @@ export const nearlyTrade: Launchpad = {
     return Number(await view(FACTORY, "get_num_launches", {}));
   },
 
-  buildTransactions(form, totalYocto, nextLaunchId): LaunchTx[] {
-    const txs: LaunchTx[] = [
-      { contractId: FACTORY, method: "launch", args: { args: launchArgs(form) }, gas: LAUNCH_GAS, deposit: totalYocto },
-    ];
-    // With a first buy the factory pauses after the pool opens; `resume`
-    // finishes the launch and delivers the buy (what nearly.trade's own UI sends).
-    if (form.devBuyYocto && form.devBuyYocto !== "0") {
-      txs.push({ contractId: FACTORY, method: "resume", args: { launch_id: String(nextLaunchId) }, gas: RESUME_GAS, deposit: "0" });
-    }
-    return txs;
+  buildTransactions(form, totalYocto): LaunchTx[] {
+    // One transaction: the factory carries out token, pool and any first buy
+    // itself. (`resume` exists only for a stalled launch and panics with
+    // "nothing to resume" otherwise — nearly.trade's own UI sends it blindly
+    // and it fails every time; we don't.)
+    return [{ contractId: FACTORY, method: "launch", args: { args: launchArgs(form) }, gas: LAUNCH_GAS, deposit: totalYocto }];
+  },
+
+  async launchStatus(view, launchId) {
+    const r = (await view(FACTORY, "get_launch", { launch_id: String(launchId) })) as
+      | { step?: string; inflight?: boolean; token?: string }
+      | null;
+    return { done: r?.step === "Done", inFlight: !!r?.inflight, tokenAccount: r?.token ?? null };
   },
 
   tokenUrl(tokenAccount) {

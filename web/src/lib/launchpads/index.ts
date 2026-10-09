@@ -27,6 +27,7 @@ function placeholder(id: string, name: string, url: string, logo: string): Launc
     quoteCost: notYet,
     nextLaunchId: notYet,
     buildTransactions: () => [],
+    launchStatus: notYet,
     tokenUrl: () => url,
   };
 }
