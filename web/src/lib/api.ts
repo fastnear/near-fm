@@ -1175,3 +1175,8 @@ export async function linkSongCoin(uuid: string, launchpad: string, symbol: stri
 export async function suggestSongCoin(uuid: string): Promise<{ name: string; symbol: string; description: string }> {
   return fetchApi(`/api/songs/${uuid}/coins/suggest`, { method: "POST" });
 }
+
+/** Report the exact launch transactions before signing; tells whether launching is enabled. */
+export async function dryRunSongCoin(uuid: string, launchpad: string, transactions: unknown, quote: unknown): Promise<{ launch_enabled: boolean }> {
+  return fetchApi(`/api/songs/${uuid}/coins/dry-run`, { method: "POST", body: JSON.stringify({ launchpad, transactions, quote }) });
+}

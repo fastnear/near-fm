@@ -123,6 +123,19 @@ async fn main() -> anyhow::Result<()> {
             rate_limit::rate_limit_middleware,
         ));
 
+    // Paid-inference routes: 5/min, 10/hour, 20/day per IP, on top of per-user quotas
+    let ai_routes = Router::new()
+        .route("/api/songs/:uuid/coins/check", post(routes::coins::check))
+        .route("/api/songs/:uuid/coins/suggest", post(routes::coins::suggest))
+        .layer(middleware::from_fn_with_state(
+            rate_limit::MultiWindowState::new(&[
+                (std::time::Duration::from_secs(60), 5),
+                (std::time::Duration::from_secs(3600), 10),
+                (std::time::Duration::from_secs(86_400), 20),
+            ]),
+            rate_limit::multi_window_middleware,
+        ));
+
     // Moderate rate-limited routes (30 req/min per IP) — auth / writes
     let moderate_routes = Router::new()
         .route("/api/auth/verify", post(routes::auth::verify))
@@ -136,9 +149,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/vote", post(routes::songs::vote_song))
         .route("/api/songs/:uuid/diamond-like", post(routes::songs::diamond_like_song))
         .route("/api/songs/:uuid/report", post(routes::songs::report_song))
-        .route("/api/songs/:uuid/coins/check", post(routes::coins::check))
-        .route("/api/songs/:uuid/coins/suggest", post(routes::coins::suggest))
         .route("/api/songs/:uuid/coins/link", post(routes::coins::link))
+        .route("/api/songs/:uuid/coins/dry-run", post(routes::coins::dry_run))
         .route("/api/playlists", post(routes::playlists::create_playlist))
         .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
         .route("/api/playlists/:uuid/songs", post(routes::playlists::add_song_to_playlist))
@@ -171,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
         // Merge rate-limited routes
         .merge(strict_routes)
         .merge(moderate_routes)
+        .merge(ai_routes)
         // Public stats
         .route(
             "/api/stats",

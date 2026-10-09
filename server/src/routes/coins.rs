@@ -65,6 +65,17 @@ async fn require_near_author(state: &AppState, user_id: i32, song: &SongRow) -> 
     }
 }
 
+/// Paid-inference gate for the author-facing AI routes: a funded wallet
+/// (sybil cost) and per-user / per-song daily quotas.
+async fn guard_ai(state: &AppState, user_id: i32, song_id: i32, creator: &str, kind: &str, quota: &launchpads::ai_check::Quota) -> Result<(), ApiError> {
+    if !launchpads::ai_check::wallet_funded(&state.config.near_rpc_url, creator).await {
+        return Err((StatusCode::PAYMENT_REQUIRED, "AI help needs at least 0.1 NEAR in your wallet (a launch costs about 0.2 NEAR)".to_string()));
+    }
+    launchpads::ai_check::take_quota(&state.db, user_id, song_id, kind, quota)
+        .await
+        .map_err(|e| (StatusCode::TOO_MANY_REQUESTS, e))
+}
+
 /// GET /api/songs/:uuid/coins — coins launched from this song (public).
 /// Hidden ones (failed relevance check) are included with `status: hidden`
 /// so the song page can tell the author rather than offer a second launch.
@@ -119,7 +130,10 @@ pub async fn check(
 ) -> Result<Json<CheckResponse>, ApiError> {
     let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
     let song = load_song(&state, &uuid).await?;
-    require_near_author(&state, claims.user_id, &song).await?;
+    let creator = require_near_author(&state, claims.user_id, &song).await?;
+    if launchpads::ai_check::enabled() {
+        guard_ai(&state, claims.user_id, song.id, &creator, "coin_check", &launchpads::ai_check::CHECK_QUOTA).await?;
+    }
 
     let verdict = launchpads::ai_check::review(
         &state.http_client,
@@ -158,10 +172,11 @@ pub async fn suggest(
 ) -> Result<Json<launchpads::ai_check::Suggestion>, ApiError> {
     let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
     let song = load_song(&state, &uuid).await?;
-    require_near_author(&state, claims.user_id, &song).await?;
+    let creator = require_near_author(&state, claims.user_id, &song).await?;
     if !launchpads::ai_check::enabled() {
         return Err((StatusCode::SERVICE_UNAVAILABLE, "AI suggestions are not enabled".to_string()));
     }
+    guard_ai(&state, claims.user_id, song.id, &creator, "coin_suggest", &launchpads::ai_check::SUGGEST_QUOTA).await?;
     let s = launchpads::ai_check::suggest(
         &state.http_client,
         &launchpads::ai_check::SongContext {
@@ -171,8 +186,57 @@ pub async fn suggest(
         },
     )
     .await
-    .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    .map_err(|e| (if e.contains("busy") || e.contains("budget") { StatusCode::TOO_MANY_REQUESTS } else { StatusCode::BAD_GATEWAY }, e))?;
     Ok(Json(s))
+}
+
+/// Launches are gated by `COIN_LAUNCH_ENABLED=1` while the flow is being verified.
+fn launch_enabled() -> bool {
+    matches!(std::env::var("COIN_LAUNCH_ENABLED").as_deref(), Ok("1") | Ok("true"))
+}
+
+#[derive(Deserialize)]
+pub struct DryRunRequest {
+    pub launchpad: String,
+    pub transactions: serde_json::Value,
+    pub quote: Option<serde_json::Value>,
+}
+
+/// POST /api/songs/:uuid/coins/dry-run — the exact transactions the wallet is
+/// about to sign, logged for review. Answers whether launching is enabled.
+pub async fn dry_run(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+    Json(req): Json<DryRunRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let song = load_song(&state, &uuid).await?;
+    let creator = require_near_author(&state, claims.user_id, &song).await?;
+
+    // Log with the icon shortened to its length; the rest verbatim.
+    let mut logged = req.transactions.clone();
+    if let Some(arr) = logged.as_array_mut() {
+        for tx in arr.iter_mut() {
+            if let Some(icon) = tx.pointer_mut("/args/args/icon") {
+                if let Some(s) = icon.as_str() {
+                    let head: String = s.chars().take(40).collect();
+                    *icon = serde_json::Value::String(format!("{head}… ({} bytes)", s.len()));
+                }
+            }
+        }
+    }
+    tracing::info!(
+        song_id = song.id,
+        song_uuid = %uuid,
+        creator = %creator,
+        launchpad = %req.launchpad,
+        launch_enabled = launch_enabled(),
+        quote = %req.quote.clone().unwrap_or(serde_json::Value::Null),
+        transactions = %logged,
+        "Coin launch dry-run"
+    );
+    Ok(Json(serde_json::json!({ "launch_enabled": launch_enabled() })))
 }
 
 #[derive(Deserialize)]

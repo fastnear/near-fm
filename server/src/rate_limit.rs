@@ -84,3 +84,83 @@ pub async fn rate_limit_middleware(
     }
     Ok(next.run(req).await)
 }
+
+// ── Multi-window limiter: N per minute, M per hour, K per day, per IP ──
+
+use std::collections::VecDeque;
+use std::time::Instant;
+
+#[derive(Clone)]
+pub struct MultiWindowState {
+    hits: Arc<Mutex<HashMap<IpAddr, VecDeque<Instant>>>>,
+    /// (window, max hits in it), longest window last.
+    windows: Arc<Vec<(Duration, usize)>>,
+}
+
+impl MultiWindowState {
+    pub fn new(windows: &[(Duration, usize)]) -> Self {
+        let mut w = windows.to_vec();
+        w.sort_by_key(|(d, _)| *d);
+        Self { hits: Arc::new(Mutex::new(HashMap::new())), windows: Arc::new(w) }
+    }
+
+    /// Records a hit if every window has room; false when any is full.
+    async fn check(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let longest = self.windows.last().map(|(d, _)| *d).unwrap_or(Duration::from_secs(86_400));
+        let mut map = self.hits.lock().await;
+        let q = map.entry(ip).or_default();
+        while q.front().map_or(false, |t| now.duration_since(*t) > longest) {
+            q.pop_front();
+        }
+        for (window, max) in self.windows.iter() {
+            let n = q.iter().rev().take_while(|t| now.duration_since(**t) <= *window).count();
+            if n >= *max {
+                return false;
+            }
+        }
+        q.push_back(now);
+        // Keep the map from growing with one-off IPs.
+        if map.len() > 50_000 {
+            map.retain(|_, q| q.back().map_or(false, |t| now.duration_since(*t) <= longest));
+        }
+        true
+    }
+}
+
+pub async fn multi_window_middleware(
+    axum::extract::State(state): axum::extract::State<MultiWindowState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let ip = extract_ip(&req);
+    if !state.check(ip).await {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    Ok(next.run(req).await)
+}
+
+#[cfg(test)]
+mod multi_window_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn minute_hour_day_windows_each_cap() {
+        let s = MultiWindowState::new(&[(Duration::from_secs(60), 2), (Duration::from_secs(3600), 3)]);
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(s.check(ip).await);
+        assert!(s.check(ip).await);
+        assert!(!s.check(ip).await, "3rd within a minute refused");
+        // Age the first two past the minute window; the hour window still holds them.
+        {
+            let mut m = s.hits.lock().await;
+            for t in m.get_mut(&ip).unwrap().iter_mut() {
+                *t = Instant::now() - Duration::from_secs(61);
+            }
+        }
+        assert!(s.check(ip).await, "minute window cleared");
+        assert!(!s.check(ip).await, "hour cap of 3 reached");
+        let other: IpAddr = "10.0.0.2".parse().unwrap();
+        assert!(s.check(other).await, "other IPs unaffected");
+    }
+}

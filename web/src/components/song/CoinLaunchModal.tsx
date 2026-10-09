@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Song } from "@/types";
 import { useNearWallet } from "@/contexts/NearWalletContext";
 import { useToast } from "@/components/ui/Toast";
-import { checkSongCoin, linkSongCoin, suggestSongCoin, type SongCoin } from "@/lib/api";
+import { checkSongCoin, dryRunSongCoin, linkSongCoin, suggestSongCoin, type SongCoin } from "@/lib/api";
 import { LAUNCHPADS, type CostQuote, type FeeMode, type Launchpad, type LaunchpadConfig, type Tax, type TaxSplit } from "@/lib/launchpads";
 import { compressIcon } from "@/lib/launchpads/image";
 
@@ -111,6 +111,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   const [aiOptIn, setAiOptIn] = useState(true);
   const [noLogoOk, setNoLogoOk] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [preview, setPreview] = useState<unknown[] | null>(null);
 
   const suggest = async () => {
     setSuggesting(true);
@@ -254,9 +255,18 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
           return;
         }
       }
-      setBusy("Confirm in your wallet…");
+      setBusy("Preparing the transaction…");
       const nextId = await launchpad.nextLaunchId(view);
       const txs = launchpad.buildTransactions(form, quote.totalYocto, nextId);
+      const { launch_enabled } = await dryRunSongCoin(song.uuid, launchpad.id, txs, quote);
+      if (!launch_enabled) {
+        setBusy(null);
+        setPreview(txs.map((t) => ({ ...t, args: { ...t.args, args: t.args.args && typeof t.args.args === "object"
+          ? { ...(t.args.args as Record<string, unknown>), icon: icon ? `<${icon.length} bytes>` : null } : t.args.args } })));
+        setError("Coin launches are in test mode: nothing was sent to your wallet. The transaction below was recorded for review.");
+        return;
+      }
+      setBusy("Confirm in your wallet…");
       const result = await callBatch(txs);
       const failure = txFailure(result);
       if (failure) {
@@ -502,6 +512,11 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
         </div>
 
         {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+        {preview && (
+          <pre className="mb-3 max-h-64 overflow-auto rounded-lg bg-black/40 border border-white/[0.06] p-3 text-[10px] text-slate-400 whitespace-pre-wrap break-all">
+            {JSON.stringify(preview, null, 2)}
+          </pre>
+        )}
 
         <button
           onClick={launch}
