@@ -11,6 +11,7 @@ pub mod blog;
 pub mod fastfs;
 pub mod wallet;
 pub mod auth;
+pub mod coins;
 pub mod comments;
 pub mod credits;
 pub mod outlayer;

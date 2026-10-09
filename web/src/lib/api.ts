@@ -1136,3 +1136,37 @@ export async function getAdminCreditsTransactions(
     `/api/admin/credits/transactions?limit=${limit}&offset=${offset}`
   );
 }
+
+// ── Song memecoins ──
+
+export interface SongCoin {
+  launchpad: string;
+  token_account: string;
+  launch_id: string | null;
+  creator_account: string;
+  name: string;
+  symbol: string;
+  status: "pending" | "live" | "hidden";
+  created_at: string;
+}
+
+export async function getSongCoins(uuid: string): Promise<SongCoin[]> {
+  return fetchApi(`/api/songs/${uuid}/coins`);
+}
+
+export interface CoinCheckResult {
+  ai_enabled: boolean;
+  allowed: boolean;
+  reason: string;
+  reviewed: boolean;
+}
+
+/** Optional AI review that the coin is about the song (author only). */
+export async function checkSongCoin(uuid: string, coin: { name: string; symbol: string; description?: string }): Promise<CoinCheckResult> {
+  return fetchApi(`/api/songs/${uuid}/coins/check`, { method: "POST", body: JSON.stringify(coin) });
+}
+
+/** Link the author's fresh launch to the song. 404 until the launch is on chain. */
+export async function linkSongCoin(uuid: string, launchpad: string, symbol: string): Promise<SongCoin> {
+  return fetchApi(`/api/songs/${uuid}/coins/link`, { method: "POST", body: JSON.stringify({ launchpad, symbol }) });
+}

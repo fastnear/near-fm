@@ -14,6 +14,7 @@ mod auth;
 mod config;
 mod db;
 mod feed;
+mod launchpads;
 mod near;
 mod rate_limit;
 mod reputation;
@@ -135,6 +136,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/vote", post(routes::songs::vote_song))
         .route("/api/songs/:uuid/diamond-like", post(routes::songs::diamond_like_song))
         .route("/api/songs/:uuid/report", post(routes::songs::report_song))
+        .route("/api/songs/:uuid/coins/check", post(routes::coins::check))
+        .route("/api/songs/:uuid/coins/link", post(routes::coins::link))
         .route("/api/playlists", post(routes::playlists::create_playlist))
         .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
         .route("/api/playlists/:uuid/songs", post(routes::playlists::add_song_to_playlist))
@@ -211,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/my-stats", get(routes::songs::get_song_my_stats))
         .route("/api/songs/:uuid/vote", get(routes::songs::get_vote))
         .route("/api/songs/:uuid/diamond-likers", get(routes::songs::get_diamond_likers))
+        .route("/api/songs/:uuid/coins", get(routes::coins::list))
         .route("/api/me/diamond-likes-remaining", get(routes::songs::get_diamond_likes_remaining))
         .route("/api/radio", get(routes::songs::get_radio))
         .route("/api/radio/skip", post(routes::songs::radio_skip))

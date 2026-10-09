@@ -22,6 +22,7 @@ import {
 import { VoteButtons } from "@/components/song/VoteButtons";
 import { TipButton } from "@/components/song/TipButton";
 import { FollowButton } from "@/components/song/FollowButton";
+import { SongCoins } from "@/components/song/SongCoins";
 import { renderWithMentions } from "@/lib/mentions";
 import { useToast } from "@/components/ui/Toast";
 
@@ -896,6 +897,9 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
                   </span>
                 )}
               </div>
+
+              {/* Memecoin from this song */}
+              <SongCoins song={song} />
 
               {/* Dates */}
               <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-slate-600">
