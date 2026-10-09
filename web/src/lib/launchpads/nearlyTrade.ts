@@ -69,7 +69,16 @@ export const nearlyTrade: Launchpad = {
       view(FACTORY, "get_quotes", {}) as Promise<[string, { decimals: number; native: boolean; enabled: boolean }][]>,
       view(FACTORY, "get_dev_buy_cap", {}) as Promise<string>,
     ]);
-    const enabled = quotes.filter(([, q]) => q.enabled);
+    // Only pairs whose factory default opening price matches the NEAR launch
+    // value: NEAR and stablecoins. Other pairs' defaults drift with the asset's
+    // price (nearly.trade's own UI recomputes init_point from a price feed);
+    // launching them at a stale price is irreversible, so they are not offered.
+    const SAFE_PAIRS = new Set([
+      NATIVE,
+      "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", // USDC
+      "usdt.tether-token.near",
+    ]);
+    const enabled = quotes.filter(([id, q]) => q.enabled && SAFE_PAIRS.has(id));
     const symbols = await Promise.all(enabled.map(([id]) => symbolOf(view, id)));
     const pairs: PairOption[] = enabled.map(([tokenId, q], i) => ({
       tokenId,

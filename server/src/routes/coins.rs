@@ -66,11 +66,13 @@ async fn require_near_author(state: &AppState, user_id: i32, song: &SongRow) -> 
 }
 
 /// GET /api/songs/:uuid/coins — coins launched from this song (public).
+/// Hidden ones (failed relevance check) are included with `status: hidden`
+/// so the song page can tell the author rather than offer a second launch.
 pub async fn list(State(state): State<AppState>, Path(uuid): Path<String>) -> Result<Json<Vec<SongCoin>>, ApiError> {
     let song = load_song(&state, &uuid).await?;
     let mut coins = sqlx::query_as::<_, SongCoin>(
         "SELECT launchpad, token_account, launch_id, creator_account, name, symbol, status, created_at \
-         FROM song_coins WHERE song_id = $1 AND status <> 'hidden' ORDER BY created_at",
+         FROM song_coins WHERE song_id = $1 ORDER BY created_at",
     )
     .bind(song.id)
     .fetch_all(&state.db)

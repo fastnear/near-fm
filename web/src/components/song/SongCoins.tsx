@@ -27,7 +27,9 @@ export function SongCoins({ song }: { song: Song }) {
   const canLaunch = isAuthor && user?.auth_provider === "near" && !!accountId && accountId === user?.near_account_id;
   const visible = coins.filter((c) => c.status !== "hidden");
 
-  if (visible.length === 0 && !canLaunch) return null;
+  const hiddenOwn = isAuthor ? coins.filter((c) => c.status === "hidden") : [];
+
+  if (visible.length === 0 && hiddenOwn.length === 0 && !canLaunch) return null;
 
   return (
     <div className="mt-5">
@@ -63,7 +65,13 @@ export function SongCoins({ song }: { song: Song }) {
         );
       })}
 
-      {canLaunch && visible.length === 0 && (
+      {hiddenOwn.map((coin) => (
+        <p key={coin.token_account} className="text-xs text-slate-500 mb-2">
+          Your coin ${coin.symbol} ({coin.token_account}) was launched but isn&apos;t shown here: it didn&apos;t look related to this song.
+        </p>
+      ))}
+
+      {canLaunch && coins.length === 0 && (
         <button
           onClick={() => setOpen(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-400/30 text-amber-100 hover:from-amber-500/30 hover:to-purple-500/30 transition"

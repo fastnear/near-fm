@@ -10,6 +10,15 @@ import { compressIcon } from "@/lib/launchpads/image";
 
 const fmtNear = (yocto: string, digits = 3) => (Number(BigInt(yocto) / BigInt("1000000000000000000")) / 1e6).toFixed(digits);
 
+/** Title cut to 32 characters at a word boundary (the name can't be changed after launch). */
+function suggestName(title: string): string {
+  const t = title.trim();
+  if (t.length <= 32) return t;
+  const cut = t.slice(0, 32);
+  const sp = cut.lastIndexOf(" ");
+  return (sp > 12 ? cut.slice(0, sp) : cut).trim();
+}
+
 /** "Doom Slug (feat. X)" → "DOOMSLUG"; keeps 2–12 letters/digits. */
 function suggestSymbol(title: string): string {
   const words = title.replace(/\(.*?\)|\[.*?\]/g, "").toUpperCase().match(/[A-Z0-9]+/g) || [];
@@ -35,6 +44,35 @@ function normalizeLink(kind: "website" | "twitter" | "telegram", raw: string, ma
   }
 }
 
+const RPC = process.env.NEXT_PUBLIC_NEAR_RPC_URL || "https://rpc.mainnet.fastnear.com";
+
+async function rpcQuery(params: Record<string, unknown>): Promise<{ result?: Record<string, unknown>; error?: unknown }> {
+  const r = await fetch(RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "q", method: "query", params }),
+  });
+  return r.json();
+}
+
+async function accountExists(accountId: string): Promise<boolean> {
+  const j = await rpcQuery({ request_type: "view_account", finality: "final", account_id: accountId });
+  return !!j.result && !j.error;
+}
+
+/** A human-readable failure from a wallet's signAndSendTransaction(s) result, or null if all succeeded. */
+function txFailure(result: unknown): string | null {
+  const outcomes = (Array.isArray(result) ? result : [result]) as Array<{ status?: { Failure?: unknown } } | null | undefined>;
+  for (const o of outcomes) {
+    const f = o?.status?.Failure;
+    if (!f) continue;
+    const s = JSON.stringify(f);
+    const m = s.match(/"panic_msg":"([^"]+)"/) || s.match(/"ErrorMessage":"([^"]+)"/);
+    return m ? m[1] : s.slice(0, 200);
+  }
+  return null;
+}
+
 interface Props {
   song: Song;
   onClose: () => void;
@@ -53,12 +91,13 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   const [config, setConfig] = useState<LaunchpadConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [name, setName] = useState(song.title.slice(0, 32));
+  const songUrl = `https://near.fm/song/${song.uuid}`;
+  const [name, setName] = useState(suggestName(song.title));
   const [symbol, setSymbol] = useState(suggestSymbol(song.title));
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(`Memecoin of the song "${song.title}" on near.fm — listen: ${songUrl}`.slice(0, 500));
   const [icon, setIcon] = useState<string | null>(null);
   const [iconState, setIconState] = useState<"loading" | "ready" | "failed" | "none">(song.cover_image_url ? "loading" : "none");
-  const [website, setWebsite] = useState("");
+  const [website, setWebsite] = useState(songUrl);
   const [twitter, setTwitter] = useState("");
   const [telegram, setTelegram] = useState("");
   const [feeMode, setFeeMode] = useState<FeeMode>("creator");
@@ -70,6 +109,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   const [pair, setPair] = useState<string | null>(null);
   const [devBuy, setDevBuy] = useState(""); // NEAR
   const [aiOptIn, setAiOptIn] = useState(true);
+  const [noLogoOk, setNoLogoOk] = useState(false);
 
   const [balanceYocto, setBalanceYocto] = useState<string | null>(null);
   const [quote, setQuote] = useState<CostQuote | null>(null);
@@ -87,14 +127,8 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
   // Wallet balance
   useEffect(() => {
     if (!accountId) return;
-    const rpc = process.env.NEXT_PUBLIC_NEAR_RPC_URL || "https://rpc.mainnet.fastnear.com";
-    fetch(rpc, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "b", method: "query", params: { request_type: "view_account", finality: "final", account_id: accountId } }),
-    })
-      .then((r) => r.json())
-      .then((j) => setBalanceYocto(j?.result?.amount ?? null))
+    rpcQuery({ request_type: "view_account", finality: "final", account_id: accountId })
+      .then((j) => setBalanceYocto((j.result?.amount as string | undefined) ?? null))
       .catch(() => setBalanceYocto(null));
   }, [accountId]);
 
@@ -169,7 +203,7 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
     }
     return p;
   }, [form, launchpad, description, feeMode, feeTo, tax, devBuyYocto, config, website, twitter, telegram]);
-  const valid = Object.keys(problems).length === 0 && iconState !== "loading";
+  const valid = Object.keys(problems).length === 0 && iconState !== "loading" && (!!icon || noLogoOk);
 
   // Cost quote
   useEffect(() => {
@@ -197,10 +231,24 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
           return;
         }
       }
+      if (form.feeMode === "other" && form.feeTo) {
+        setBusy("Checking the fee wallet…");
+        if (!(await accountExists(form.feeTo))) {
+          setBusy(null);
+          setError(`Account ${form.feeTo} does not exist on NEAR. Fees sent there would be lost.`);
+          return;
+        }
+      }
       setBusy("Confirm in your wallet…");
       const nextId = await launchpad.nextLaunchId(view);
       const txs = launchpad.buildTransactions(form, quote.totalYocto, nextId);
-      await callBatch(txs);
+      const result = await callBatch(txs);
+      const failure = txFailure(result);
+      if (failure) {
+        setBusy(null);
+        setError(`The launch transaction failed, nothing was created: ${failure}`);
+        return;
+      }
 
       setBusy("Launching… waiting for the token to appear on chain");
       let coin: SongCoin | null = null;
@@ -284,6 +332,12 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
               <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => onPickIcon(e.target.files?.[0])} />
             </label>
             <p className="text-[10px] text-slate-600 mt-1 w-20">From the cover. Tap to change.</p>
+            {!icon && iconState !== "loading" && (
+              <label className="flex items-start gap-1 mt-2 w-28 text-[10px] text-amber-300/80 cursor-pointer">
+                <input type="checkbox" checked={noLogoOk} onChange={(e) => setNoLogoOk(e.target.checked)} className="mt-0.5" />
+                <span>Launch without a logo (can&apos;t be added later)</span>
+              </label>
+            )}
           </div>
           <div className="space-y-3">
             <div>

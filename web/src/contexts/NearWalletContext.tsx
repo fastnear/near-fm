@@ -56,7 +56,7 @@ interface NearWalletContextType {
     args: Record<string, unknown>;
     gas?: string;
     deposit?: string;
-  }>) => Promise<void>;
+  }>) => Promise<unknown>;
   viewMethod: (params: {
     contractId: string;
     method: string;
@@ -433,7 +433,7 @@ export function NearWalletProvider({ children }: { children: ReactNode }) {
     }>) => {
       if (!wallet) throw new Error("Please connect your NEAR wallet");
 
-      await wallet.signAndSendTransactions({
+      return await wallet.signAndSendTransactions({
         transactions: txns.map((tx) => ({
           receiverId: tx.contractId,
           actions: [
