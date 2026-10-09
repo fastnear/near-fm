@@ -107,11 +107,34 @@ pub async fn list(State(state): State<AppState>, Path(uuid): Path<String>) -> Re
     Ok(Json(coins))
 }
 
+/// Only the coin fields the launch itself carries; anything else (a prompt,
+/// a model, instructions) is rejected at parse time.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckRequest {
     pub name: String,
     pub symbol: String,
     pub description: Option<String>,
+}
+
+/// The coin fields must already be valid launch inputs — the AI never sees
+/// free-form text beyond what the launchpad would store.
+fn validate_coin_fields(req: &CheckRequest) -> Result<(String, String, Option<String>), ApiError> {
+    let bad = |m: &str| (StatusCode::BAD_REQUEST, m.to_string());
+    let name = launchpads::ai_check::clean(&req.name, 32);
+    if name.chars().count() < 2 {
+        return Err(bad("name: 2 to 32 characters"));
+    }
+    let symbol = req.symbol.trim().to_uppercase();
+    if !(2..=12).contains(&symbol.len()) || !symbol.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(bad("symbol: 2 to 12 letters or digits"));
+    }
+    let description = req
+        .description
+        .as_deref()
+        .map(|d| launchpads::ai_check::clean(d, 300))
+        .filter(|d| !d.is_empty());
+    Ok((name, symbol, description))
 }
 
 #[derive(Serialize)]
@@ -129,6 +152,7 @@ pub async fn check(
     Json(req): Json<CheckRequest>,
 ) -> Result<Json<CheckResponse>, ApiError> {
     let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let (name, symbol, description) = validate_coin_fields(&req)?;
     let song = load_song(&state, &uuid).await?;
     let creator = require_near_author(&state, claims.user_id, &song).await?;
     if launchpads::ai_check::enabled() {
@@ -143,9 +167,9 @@ pub async fn check(
             lyrics: song.lyrics.as_deref(),
         },
         &launchpads::ai_check::CoinContext {
-            name: req.name.trim(),
-            symbol: req.symbol.trim(),
-            description: req.description.as_deref(),
+            name: &name,
+            symbol: &symbol,
+            description: description.as_deref(),
         },
     )
     .await;
@@ -153,8 +177,8 @@ pub async fn check(
     if verdict.reviewed {
         sqlx::query("INSERT INTO song_coin_checks (song_id, name, symbol, allowed, reason) VALUES ($1, $2, $3, $4, $5)")
             .bind(song.id)
-            .bind(req.name.trim())
-            .bind(req.symbol.trim().to_uppercase())
+            .bind(&name)
+            .bind(&symbol)
             .bind(verdict.allowed)
             .bind(&verdict.reason)
             .execute(&state.db)
