@@ -319,8 +319,7 @@ pub async fn upsert_vote(
     sqlx::query(
         r#"UPDATE songs SET
             upvotes = (SELECT COALESCE(SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
-            downvotes = (SELECT COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
-            updated_at = NOW()
+            downvotes = (SELECT COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1)
            WHERE id = $1"#,
     )
     .bind(song_id)
@@ -345,8 +344,7 @@ pub async fn delete_vote(
     sqlx::query(
         r#"UPDATE songs SET
             upvotes = (SELECT COALESCE(SUM(CASE WHEN value = 1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
-            downvotes = (SELECT COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1),
-            updated_at = NOW()
+            downvotes = (SELECT COALESCE(SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END), 0) FROM votes WHERE song_id = $1)
            WHERE id = $1"#,
     )
     .bind(song_id)
