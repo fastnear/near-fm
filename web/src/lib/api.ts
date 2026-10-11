@@ -1147,7 +1147,43 @@ export interface SongCoin {
   name: string;
   symbol: string;
   status: "pending" | "live" | "hidden";
+  /** `launched` from this song, or `linked`: an existing coin the song is about. */
+  kind: "launched" | "linked";
+  icon: string | null;
+  trade_url: string | null;
+  trade_url_trusted: boolean;
+  relatedness: number | null;
   created_at: string;
+}
+
+export interface TokenInfo {
+  token_account: string;
+  name: string;
+  symbol: string;
+  icon: string | null;
+  decimals: number;
+  total_supply: string | null;
+  source: "nearly.trade" | "justhoot.fun" | "external";
+  creator: string | null;
+  trade_url: string | null;
+}
+
+/** Look up an existing NEP-141 token by account id or a link to it. */
+export async function lookupCoin(token: string): Promise<TokenInfo> {
+  return fetchApi(`/api/coins/lookup?token=${encodeURIComponent(token)}`);
+}
+
+/** Attach an existing coin the song is about (AI checks the song's words; a trade link is required). */
+export async function attachSongCoin(uuid: string, token: string, tradeUrl?: string): Promise<SongCoin> {
+  return fetchApi(`/api/songs/${uuid}/coins/attach`, { method: "POST", body: JSON.stringify({ token, trade_url: tradeUrl || null }) });
+}
+
+export async function setSongCoinTradeUrl(uuid: string, token: string, tradeUrl: string): Promise<SongCoin> {
+  return fetchApi(`/api/songs/${uuid}/coins/${encodeURIComponent(token)}`, { method: "PATCH", body: JSON.stringify({ trade_url: tradeUrl }) });
+}
+
+export async function detachSongCoin(uuid: string, token: string): Promise<void> {
+  await fetchApi(`/api/songs/${uuid}/coins/${encodeURIComponent(token)}`, { method: "DELETE" });
 }
 
 export async function getSongCoins(uuid: string): Promise<SongCoin[]> {

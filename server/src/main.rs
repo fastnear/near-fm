@@ -127,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
     let ai_routes = Router::new()
         .route("/api/songs/:uuid/coins/check", post(routes::coins::check))
         .route("/api/songs/:uuid/coins/suggest", post(routes::coins::suggest))
+        .route("/api/songs/:uuid/coins/attach", post(routes::coins::attach))
         .layer(middleware::from_fn_with_state(
             rate_limit::MultiWindowState::new(&[
                 (std::time::Duration::from_secs(60), 5),
@@ -151,6 +152,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/songs/:uuid/report", post(routes::songs::report_song))
         .route("/api/songs/:uuid/coins/link", post(routes::coins::link))
         .route("/api/songs/:uuid/coins/dry-run", post(routes::coins::dry_run))
+        .route("/api/songs/:uuid/coins/:token", patch(routes::coins::set_trade_url).delete(routes::coins::detach))
+        .route("/api/coins/lookup", get(routes::coins::lookup))
         .route("/api/playlists", post(routes::playlists::create_playlist))
         .route("/api/playlists/:uuid", patch(routes::playlists::update_playlist).delete(routes::playlists::delete_playlist))
         .route("/api/playlists/:uuid/songs", post(routes::playlists::add_song_to_playlist))

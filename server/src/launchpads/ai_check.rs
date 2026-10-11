@@ -259,6 +259,63 @@ pub async fn review(http: &reqwest::Client, song: &SongContext<'_>, coin: &CoinC
     })
 }
 
+/// How much the song is about an existing coin, 0–100.
+#[derive(Debug, Clone, Serialize)]
+pub struct Relatedness {
+    pub score: u8,
+    pub reason: String,
+}
+
+pub fn relatedness_prompt(song: &SongContext, coin: &CoinContext) -> String {
+    format!(
+        "Authors on near.fm attach an existing memecoin to a song when the song is about that coin, \
+         its character, image, name or theme. Rate how much THIS song is about THIS coin.\n\
+         Scale 0–100: 0 = a generic song with no connection; 25 = a clear nod (the coin's name, ticker, \
+         mascot or theme appears, or an unmistakable wordplay on it); 60 = the coin is a main topic; \
+         100 = the whole song is about it. Judge the song's words, not the coin's quality. \
+         A song that could be about anything scores under 25.\n\n\
+         {song_block}\n\n{coin_block}\n\n\
+         Answer with JSON only: {{\"score\": 0-100, \"reason\": \"one short sentence\"}}",
+        song_block = fenced("SONG", &format!(
+            "Title: {}\nDescription: {}\nLyrics (excerpt):\n{}",
+            clip(song.title, 200), clip(song.description.unwrap_or("-"), 500), clip(song.lyrics.unwrap_or("-"), 1500))),
+        coin_block = fenced("COIN", &format!(
+            "Name: {}\nTicker: {}\nDescription: {}",
+            clip(coin.name, 64), clip(coin.symbol, 16), clip(coin.description.unwrap_or("-"), 300))),
+    )
+}
+
+pub fn parse_relatedness(text: &str) -> Option<Relatedness> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    let v: Value = serde_json::from_str(text.get(start..=end)?).ok()?;
+    let score = v["score"].as_f64()?.round().clamp(0.0, 100.0) as u8;
+    Some(Relatedness { score, reason: v["reason"].as_str().unwrap_or("").to_string() })
+}
+
+/// Minimum score to attach a coin (`COIN_MIN_RELATEDNESS`, default 25).
+pub fn min_relatedness() -> u8 {
+    std::env::var("COIN_MIN_RELATEDNESS").ok().and_then(|v| v.parse().ok()).unwrap_or(25)
+}
+
+pub async fn relatedness(http: &reqwest::Client, song: &SongContext<'_>, coin: &CoinContext<'_>) -> Result<Relatedness, String> {
+    if !enabled() {
+        return Err("AI review is not enabled".to_string());
+    }
+    let text = chat(http, &relatedness_prompt(song, coin), 0.0).await.map_err(|e| {
+        tracing::warn!("coin AI relatedness: {e}");
+        match e.as_str() {
+            "busy" => "AI is busy right now, try again in a moment".to_string(),
+            e if e.contains("budget") => "AI budget for today is used up".to_string(),
+            _ => "AI is unavailable right now".to_string(),
+        }
+    })?;
+    parse_relatedness(&text).ok_or_else(|| {
+        tracing::warn!("coin AI relatedness: unparseable answer: {}", text.chars().take(200).collect::<String>());
+        "AI gave an unusable answer, try again".to_string()
+    })
+}
+
 /// A proposed coin for a song: name, ticker and description to prefill the
 /// launch form. The author can edit everything before launching.
 #[derive(Debug, Clone, Serialize)]
@@ -357,6 +414,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_relatedness() {
+        let r = parse_relatedness("{\"score\": 37.6, \"reason\": \"mentions the slug\"}").unwrap();
+        assert_eq!(r.score, 38);
+        assert_eq!(parse_relatedness("{\"score\": 250}").unwrap().score, 100);
+        assert!(parse_relatedness("{\"reason\": \"no score\"}").is_none());
+    }
+
+    #[test]
     fn prompt_carries_song_and_coin() {
         let p = prompt(
             &SongContext { title: "Doom Slug", description: None, lyrics: Some("slugs at dawn") },
@@ -396,6 +461,12 @@ mod live_tests {
         eprintln!("suggestion 2: {sug2:?}");
         assert_eq!(sug2.name, "Neon Nights in Tbilisi", "title must be kept as the name");
         assert!(sug2.symbol.starts_with("NEON") || sug2.symbol.starts_with("NN"), "ticker must come from the title: {}", sug2.symbol);
+        let rel = relatedness(&http, &song, &CoinContext { name: "WAGMI", symbol: "WAGMI", description: Some("We're all gonna make it") }).await.unwrap();
+        eprintln!("relatedness related: {rel:?}");
+        assert!(rel.score >= 25, "related coin scored {}", rel.score);
+        let rel = relatedness(&http, &song, &CoinContext { name: "Doge", symbol: "DOGE", description: Some("the dog coin") }).await.unwrap();
+        eprintln!("relatedness unrelated: {rel:?}");
+        assert!(rel.score < 25, "unrelated coin scored {}", rel.score);
         // The suggestion must itself pass the relevance review.
         let v = review(&http, &song, &CoinContext { name: &sug.name, symbol: &sug.symbol, description: Some(&sug.description) }).await;
         assert!(v.allowed, "suggested coin failed review: {}", v.reason);

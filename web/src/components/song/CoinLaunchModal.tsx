@@ -75,11 +75,10 @@ function txFailure(result: unknown): string | null {
 
 interface Props {
   song: Song;
-  onClose: () => void;
   onLaunched: (coin: SongCoin) => void;
 }
 
-export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
+export function CoinLaunchModal({ song, onLaunched }: Props) {
   const { accountId, viewMethod, callBatch } = useNearWallet();
   const { showToast } = useToast();
   const view = useCallback(
@@ -329,15 +328,8 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
     `px-3 py-1.5 rounded-lg text-xs font-medium border transition ${active ? "bg-purple-500/20 border-purple-500/50 text-purple-200" : "bg-white/[0.03] border-white/[0.08] text-slate-400 hover:bg-white/[0.06]"}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm" >
-      <div className="w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-[#0f0f14] border border-white/[0.08] rounded-t-2xl sm:rounded-2xl p-5 sm:p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Create a memecoin from this song</h2>
-            <p className="text-xs text-slate-500 mt-0.5">You sign the launch in your own wallet and pay the launchpad&apos;s storage cost. near.fm takes nothing.</p>
-          </div>
-          <button onClick={onClose} disabled={!!busy} className="text-slate-500 hover:text-slate-300 text-xl leading-none">×</button>
-        </div>
+    <>
+        <p className="text-xs text-slate-500 mb-4">You sign the launch in your own wallet and pay the launchpad&apos;s storage cost. near.fm takes nothing.</p>
 
         {/* Launchpad */}
         <div className="mb-5">
@@ -557,7 +549,6 @@ export function CoinLaunchModal({ song, onClose, onLaunched }: Props) {
         <p className="text-[11px] text-slate-600 mt-3">
           Tokens are created by you on {launchpad.name}; near.fm does not review, endorse or trade them. Prices are volatile and can go to zero.
         </p>
-      </div>
-    </div>
+    </>
   );
 }

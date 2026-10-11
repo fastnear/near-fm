@@ -10,6 +10,7 @@
 
 pub mod ai_check;
 pub mod nearly_trade;
+pub mod token;
 
 /// A launch as read back from the chain.
 #[derive(Debug, Clone)]
@@ -52,5 +53,13 @@ pub async fn get_launch(launchpad: &str, rpc_url: &str, token_account: &str) -> 
     match launchpad {
         nearly_trade::ID => nearly_trade::get_launch_by_token(rpc_url, token_account).await,
         other => Err(format!("unsupported launchpad '{other}'")),
+    }
+}
+
+/// The launchpad's own page for a token it launched.
+pub fn getter_trade_url(launchpad: &str, token_account: &str) -> Option<String> {
+    match launchpad {
+        nearly_trade::ID => Some(format!("https://nearly.trade/{token_account}")),
+        _ => None,
     }
 }

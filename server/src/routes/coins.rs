@@ -22,8 +22,16 @@ pub struct SongCoin {
     pub name: String,
     pub symbol: String,
     pub status: String,
+    /// `launched` from this song, or `linked`: an existing coin the song is about.
+    pub kind: String,
+    pub icon: Option<String>,
+    pub trade_url: Option<String>,
+    pub trade_url_trusted: bool,
+    pub relatedness: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+const COIN_COLUMNS: &str = "launchpad, token_account, launch_id, creator_account, name, symbol, status, kind, icon, trade_url, trade_url_trusted, relatedness, created_at";
 
 #[derive(sqlx::FromRow)]
 struct SongRow {
@@ -65,6 +73,203 @@ async fn require_near_author(state: &AppState, user_id: i32, song: &SongRow) -> 
     }
 }
 
+/// The caller must be the song's author (any sign-in) and not banned.
+async fn require_author(state: &AppState, user_id: i32, song: &SongRow) -> Result<(), ApiError> {
+    if song.uploader_id != user_id {
+        return Err((StatusCode::FORBIDDEN, "Only the song's author can do this".to_string()));
+    }
+    let banned: bool = sqlx::query_scalar("SELECT is_banned FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if banned {
+        return Err((StatusCode::FORBIDDEN, "Account banned".to_string()));
+    }
+    Ok(())
+}
+
+async fn song_has_coin(state: &AppState, song_id: i32) -> Result<bool, ApiError> {
+    sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM song_coins WHERE song_id = $1 AND status <> 'hidden')")
+        .bind(song_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn set_song_coin(state: &AppState, song_id: i32, coin: Option<&SongCoin>) {
+    match coin {
+        Some(c) => sqlx::query("UPDATE songs SET coin_symbol = $1, coin_launchpad = $2, coin_token_account = $3 WHERE id = $4")
+            .bind(&c.symbol).bind(&c.launchpad).bind(&c.token_account).bind(song_id),
+        None => sqlx::query("UPDATE songs SET coin_symbol = NULL, coin_launchpad = NULL, coin_token_account = NULL WHERE id = $1").bind(song_id),
+    }
+    .execute(&state.db)
+    .await
+    .ok();
+}
+
+#[derive(Deserialize)]
+pub struct LookupQuery {
+    pub token: String,
+}
+
+/// GET /api/coins/lookup?token=… — is this a token, what is it, where is it traded.
+pub async fn lookup(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    axum::extract::Query(q): axum::extract::Query<LookupQuery>,
+) -> Result<Json<launchpads::token::TokenInfo>, ApiError> {
+    require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let account = launchpads::token::extract_account_id(&q.token)
+        .ok_or((StatusCode::BAD_REQUEST, "Enter the token's contract account (like coin.nearlytrade.near) or a link to it".to_string()))?;
+    launchpads::token::lookup(&state.http_client, &state.config.near_rpc_url, &account)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttachRequest {
+    pub token: String,
+    pub trade_url: Option<String>,
+}
+
+/// POST /api/songs/:uuid/coins/attach — the song is about an existing coin.
+/// The AI must find the song's words at least `COIN_MIN_RELATEDNESS` about it.
+pub async fn attach(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path(uuid): Path<String>,
+    Json(req): Json<AttachRequest>,
+) -> Result<Json<SongCoin>, ApiError> {
+    let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let song = load_song(&state, &uuid).await?;
+    require_author(&state, claims.user_id, &song).await?;
+    if song_has_coin(&state, song.id).await? {
+        return Err((StatusCode::CONFLICT, "This song already has a coin. Unlink it first.".to_string()));
+    }
+    let account = launchpads::token::extract_account_id(&req.token)
+        .ok_or((StatusCode::BAD_REQUEST, "Enter the token's contract account or a link to it".to_string()))?;
+    let info = launchpads::token::lookup(&state.http_client, &state.config.near_rpc_url, &account)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    // A trade link is required: ours when we are sure of it, else the author's.
+    let (trade_url, trusted) = match req.trade_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) => launchpads::token::check_trade_url(u).map_err(|e| (StatusCode::BAD_REQUEST, e))?,
+        None => match &info.trade_url {
+            Some(u) => (u.clone(), true),
+            None => return Err((StatusCode::BAD_REQUEST, "We could not find where this token is traded — add a link to its trading page".to_string())),
+        },
+    };
+
+    if !launchpads::ai_check::enabled() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "The relevance check is unavailable right now".to_string()));
+    }
+    launchpads::ai_check::take_quota(&state.db, claims.user_id, song.id, "coin_attach", &launchpads::ai_check::CHECK_QUOTA)
+        .await
+        .map_err(|e| (StatusCode::TOO_MANY_REQUESTS, e))?;
+    let rel = launchpads::ai_check::relatedness(
+        &state.http_client,
+        &launchpads::ai_check::SongContext { title: &song.title, description: song.description.as_deref(), lyrics: song.lyrics.as_deref() },
+        &launchpads::ai_check::CoinContext { name: &info.name, symbol: &info.symbol, description: None },
+    )
+    .await
+    .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
+    let min = launchpads::ai_check::min_relatedness();
+    if rel.score < min {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("The song doesn't seem to be about ${} ({}/100 — needs at least {}): {}", info.symbol, rel.score, min, rel.reason),
+        ));
+    }
+
+    let coin = sqlx::query_as::<_, SongCoin>(&format!(
+        "INSERT INTO song_coins (song_id, launchpad, token_account, creator_account, name, symbol, status, kind, icon, trade_url, trade_url_trusted, linked_by_user_id, relatedness, ai_verdict) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'live', 'linked', $7, $8, $9, $10, $11, $12) RETURNING {COIN_COLUMNS}"
+    ))
+    .bind(song.id)
+    .bind(&info.source)
+    .bind(&info.token_account)
+    .bind(info.creator.clone().unwrap_or_default())
+    .bind(&info.name)
+    .bind(&info.symbol)
+    .bind(&info.icon)
+    .bind(&trade_url)
+    .bind(trusted)
+    .bind(claims.user_id)
+    .bind(rel.score as i32)
+    .bind(serde_json::to_value(&rel).ok())
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(db) if db.constraint().is_some() => (StatusCode::CONFLICT, "This song already has a coin".to_string()),
+        e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    })?;
+    set_song_coin(&state, song.id, Some(&coin)).await;
+    tracing::info!(song_id = song.id, token = %coin.token_account, score = rel.score, trusted, "Song coin attached");
+    Ok(Json(coin))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TradeUrlRequest {
+    pub trade_url: String,
+}
+
+/// PATCH /api/songs/:uuid/coins/:token — the author changes where "Trade" points.
+pub async fn set_trade_url(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path((uuid, token)): Path<(String, String)>,
+    Json(req): Json<TradeUrlRequest>,
+) -> Result<Json<SongCoin>, ApiError> {
+    let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let song = load_song(&state, &uuid).await?;
+    require_author(&state, claims.user_id, &song).await?;
+    let (url, trusted) = launchpads::token::check_trade_url(&req.trade_url).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    sqlx::query_as::<_, SongCoin>(&format!(
+        "UPDATE song_coins SET trade_url = $1, trade_url_trusted = $2, updated_at = NOW() WHERE song_id = $3 AND token_account = $4 RETURNING {COIN_COLUMNS}"
+    ))
+    .bind(&url)
+    .bind(trusted)
+    .bind(song.id)
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map(Json)
+    .ok_or((StatusCode::NOT_FOUND, "Coin not found".to_string()))
+}
+
+/// DELETE /api/songs/:uuid/coins/:token — unlink (author or admin). The
+/// token itself is untouched; only the song page stops showing it.
+pub async fn detach(
+    State(state): State<AppState>,
+    extensions: Extensions,
+    Path((uuid, token)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let claims = require_auth(&extensions).map_err(|s| (s, "Authentication required".to_string()))?;
+    let song = load_song(&state, &uuid).await?;
+    if !claims.is_admin {
+        require_author(&state, claims.user_id, &song).await?;
+    }
+    let n = sqlx::query("DELETE FROM song_coins WHERE song_id = $1 AND token_account = $2")
+        .bind(song.id)
+        .bind(&token)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .rows_affected();
+    if n == 0 {
+        return Err((StatusCode::NOT_FOUND, "Coin not found".to_string()));
+    }
+    set_song_coin(&state, song.id, None).await;
+    tracing::info!(song_id = song.id, token = %token, by = claims.user_id, "Song coin unlinked");
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Paid-inference gate for the author-facing AI routes: a funded wallet
 /// (sybil cost) and per-user / per-song daily quotas.
 async fn guard_ai(state: &AppState, user_id: i32, song_id: i32, creator: &str, kind: &str, quota: &launchpads::ai_check::Quota) -> Result<(), ApiError> {
@@ -81,10 +286,9 @@ async fn guard_ai(state: &AppState, user_id: i32, song_id: i32, creator: &str, k
 /// so the song page can tell the author rather than offer a second launch.
 pub async fn list(State(state): State<AppState>, Path(uuid): Path<String>) -> Result<Json<Vec<SongCoin>>, ApiError> {
     let song = load_song(&state, &uuid).await?;
-    let mut coins = sqlx::query_as::<_, SongCoin>(
-        "SELECT launchpad, token_account, launch_id, creator_account, name, symbol, status, created_at \
-         FROM song_coins WHERE song_id = $1 ORDER BY created_at",
-    )
+    let mut coins = sqlx::query_as::<_, SongCoin>(&format!(
+        "SELECT {COIN_COLUMNS} FROM song_coins WHERE song_id = $1 ORDER BY created_at"
+    ))
     .bind(song.id)
     .fetch_all(&state.db)
     .await
@@ -329,11 +533,11 @@ pub async fn link(
         "pending"
     };
 
-    let inserted = sqlx::query_as::<_, SongCoin>(
-        "INSERT INTO song_coins (song_id, launchpad, token_account, launch_id, creator_account, name, symbol, status, ai_verdict) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
-         RETURNING launchpad, token_account, launch_id, creator_account, name, symbol, status, created_at",
-    )
+    let inserted = sqlx::query_as::<_, SongCoin>(&format!(
+        "INSERT INTO song_coins (song_id, launchpad, token_account, launch_id, creator_account, name, symbol, status, ai_verdict, kind, trade_url) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'launched', $10) \
+         RETURNING {COIN_COLUMNS}"
+    ))
     .bind(song.id)
     .bind(&req.launchpad)
     .bind(&found.token_account)
@@ -343,6 +547,7 @@ pub async fn link(
     .bind(&found.symbol)
     .bind(status)
     .bind(serde_json::to_value(&verdict).ok())
+    .bind(launchpads::getter_trade_url(&req.launchpad, &found.token_account))
     .fetch_one(&state.db)
     .await;
 
@@ -358,14 +563,7 @@ pub async fn link(
     };
 
     if coin.status != "hidden" {
-        sqlx::query("UPDATE songs SET coin_symbol = $1, coin_launchpad = $2, coin_token_account = $3 WHERE id = $4 AND coin_symbol IS NULL")
-            .bind(&coin.symbol)
-            .bind(&coin.launchpad)
-            .bind(&coin.token_account)
-            .bind(song.id)
-            .execute(&state.db)
-            .await
-            .ok();
+        set_song_coin(&state, song.id, Some(&coin)).await;
     }
 
     tracing::info!(song_id = song.id, launchpad = %coin.launchpad, token = %coin.token_account, status = %coin.status, "Song coin linked");
