@@ -92,19 +92,32 @@ export function SongCoins({ song }: { song: Song }) {
               </span>
             </button>
 
-            {isAuthor && (
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+            {/* Linked coins only: the author can change the trade link or unlink.
+                A coin launched from the song is permanent, like the token itself. */}
+            {isAuthor && !launched && (
+              <div className="mt-2 flex items-center gap-2 text-slate-500">
                 {editingUrl === coin.token_account ? (
                   <span className="flex items-center gap-2 w-full">
-                    <input value={urlDraft} onChange={(e) => setUrlDraft(e.target.value)} placeholder="https://…"
+                    <input value={urlDraft} onChange={(e) => setUrlDraft(e.target.value)} placeholder="https://…" autoFocus
                       className="flex-1 px-2 py-1 rounded bg-white/[0.04] border border-white/[0.08] text-xs text-slate-200" />
-                    <button type="button" onClick={() => saveUrl(coin)} className="text-purple-300 hover:text-purple-200">Save</button>
-                    <button type="button" onClick={() => setEditingUrl(null)} className="hover:text-slate-300">Cancel</button>
+                    <button type="button" onClick={() => saveUrl(coin)} className="text-xs text-purple-300 hover:text-purple-200">Save</button>
+                    <button type="button" onClick={() => setEditingUrl(null)} className="text-xs hover:text-slate-300">Cancel</button>
                   </span>
                 ) : (
                   <>
-                    <button type="button" onClick={() => { setEditingUrl(coin.token_account); setUrlDraft(coin.trade_url ?? ""); }} className="hover:text-slate-300">Change trade link</button>
-                    <button type="button" onClick={() => unlink(coin)} className="hover:text-red-300">Unlink</button>
+                    <button type="button" title="Change trade link" aria-label="Change trade link"
+                      onClick={() => { setEditingUrl(coin.token_account); setUrlDraft(coin.trade_url ?? ""); }}
+                      className="p-1 rounded hover:bg-white/[0.06] hover:text-slate-300 transition">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                    <button type="button" title="Unlink coin" aria-label="Unlink coin" onClick={() => unlink(coin)}
+                      className="p-1 rounded hover:bg-red-500/10 hover:text-red-300 transition">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
                   </>
                 )}
               </div>
