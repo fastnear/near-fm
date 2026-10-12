@@ -16,7 +16,16 @@ export function Footer() {
           </Link>
         </div>
         <p>
-          Created by{" "}
+          Powered by{" "}
+          <a
+            href="https://outlayer.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            OutLayer
+          </a>{" "}
+          and{" "}
           <a
             href="https://fastnear.com"
             target="_blank"
@@ -24,15 +33,6 @@ export function Footer() {
             className="text-slate-400 hover:text-white transition-colors"
           >
             FastNEAR
-          </a>
-          , powered by{" "}
-          <a
-            href="https://near.org"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-slate-400 hover:text-white transition-colors"
-          >
-            NEAR Blockchain
           </a>
         </p>
       </div>
