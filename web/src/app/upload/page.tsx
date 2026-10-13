@@ -295,6 +295,14 @@ function UploadPage() {
                   setAudioDuration(Math.round(audio.duration));
                   URL.revokeObjectURL(audio.src);
                 });
+                // The browser can't decode it, so nobody else will be able to play it either.
+                audio.addEventListener("error", () => {
+                  URL.revokeObjectURL(audio.src);
+                  setAudioFile(null);
+                  setAudioDuration(null);
+                  if (audioInputRef.current) audioInputRef.current.value = "";
+                  alert("This file can't be played in the browser. Please re-export it as MP3, WAV or OGG and try again.");
+                });
               } else {
                 setAudioDuration(null);
               }

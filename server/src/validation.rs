@@ -1,5 +1,7 @@
 use sqlx::PgPool;
 
+use crate::audio_sniff::{looks_like_audio, SNIFF_BYTES};
+
 const MAX_AUDIO_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
 
 const VALIDATION_INITIAL_DELAY_SECS: u64 = 30;
@@ -17,6 +19,7 @@ const COVER_CHECK_DELAY_SECS: u64 = 20;
 /// - HTTP status is 200
 /// - Content-Type header starts with "audio/" or "video/"
 /// - Content-Length is at most 50 MB
+/// - The first bytes look like audio (container magic or MPEG frames)
 ///
 /// On success: marks the song as validated, notifies uploader.
 /// On failure: hides the song and creates a notification for the uploader.
@@ -31,7 +34,13 @@ async fn validate_audio(pool: &PgPool, song_id: i32, audio_url: String) {
                 notify_validated(pool, song_id).await;
                 return;
             }
-            Err(reason) => {
+            // The bytes are there and they are not audio: waiting won't change that.
+            Err(Failure::Fatal(reason)) => {
+                tracing::warn!(song_id, %reason, "Audio validation failed permanently, hiding song");
+                mark_invalid(pool, song_id, &reason).await;
+                return;
+            }
+            Err(Failure::Retry(reason)) => {
                 if attempt + 1 < VALIDATION_RETRIES {
                     tracing::info!(song_id, attempt, %reason, "Audio validation attempt failed, retrying");
                     tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
@@ -44,21 +53,30 @@ async fn validate_audio(pool: &PgPool, song_id: i32, audio_url: String) {
     }
 }
 
-async fn do_validate(pool: &PgPool, song_id: i32, audio_url: &str) -> Result<(), String> {
+enum Failure {
+    /// Transient (not indexed yet, network): try again later.
+    Retry(String),
+    /// Definitive: the file is reachable but unusable.
+    Fatal(String),
+}
+
+async fn do_validate(pool: &PgPool, song_id: i32, audio_url: &str) -> Result<(), Failure> {
+    use Failure::{Fatal, Retry};
+
     let client = reqwest::Client::new();
 
-    let response = client
+    let mut response = client
         .get(audio_url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch audio URL: {}", e))?;
+        .map_err(|e| Retry(format!("Failed to fetch audio URL: {}", e)))?;
 
     // Check HTTP status
     if response.status().as_u16() != 200 {
-        return Err(format!(
+        return Err(Retry(format!(
             "Unexpected HTTP status: {}",
             response.status()
-        ));
+        )));
     }
 
     // Check Content-Type
@@ -66,23 +84,47 @@ async fn do_validate(pool: &PgPool, song_id: i32, audio_url: &str) -> Result<(),
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_string();
 
     if !content_type.starts_with("audio/") && !content_type.starts_with("video/") && content_type != "application/octet-stream" {
-        return Err(format!(
+        return Err(Retry(format!(
             "Invalid content type: expected audio/* or video/*, got '{}'",
             content_type
-        ));
+        )));
     }
+    let is_video = content_type.starts_with("video/");
 
     // Check Content-Length
     if let Some(content_length) = response.content_length() {
         if content_length > MAX_AUDIO_SIZE {
-            return Err(format!(
+            return Err(Fatal(format!(
                 "Audio file too large: {} bytes (max {} bytes)",
                 content_length, MAX_AUDIO_SIZE
-            ));
+            )));
         }
+    }
+
+    // Check the content itself: read just the head of the file and look for
+    // an audio container or MPEG frames. Video containers (MP4/WebM) pass the
+    // same magic-number check.
+    let mut head: Vec<u8> = Vec::with_capacity(SNIFF_BYTES.min(64 * 1024));
+    while head.len() < SNIFF_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => head.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(e) => return Err(Retry(format!("Failed to read audio body: {}", e))),
+        }
+    }
+    head.truncate(SNIFF_BYTES);
+    if head.is_empty() {
+        return Err(Retry("Empty response body".to_string()));
+    }
+    if !looks_like_audio(&head) {
+        tracing::warn!(song_id, %content_type, bytes = head.len(), is_video, "Audio content not recognized");
+        return Err(Fatal(
+            "The file is not a playable audio file (no MP3/WAV/OGG/FLAC/M4A data found)".to_string(),
+        ));
     }
 
     // All checks passed -- mark as validated

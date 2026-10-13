@@ -287,6 +287,15 @@ pub async fn upload(
     let (mime_type, data) = file_data
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "No file field in request".to_string()))?;
 
+    // Refuse to spend on-chain storage on a file that only claims to be audio.
+    if mime_type.starts_with("audio/") && !crate::audio_sniff::looks_like_audio(&data) {
+        tracing::warn!(user_id = claims.user_id, %mime_type, size = data.len(), "Rejected upload: content is not recognizable audio");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "This file doesn't look like a playable audio file (expected MP3, WAV, OGG, FLAC or M4A). Please re-export it and try again.".to_string(),
+        ));
+    }
+
     // Compute hash + relative path
     let hash = compute_sha256(&data);
     let ext = mime_to_ext(&mime_type);

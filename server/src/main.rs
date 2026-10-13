@@ -10,6 +10,7 @@ use axum::{
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+mod audio_sniff;
 mod auth;
 mod config;
 mod db;
