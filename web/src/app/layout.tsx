@@ -33,9 +33,9 @@ export const metadata: Metadata = {
     siteName: "near.fm",
     images: [
       {
-        url: "/near-fm-hor.png",
-        width: 1200,
-        height: 630,
+        url: "/social-preview.jpg",
+        width: 1431,
+        height: 806,
         alt: "NEAR FM",
       },
     ],
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     title: "near.fm — AI Music for NEAR",
     description:
       "NEAR FM - decentralized radio for AI-generated music about the NEAR ecosystem",
-    images: ["/near-fm-hor.png"],
+    images: ["/social-preview.jpg"],
   },
 };
 

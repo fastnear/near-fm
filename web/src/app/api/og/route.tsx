@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get("type") || "default";
   const cover = searchParams.get("cover") || "";
 
-  const bgUrl = cover || "https://near.fm/near-fm-hor.png";
+  const bgUrl = cover || "https://near.fm/og-default.jpg";
   const headers = { "Cache-Control": "public, max-age=86400, s-maxage=86400" };
 
   return new ImageResponse(

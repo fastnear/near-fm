@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatedLogo } from "@/components/AnimatedLogo";
 import Link from "next/link";
 import { getStats } from "@/lib/api";
 
@@ -32,7 +31,7 @@ export default function AboutPage() {
     <div className="max-w-3xl mx-auto px-4 py-16">
       {/* Hero */}
       <div className="flex flex-col items-center gap-4 mb-16">
-        <AnimatedLogo className="h-[120px] w-auto" />
+        <img src="/logo.png" alt="NEAR FM" className="h-[160px] w-auto" />
         <h1 className="text-5xl font-bold text-gradient tracking-tight">
           near.fm
         </h1>
