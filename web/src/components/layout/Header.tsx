@@ -77,7 +77,6 @@ export function Header() {
             </button>
           )}
           <Link href="/" className="flex items-center gap-2.5 group">
-            <img src="/logo-icon.png" alt="" className="h-9 w-9" />
             <span className="text-xl font-bold text-gradient tracking-tight">
               NEAR FM
             </span>
