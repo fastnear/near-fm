@@ -627,7 +627,7 @@ export function SongDetail({ uuid: initialUuid }: { uuid: string }) {
 
                 {/* Share on X */}
                 <a
-                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title}${song.uploader_twitter_handle ? ` by @${song.uploader_twitter_handle}` : ""} — listen on near.fm, decentralized platform for AI-generated music\n\n${window.location.href}`)}`}
+                  href={`https://x.com/intent/tweet?text=${encodeURIComponent(`${song.title}${song.uploader_twitter_handle ? ` by @${song.uploader_twitter_handle}` : ""} — listen on NEAR FM, decentralized platform for AI-generated music\n\n${window.location.href}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-ghost px-3 py-1.5 text-sm rounded-xl flex items-center gap-1.5"
